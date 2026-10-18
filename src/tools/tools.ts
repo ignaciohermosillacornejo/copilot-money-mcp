@@ -2993,8 +2993,10 @@ export class CopilotMoneyTools {
   }
 
   /** The [from, to] date range + month count for write-resolution live
-   *  fetches. Shared by resolveTransactionMeta and resolveParentSnapshot. */
-  private static writeResolveWindow(): { from: string; to: string; months: number } {
+   *  fetches. Shared by resolveTransactionMeta, resolveParentSnapshot and
+   *  splitParentEvidence. Public so tests derive the window from this one
+   *  definition instead of re-implementing its arithmetic. */
+  static writeResolveWindow(): { from: string; to: string; months: number } {
     const months = CopilotMoneyTools.resolveWindowMonths();
     const to = new Date().toISOString().slice(0, 10);
     const fromDate = new Date();
@@ -3770,7 +3772,7 @@ export class CopilotMoneyTools {
           `credit its amount back to the account a second time, leaving the account balance ` +
           `wrong. Delete the child transactions instead — the parent stays hidden once split. ` +
           `There is no unsplit operation. If you removed this split in the Copilot app, run ` +
-          `refresh_cache (or refresh_database in cache mode) and retry.`
+          `refresh_cache, or refresh_database if the split was cached locally, and retry.`
       );
     }
     // Deleting a child: remember its parent BEFORE the delete is sent, so the
@@ -3827,6 +3829,10 @@ export class CopilotMoneyTools {
    *      transactions are ALREADY in memory (free, and it survives restarts;
    *      a decode is never triggered here, which is what
    *      resolveTransactionMeta / resolveParentSnapshot deliberately avoid).
+   *      Those rows can be stale, so they can refuse an id whose split was
+   *      removed in the app; refresh_database clears them, which is why the
+   *      refusal names it in live mode too. A window row for the id, when
+   *      present, decides `parentOfTarget` over local rows.
    *
    * A failed window fetch does not block the delete: the check proceeds on
    * what the caches and the session record already hold, matching its
@@ -3875,7 +3881,9 @@ export class CopilotMoneyTools {
         this.liveDb.hasSplitChildOf(id) ||
         fetched.some((r) => r.parentId === id) ||
         local.isParent;
-      return { isParent, parentOfTarget: own?.parentId ?? local.parentOfTarget };
+      // A present window row's answer (including "no parent") wins over local
+      // rows, which may be stale.
+      return { isParent, parentOfTarget: own ? (own.parentId ?? null) : local.parentOfTarget };
     }
 
     if (this.knownSplitParents.has(id)) return { isParent: true, parentOfTarget: null };
@@ -4178,66 +4186,106 @@ export class CopilotMoneyTools {
       // whole month is not invalidated: that would also drop the children
       // written through below, #820.) No-op if the cache is unloaded or the id
       // is absent — same eviction-is-a-no-op contract as delete_transaction.
+      //
+      // The months the split touched are captured BEFORE the eviction (the
+      // parent's cached row is the reliable source; the response and the
+      // inputs may have drifted or differ): if the mapping or write-through
+      // below throws, those months are dropped so the next read refetches,
+      // rather than serving a month with neither parent nor children (#820).
+      const touchedMonths = [
+        this.liveDb?.lookupTransactionNodes([transaction_id]).get(transaction_id)?.date,
+        (result.parentTransaction as Partial<CreatedTransaction> | undefined)?.date,
+        ...inputs.map((i) => i.date),
+      ]
+        .filter((d): d is string => typeof d === 'string' && d.length >= 7)
+        .map((d) => d.slice(0, 7));
       this.recordSplitParent(transaction_id);
       this.db.patchCachedTransactionDelete(transaction_id);
       this.liveDb?.patchLiveTransactionDelete(transaction_id);
 
-      // Map each server-side TransactionFields shape to the local snake_case
-      // Transaction model. Same field set as create_transaction / add_to_recurring.
-      const toLocal = (tx: CreatedTransaction): Transaction => ({
-        transaction_id: tx.id,
-        amount: tx.amount,
-        date: tx.date,
-        name: tx.name,
-        account_id: tx.accountId,
-        item_id: tx.itemId,
-        category_id: tx.categoryId,
-        pending: tx.isPending,
-        user_reviewed: tx.isReviewed,
-        user_note: tx.userNotes ?? undefined,
-        recurring_id: tx.recurringId ?? undefined,
-        tag_ids: tx.tags.map((t) => t.id),
-        internal_transfer: tx.type === 'INTERNAL_TRANSFER',
-      });
-
-      const parent = toLocal(result.parentTransaction);
-      const children = result.splitTransactions.map(toLocal);
-
-      // Feed the live meta index with the parent (it leaves the live cache
-      // below, so the children's upserts are not its route in) — so a
-      // follow-up write naming it resolves without a network fetch. Same
-      // empty-id guard as the other feeds (#508).
-      const parentTx = result.parentTransaction;
-      if (parentTx.accountId && parentTx.itemId) {
-        this.liveDb?.indexTransactionMeta(parentTx.id, {
-          accountId: parentTx.accountId,
-          itemId: parentTx.itemId,
-        });
+      try {
+        return this.finishSplit(result);
+      } catch (e) {
+        this.liveDb?.invalidateLiveMonths(touchedMonths);
+        // Re-take the record at the new generation so the next delete of
+        // this parent still refuses without a fetch.
+        this.recordSplitParent(transaction_id);
+        throw e;
       }
-
-      // Live cache write-through for the children (#820) — without it a split
-      // in a cached month made the whole amount vanish (parent evicted,
-      // children absent) until TTL expiry. The mutation fragment does not
-      // select parentId, so set it from the parent the server just returned:
-      // that is what a Transactions read reports for a split child. Each
-      // upsert also feeds the meta index for that child.
-      for (const child of result.splitTransactions) {
-        this.liveDb?.upsertLiveTransaction(child, { insert: true, parentId: parentTx.id });
-      }
-
-      return {
-        success: true,
-        parent_transaction_id: parent.transaction_id,
-        child_transaction_ids: children.map((c) => c.transaction_id),
-        parent,
-        children,
-      };
     } catch (e) {
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }
       throw e;
     }
+  }
+
+  /**
+   * The part of split_transaction after the mutation resolved and the parent
+   * was recorded and evicted: map the response and write the children
+   * through. Separate so a throw here (a drifted response) can be caught and
+   * the touched months dropped from the live cache.
+   */
+  private finishSplit(result: {
+    parentTransaction: CreatedTransaction;
+    splitTransactions: CreatedTransaction[];
+  }): {
+    success: true;
+    parent_transaction_id: string;
+    child_transaction_ids: string[];
+    parent: Transaction;
+    children: Transaction[];
+  } {
+    // Map each server-side TransactionFields shape to the local snake_case
+    // Transaction model. Same field set as create_transaction / add_to_recurring.
+    const toLocal = (tx: CreatedTransaction): Transaction => ({
+      transaction_id: tx.id,
+      amount: tx.amount,
+      date: tx.date,
+      name: tx.name,
+      account_id: tx.accountId,
+      item_id: tx.itemId,
+      category_id: tx.categoryId,
+      pending: tx.isPending,
+      user_reviewed: tx.isReviewed,
+      user_note: tx.userNotes ?? undefined,
+      recurring_id: tx.recurringId ?? undefined,
+      tag_ids: tx.tags.map((t) => t.id),
+      internal_transfer: tx.type === 'INTERNAL_TRANSFER',
+    });
+
+    const parent = toLocal(result.parentTransaction);
+    const children = result.splitTransactions.map(toLocal);
+
+    // Feed the live meta index with the parent (it leaves the live cache
+    // below, so the children's upserts are not its route in) — so a
+    // follow-up write naming it resolves without a network fetch. Same
+    // empty-id guard as the other feeds (#508).
+    const parentTx = result.parentTransaction;
+    if (parentTx.accountId && parentTx.itemId) {
+      this.liveDb?.indexTransactionMeta(parentTx.id, {
+        accountId: parentTx.accountId,
+        itemId: parentTx.itemId,
+      });
+    }
+
+    // Live cache write-through for the children (#820) — without it a split
+    // in a cached month made the whole amount vanish (parent evicted,
+    // children absent) until TTL expiry. The mutation fragment does not
+    // select parentId, so set it from the parent the server just returned:
+    // that is what a Transactions read reports for a split child. Each
+    // upsert also feeds the meta index for that child.
+    for (const child of result.splitTransactions) {
+      this.liveDb?.upsertLiveTransaction(child, { insert: true, parentId: parentTx.id });
+    }
+
+    return {
+      success: true,
+      parent_transaction_id: parent.transaction_id,
+      child_transaction_ids: children.map((c) => c.transaction_id),
+      parent,
+      children,
+    };
   }
 
   /**

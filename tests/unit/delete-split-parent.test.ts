@@ -381,7 +381,9 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
       .catch((e: Error) => e);
     expect(err?.message).toMatch(/removed this split in the Copilot app/i);
     expect(err?.message).toMatch(/refresh_cache/);
-    expect(err?.message).toMatch(/refresh_database/);
+    // refresh_database is not scoped to cache mode: in live mode stale local
+    // rows already in memory can refuse too, and only it clears them.
+    expect(err?.message).toMatch(/refresh_database if the split was cached locally/);
   });
 
   test('a session record is retired when the server returns the id as an ordinary row', async () => {
@@ -455,10 +457,14 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
   });
 
   test('(g-live) a drifted split leaves no stale cached parent that retires the record', async () => {
-    // The parent sits in a cold cached month. The drifted response throws in
-    // the mapping, before the parent would have been evicted from the cache —
-    // so a stale pre-split row is all a later check could find. It must not
-    // count as proof that the id is not a parent.
+    // The parent sits in a cached month. The drifted response throws in the
+    // mapping, before the children are written through. Two things must hold:
+    // no stale pre-split row may remain for a later check to mistake for a
+    // live one, and the month must not be left cached with neither the parent
+    // nor its children (the #820 shape) — it is dropped, so the next read
+    // refetches. 2025-03 is outside the write-resolve window, so the window
+    // fetch never refreshes it: what is exercised is the eviction and the
+    // fetched_at guard, not a cold-tier refetch.
     const drifted = { ...serverTx(PARENT_ID, 100, ''), tags: null };
     const client = createMockGraphQLClient({
       ...WINDOW(),
@@ -484,6 +490,7 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
         ],
       })
     ).rejects.toThrow();
+    expect(liveDb.getTransactionsWindowCache().hasMonth('2025-03')).toBe(false);
 
     await expect(
       tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
@@ -494,7 +501,9 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
   test('a stale cached row cannot retire the session record — only a refetched one', async () => {
     // Record taken, then some other write invalidates an unrelated month (so
     // the cheap path is skipped) while the parent's pre-split row is still
-    // cached in a month the window fetch does not refetch.
+    // cached in a month the window fetch does not refetch. 2025-03 is outside
+    // the write-resolve window, so this exercises the fetched_at guard, not
+    // the cold-tier-within-TTL path.
     const client = createMockGraphQLClient({
       ...WINDOW(),
       ...SPLIT_MOCK,

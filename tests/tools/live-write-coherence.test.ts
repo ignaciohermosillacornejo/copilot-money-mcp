@@ -30,6 +30,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
+import { monthsCovered } from '../../src/utils/date.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
@@ -213,20 +214,12 @@ interface Case {
 }
 
 /**
- * Months in the write-resolve window (mirrors CopilotMoneyTools'
- * writeResolveWindow: today back COPILOT_WRITE_RESOLVE_WINDOW_MONTHS, default
- * 13, inclusive of both ends). None of them is cached here — the seeded cold
- * month is older than the window — so a window load fetches each one.
+ * Months in the write-resolve window, derived from the source's own window
+ * definition. None of them is cached here — the seeded cold month is older
+ * than the window — so a window load fetches each one.
  */
 function writeResolveWindowMonthCount(): number {
-  const env = parseInt(process.env.COPILOT_WRITE_RESOLVE_WINDOW_MONTHS ?? '', 10);
-  const months = !isNaN(env) && env > 0 ? env : 13;
-  const to = new Date();
-  const from = new Date();
-  from.setMonth(from.getMonth() - months);
-  return (
-    (to.getUTCFullYear() - from.getUTCFullYear()) * 12 + (to.getUTCMonth() - from.getUTCMonth()) + 1
-  );
+  return monthsCovered(CopilotMoneyTools.writeResolveWindow()).length;
 }
 
 function setup(mutationMocks: MockResponsesByOp) {

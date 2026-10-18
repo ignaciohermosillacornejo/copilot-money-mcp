@@ -782,6 +782,17 @@ export class LiveCopilotDatabase {
     if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
   }
 
+  /**
+   * Drop the given YYYY-MM months from the window cache if cached, so the
+   * next read refetches them. For a write that changed rows the cache can no
+   * longer find by id — e.g. a split whose parent was already evicted when a
+   * drifted response stopped the children's write-through (#822).
+   */
+  invalidateLiveMonths(months: readonly string[]): void {
+    const stale = [...new Set(months)].filter((m) => this.transactionsWindowCache.hasMonth(m));
+    if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
+  }
+
   patchLiveTagUpsert(tag: TagNode): void {
     this.tagsCache.upsert(tag);
   }

@@ -77,7 +77,8 @@ sent:
   `children_transaction_ids`, or any cached row's `parent_transaction_id` is the id.
 
 The refusal says to delete the children instead, that there is no unsplit, and how to retry
-after removing the split in the app (`refresh_cache`, or `refresh_database` in cache mode).
+after removing the split in the app (`refresh_cache`, or `refresh_database` if the split
+was cached locally — stale local rows can refuse in live mode too).
 That the parent stays hidden once its children are deleted is **unverified**; the smoke
 harness logs the parent id it leaves behind. There is no opt-in override. Both tool
 descriptions now state the rule, and the smoke harness deregisters the parent before it
