@@ -1114,6 +1114,25 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'therefore carries as null until its month is refetched) — see ' +
       'operations.generated.ts. Nothing re-checks it.',
   },
+  {
+    surface: 'Transaction.parentId:childlessParentHidden',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'Two #822 decisions assume that a split parent whose children have ALL been deleted ' +
+      'stays absent from the Transactions query (and off the balance): (1) the round-trip ' +
+      "smoke's split check leaves the parent behind instead of deleting it, and (2) " +
+      "delete_transaction's live-first check RETIRES a session record when a row for the id " +
+      'comes back from a freshly fetched month, taking that row as proof the id is not a ' +
+      'split parent. If a childless ex-parent did reappear as an ordinary row, (2) would ' +
+      'send the delete and the server would credit its amount back a second time. The path ' +
+      'needs the cache generation to move first, and `refresh_cache`, which the refusal ' +
+      'message recommends, does exactly that. `Transaction.parentId:splitChildren` above ' +
+      'only observed parents that still had children, so it does not cover this. To close: ' +
+      'split a throwaway manual transaction, delete both children, then read its month and ' +
+      'record whether the parent id appears (the release parity test, W-section).',
+  },
 
   queryOperation('categories'),
   gatedQueryResponseShape('categories', {

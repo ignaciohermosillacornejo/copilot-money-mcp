@@ -3878,6 +3878,9 @@ export class CopilotMoneyTools {
       }
 
       const local = this.localSplitEvidence(id, this.db.peekLoadedTransactions() ?? []);
+      // hasSplitChildOf is re-checked after the fetch on purpose: an ingested
+      // boundary-month row can sit outside the date filter `fetched` was built
+      // from, so neither check subsumes the other.
       const isParent =
         record !== undefined ||
         this.liveDb.hasSplitChildOf(id) ||

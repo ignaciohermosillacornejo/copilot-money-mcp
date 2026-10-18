@@ -212,6 +212,7 @@ Log every write in the ledger **before** sending it (SKILL.md Guardrail 2).
 | W-20 | [P2] Split variants | Split an INCOME row; split with a child dated in a cold month; edit a child's category; mixed-sign children | Matches the web; child edits visible (COH) | not run |
 | W-21 | [P2] Parallel writes | In one turn: two `update_transaction` on one test row (name, tags) and two `create_transaction` | Both edits land; each create exists once; balance change equals their sum | not run |
 | W-22 | [P2] Delete a category, tag or recurring still in use | Delete each while a test row references it | The row's category / tags / `recurring_id` in both modes match the web; no dangling ids; `tagged` filter has no ghost | not run |
+| W-23 | [P1] Split parent cannot be deleted (#822) | Split a test row, then `delete_transaction` on the parent; delete both children; `get_transactions_live` for its month with fields: ["default", "parent_transaction_id"]; `refresh_cache` that month; `delete_transaction` on the parent again | Both parent deletes refused and nothing sent; the parent id never appears in the read, even with no children left (settles the unverified ledger row `Transaction.parentId:childlessParentHidden`); web balance back to the baseline | not run |
 
 ## COH — Coherence (writes must be visible to the next read)
 
