@@ -1129,9 +1129,10 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'send the delete and the server would credit its amount back a second time. The path ' +
       'needs the cache generation to move first, and `refresh_cache`, which the refusal ' +
       'message recommends, does exactly that. `Transaction.parentId:splitChildren` above ' +
-      'only observed parents that still had children, so it does not cover this. To close: ' +
-      'split a throwaway manual transaction, delete both children, then read its month and ' +
-      'record whether the parent id appears (the release parity test, W-section).',
+      'only observed parents that still had children, so it does not cover this. A one-shot ' +
+      'check upgrades it to verified-once (a manual parity row cannot gate it): split a ' +
+      'throwaway manual transaction, delete both children, refresh_cache, then read its month ' +
+      'with a fresh fetch and record whether the parent id appears (release parity row W-23).',
   },
 
   queryOperation('categories'),

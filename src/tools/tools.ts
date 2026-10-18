@@ -3872,15 +3872,18 @@ export class CopilotMoneyTools {
       const own =
         this.liveDb.lookupTransactionNodes([id]).get(id) ?? fetched.find((r) => r.id === id);
       const ownFetchedAt = own ? windowCache.getFetchedAt(own.date.slice(0, 7)) : undefined;
+      // ledger: Transaction.parentId:childlessParentHidden (unverified) — this
+      // retirement assumes a childless ex-parent never comes back as a row.
       if (own && ownFetchedAt !== undefined && ownFetchedAt >= startedAt) {
         this.knownSplitParents.delete(id);
         return { isParent: false, parentOfTarget: own.parentId ?? null };
       }
 
       const local = this.localSplitEvidence(id, this.db.peekLoadedTransactions() ?? []);
-      // hasSplitChildOf is re-checked after the fetch on purpose: an ingested
-      // boundary-month row can sit outside the date filter `fetched` was built
-      // from, so neither check subsumes the other.
+      // hasSplitChildOf is re-checked after the fetch on purpose, and neither
+      // check subsumes the other: an ingested boundary-month row can sit
+      // outside the date filter `fetched` was built from, and the fetch can
+      // LRU-evict a month the early check saw.
       const isParent =
         record !== undefined ||
         this.liveDb.hasSplitChildOf(id) ||

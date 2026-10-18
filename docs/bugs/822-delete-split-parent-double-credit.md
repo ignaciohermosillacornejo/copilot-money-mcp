@@ -84,8 +84,10 @@ decisions rest on it: the smoke harness leaving the parent behind (it logs the i
 live-first check retiring a session record when a freshly fetched row for the id comes back.
 If a childless ex-parent ever reappeared as an ordinary row, the retirement would let its
 delete through, and the `refresh_cache` the refusal recommends is what opens that path.
-Ledger: `Transaction.parentId:childlessParentHidden` (unverified). There is no opt-in override. Both tool
-descriptions now state the rule, and the smoke harness deregisters the parent before it
+Ledger: `Transaction.parentId:childlessParentHidden` (unverified; parity row W-23 would
+upgrade it to verified-once).
+
+There is no opt-in override. Both tool descriptions now state the rule, and the smoke harness deregisters the parent before it
 sends the split, so cleanup deletes only the children even when the split's response is
 lost.
 

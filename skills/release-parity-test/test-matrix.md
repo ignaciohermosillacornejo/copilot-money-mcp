@@ -212,7 +212,7 @@ Log every write in the ledger **before** sending it (SKILL.md Guardrail 2).
 | W-20 | [P2] Split variants | Split an INCOME row; split with a child dated in a cold month; edit a child's category; mixed-sign children | Matches the web; child edits visible (COH) | not run |
 | W-21 | [P2] Parallel writes | In one turn: two `update_transaction` on one test row (name, tags) and two `create_transaction` | Both edits land; each create exists once; balance change equals their sum | not run |
 | W-22 | [P2] Delete a category, tag or recurring still in use | Delete each while a test row references it | The row's category / tags / `recurring_id` in both modes match the web; no dangling ids; `tagged` filter has no ghost | not run |
-| W-23 | [P1] Split parent cannot be deleted (#822) | Split a test row, then `delete_transaction` on the parent; delete both children; `get_transactions_live` for its month with fields: ["default", "parent_transaction_id"]; `refresh_cache` that month; `delete_transaction` on the parent again | Both parent deletes refused and nothing sent; the parent id never appears in the read, even with no children left (settles the unverified ledger row `Transaction.parentId:childlessParentHidden`); web balance back to the baseline | not run |
+| W-23 | [P1] Split parent cannot be deleted (#822) | Split a test row, then `delete_transaction` on the parent; delete both children; `refresh_cache` that month, then `get_transactions_live` for it with fields: ["default", "parent_transaction_id"] and require `_cache_hit: false` (a cached read proves nothing: the parent was evicted locally at split time); `refresh_cache` again; `delete_transaction` on the parent again. Both parent deletes are expected to be REFUSED by the client before anything is sent, which is why this row may call it despite Guardrail 4. If either is accepted, #822 has regressed: stop, record the balance delta, do not retry. See also CL-06 | Both parent deletes refused and nothing sent; the parent id never appears in the fresh read, even with no children left (upgrades the ledger row `Transaction.parentId:childlessParentHidden` to verified-once); web balance back to the baseline | not run |
 
 ## COH — Coherence (writes must be visible to the next read)
 
@@ -293,7 +293,7 @@ web for that month, and list every write-tool call in the subagent's transcript.
 | CL-03 | [P1] Test category and tag deleted | Gone | 2026-10-14 PASS |
 | CL-04 | [P1] Manual balance equals the P-04 baseline | Equal in live (after `refresh_cache {scope:"accounts"}`) and web | 2026-10-14 FAIL until the user reset it (#822) |
 | CL-05 | [P1] Real-account settings changed during the run restored | Restored | 2026-10-14 PASS |
-| CL-06 | [P1] Split parents after their children are gone | Record each parent's state in live and web; never delete one; a remaining parent is a known leftover | not run |
+| CL-06 | [P1] Split parents after their children are gone | Record each parent's state in live and web; never delete one; a remaining parent is a known leftover. W-23 checks the same parents through the delete guard | not run |
 | CL-07 | [P1] Balance after every cleanup group | Baseline plus the effects of the ledger rows still present; the first drifting step is named | not run |
 | CL-08 | [P2] Real categories touched by the test | Web month totals back to their before-test values | not run |
 | CL-09 | [P2] Cache catches up | After the desktop app syncs, no test rows in the cache; wait at most 15 minutes, then SKIP (stale) | not run |
