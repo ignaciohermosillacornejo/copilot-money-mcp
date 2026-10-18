@@ -2958,7 +2958,7 @@ export class CopilotMoneyTools {
       }
     }
 
-    const { from, to, months } = CopilotMoneyTools.writeResolveWindow();
+    const { from, to, lookbackMonths } = CopilotMoneyTools.writeResolveWindow();
     if (missing.length > 0) {
       // Consult the meta index the fetch just fed rather than scanning the
       // date-filtered return value: fetchMonth feeds the index with the FULL
@@ -2975,7 +2975,7 @@ export class CopilotMoneyTools {
     // window error for ids absent from `meta`, and an empty `missing` means
     // every requested id IS in `meta` — the error path is unreachable
     // without an attempted fetch.
-    return { meta: out, liveWindowMonths: months };
+    return { meta: out, liveWindowMonths: lookbackMonths };
   }
 
   /**
@@ -2992,17 +2992,19 @@ export class CopilotMoneyTools {
     return 13;
   }
 
-  /** The [from, to] date range + month count for write-resolution live
-   *  fetches. Shared by resolveTransactionMeta, resolveParentSnapshot and
+  /** The [from, to] date range for write-resolution live fetches, plus
+   *  `lookbackMonths`: how far back `from` is. A window load covers
+   *  monthsCovered({ from, to }) = lookbackMonths + 1 calendar months. Shared
+   *  by resolveTransactionMeta, resolveParentSnapshot and
    *  splitParentEvidence. Public so tests derive the window from this one
    *  definition instead of re-implementing its arithmetic. */
-  static writeResolveWindow(): { from: string; to: string; months: number } {
-    const months = CopilotMoneyTools.resolveWindowMonths();
+  static writeResolveWindow(): { from: string; to: string; lookbackMonths: number } {
+    const lookbackMonths = CopilotMoneyTools.resolveWindowMonths();
     const to = new Date().toISOString().slice(0, 10);
     const fromDate = new Date();
-    fromDate.setMonth(fromDate.getMonth() - months);
+    fromDate.setMonth(fromDate.getMonth() - lookbackMonths);
     const from = fromDate.toISOString().slice(0, 10);
-    return { from, to, months };
+    return { from, to, lookbackMonths };
   }
 
   /**
@@ -3051,12 +3053,12 @@ export class CopilotMoneyTools {
         liveWindowMonths: null,
       };
     }
-    const { from, to, months } = CopilotMoneyTools.writeResolveWindow();
+    const { from, to, lookbackMonths } = CopilotMoneyTools.writeResolveWindow();
     const cached = this.liveDb.lookupTransactionNodes([id]).get(id);
     if (cached) {
       return {
         snapshot: { amount: cached.amount, date: cached.date, name: cached.name },
-        liveWindowMonths: months,
+        liveWindowMonths: lookbackMonths,
       };
     }
     const live = await this.liveDb.getTransactions({ from, to });
@@ -3067,10 +3069,10 @@ export class CopilotMoneyTools {
     // before the fetch returns — the in-hand rows are immune to that.
     const n =
       this.liveDb.lookupTransactionNodes([id]).get(id) ?? live.rows.find((r) => r.id === id);
-    if (!n) return { snapshot: null, liveWindowMonths: months };
+    if (!n) return { snapshot: null, liveWindowMonths: lookbackMonths };
     return {
       snapshot: { amount: n.amount, date: n.date, name: n.name },
-      liveWindowMonths: months,
+      liveWindowMonths: lookbackMonths,
     };
   }
 
@@ -4196,6 +4198,11 @@ export class CopilotMoneyTools {
         this.liveDb?.lookupTransactionNodes([transaction_id]).get(transaction_id)?.date,
         (result.parentTransaction as Partial<CreatedTransaction> | undefined)?.date,
         ...inputs.map((i) => i.date),
+        // Guarded: this runs before the drift-tolerant mapping, so a drifted
+        // response may not carry an array of children.
+        ...(Array.isArray(result.splitTransactions)
+          ? result.splitTransactions.map((c) => (c as Partial<CreatedTransaction> | null)?.date)
+          : []),
       ]
         .filter((d): d is string => typeof d === 'string' && d.length >= 7)
         .map((d) => d.slice(0, 7));
@@ -4206,7 +4213,7 @@ export class CopilotMoneyTools {
       try {
         return this.finishSplit(result);
       } catch (e) {
-        this.liveDb?.invalidateLiveMonths(touchedMonths);
+        this.liveDb?.invalidateLiveMonthKeys(touchedMonths);
         // Re-take the record at the new generation so the next delete of
         // this parent still refuses without a fetch.
         this.recordSplitParent(transaction_id);

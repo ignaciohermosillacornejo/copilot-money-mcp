@@ -788,7 +788,7 @@ export class LiveCopilotDatabase {
    * longer find by id — e.g. a split whose parent was already evicted when a
    * drifted response stopped the children's write-through (#822).
    */
-  invalidateLiveMonths(months: readonly string[]): void {
+  invalidateLiveMonthKeys(months: readonly string[]): void {
     const stale = [...new Set(months)].filter((m) => this.transactionsWindowCache.hasMonth(m));
     if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
   }
