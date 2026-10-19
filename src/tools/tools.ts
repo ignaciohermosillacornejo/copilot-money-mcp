@@ -695,6 +695,23 @@ export class CopilotMoneyTools {
     this.db.forgetSplitParentIds();
   }
 
+  /**
+   * After a transaction mutation THREW (#832). A transport error or timeout can
+   * follow a write the server already applied, and the error says nothing about
+   * whether it did. So the live months holding `ids` (and any `months` named
+   * outright, for a row the cache cannot find by id) are dropped, and the next
+   * read asks the server instead of serving the pre-write row from the cold
+   * tier for up to a week. The accounts snapshot goes too, since the write may
+   * have moved a balance. A GraphQL validation error cannot have written
+   * anything, so there this costs one refetch for nothing; the catch cannot
+   * tell the two apart without guessing, so it accepts the cost.
+   */
+  private invalidateAfterFailedWrite(ids: readonly string[], months: readonly string[] = []): void {
+    this.liveDb?.invalidateLiveTransactionMonths(ids);
+    if (months.length > 0) this.liveDb?.invalidateLiveMonthKeys(months);
+    this.liveDb?.invalidateLiveBalances();
+  }
+
   /** Whether this server has recorded `id` as a split parent (#822, #842). */
   private isRecordedSplitParent(id: string): boolean {
     // mutation-guard: split-parent records survive a restart
@@ -3603,6 +3620,7 @@ export class CopilotMoneyTools {
       // Live cache: patch from the server's returned row, not the local patch
       // (#821 — the snake_case patch never matched the camelCase node).
       this.liveDb?.upsertLiveTransaction(result.transaction);
+      this.liveDb?.invalidateLiveBalances();
 
       return {
         success: true,
@@ -3610,6 +3628,7 @@ export class CopilotMoneyTools {
         updated,
       };
     } catch (e) {
+      this.invalidateAfterFailedWrite([transaction_id]);
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }
@@ -3731,12 +3750,19 @@ export class CopilotMoneyTools {
       BULK_WRITE_CONCURRENCY,
       !continue_on_error,
       async ({ edit, route, index }) => {
-        const result = await editTransaction(client, {
-          id: route.id,
-          accountId: route.accountId,
-          itemId: route.itemId,
-          input: buildEditInput(edit),
-        });
+        let result: Awaited<ReturnType<typeof editTransaction>>;
+        try {
+          result = await editTransaction(client, {
+            id: route.id,
+            accountId: route.accountId,
+            itemId: route.itemId,
+            input: buildEditInput(edit),
+          });
+        } catch (e) {
+          // Same as update_transaction (#832): the edit may have landed.
+          this.invalidateAfterFailedWrite([route.id]);
+          throw e;
+        }
         indexed.push({
           index,
           transaction_id: result.id,
@@ -3749,6 +3775,7 @@ export class CopilotMoneyTools {
           this.db.patchCachedTransaction(route.id, patch);
         }
         this.liveDb?.upsertLiveTransaction(result.transaction);
+        this.liveDb?.invalidateLiveBalances();
       }
     );
 
@@ -3918,6 +3945,7 @@ export class CopilotMoneyTools {
       // lives inside upsertLiveTransaction.
       // mutation-guard: create_transaction writes through to the live cache
       this.liveDb?.upsertLiveTransaction(tx, { insert: true });
+      this.liveDb?.invalidateLiveBalances();
 
       return {
         success: true,
@@ -3925,6 +3953,8 @@ export class CopilotMoneyTools {
         transaction,
       };
     } catch (e) {
+      // No id exists to find the row by, so its month is named outright (#832).
+      this.invalidateAfterFailedWrite([], [date.slice(0, 7)]);
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }
@@ -3946,9 +3976,11 @@ export class CopilotMoneyTools {
    * Cache: on success we evict the row from the in-memory transaction
    * cache via a small focused helper (patchCachedTransactionDelete) so
    * subsequent get_transactions reflect the delete without waiting for
-   * refresh_database. On server-returned-false OR thrown error, the
-   * cache is intentionally untouched — the local state must not drift
-   * away from whatever Copilot's server thinks is real.
+   * refresh_database. On server-returned-false the cache is intentionally
+   * untouched — the local state must not drift away from whatever
+   * Copilot's server thinks is real. On a thrown error the local row is
+   * kept too, but the live month holding it is dropped (#832): the delete
+   * may have landed before the error, so the next live read asks the server.
    *
    * Note on Plaid re-sync: Plaid-connected transactions may re-appear
    * on the source account's next sync, but user-side metadata
@@ -4041,6 +4073,7 @@ export class CopilotMoneyTools {
       if (deleted) {
         this.db.patchCachedTransactionDelete(transaction_id);
         this.liveDb?.patchLiveTransactionDelete(transaction_id);
+        this.liveDb?.invalidateLiveBalances();
       }
 
       return {
@@ -4049,6 +4082,8 @@ export class CopilotMoneyTools {
         deleted,
       };
     } catch (e) {
+      // The row may be gone server-side or not (#832).
+      this.invalidateAfterFailedWrite([transaction_id]);
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }
@@ -4262,6 +4297,7 @@ export class CopilotMoneyTools {
       // eviction-is-a-no-op contract.
       this.db.patchCachedTransaction(transaction_id, { recurring_id });
       this.liveDb?.upsertLiveTransaction(tx);
+      this.liveDb?.invalidateLiveBalances();
 
       return {
         success: true,
@@ -4269,6 +4305,7 @@ export class CopilotMoneyTools {
         transaction,
       };
     } catch (e) {
+      this.invalidateAfterFailedWrite([transaction_id]);
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }
@@ -4488,6 +4525,7 @@ export class CopilotMoneyTools {
       this.recordSplitParent(transaction_id);
       this.db.patchCachedTransactionDelete(transaction_id);
       this.liveDb?.patchLiveTransactionDelete(transaction_id);
+      this.liveDb?.invalidateLiveBalances();
 
       try {
         return this.finishSplit(result);
@@ -4496,6 +4534,11 @@ export class CopilotMoneyTools {
         throw e;
       }
     } catch (e) {
+      // A split that landed and then errored leaves the parent cached while
+      // its children exist server-side, double-counting the amount (#832). The
+      // parent's id finds its month; the children's months are unknown here,
+      // since the error carries no response.
+      this.invalidateAfterFailedWrite([transaction_id]);
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }
@@ -4748,7 +4791,7 @@ export class CopilotMoneyTools {
       // server wrote, say), and nothing says which rows did. Drop the live
       // months holding the targeted rows so the next read asks the server
       // instead of serving pre-write rows for up to a week.
-      this.liveDb?.invalidateLiveTransactionMonths(ids.map((t) => t.id));
+      this.invalidateAfterFailedWrite(ids.map((t) => t.id));
       if (e instanceof GraphQLError) {
         throw new Error(`${label} failed: ${graphQLErrorToMcpError(e)}`, { cause: e });
       }
@@ -4759,6 +4802,8 @@ export class CopilotMoneyTools {
     // rejected sibling must not leave the caches claiming a landed row never
     // changed.
     onLanded(result.updated);
+    // A type change can move a manual account's balance (#825).
+    this.liveDb?.invalidateLiveBalances();
     if (result.failed.length > 0) {
       const detail = result.failed
         .map(

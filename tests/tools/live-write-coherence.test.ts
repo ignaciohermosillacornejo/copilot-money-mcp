@@ -39,6 +39,7 @@ import { TOOL_REGISTRY, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.j
 import * as transactionRegistry from '../../src/tools/registry/transactions.js';
 import type { LiveToolContext, ToolContext } from '../../src/tools/registry/types.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
+import type { AccountNode } from '../../src/core/graphql/queries/accounts.js';
 import type {
   CreatedTransaction,
   EditTransactionInput,
@@ -283,7 +284,7 @@ function setup(mutationMocks: MockResponsesByOp) {
     ((db as any)._transactions as Array<Record<string, unknown>>).find(
       (t) => t.transaction_id === id
     );
-  return { call, read, local, fetches: () => transactionsFetches };
+  return { call, read, local, liveDb, fetches: () => transactionsFetches };
 }
 
 const routing = { account_id: ACCOUNT_ID, item_id: ITEM_ID };
@@ -756,7 +757,10 @@ describe('a partial batch writes through the rows that landed', () => {
     }
   );
 
-  test('update_transactions: a failed edit does not stop a landed one being written through', async () => {
+  // The failed edit drops the shared month (#832), so the live read comes from
+  // the server; the landed edit is still in the local cache, and the failed
+  // one is not.
+  test('update_transactions: a failed edit drops its month; the landed one stays patched locally', async () => {
     const { call, read, local, fetches } = setup({
       EditTransaction: (vars) => {
         const v = vars as { id: string; input: EditTransactionInput };
@@ -776,10 +780,8 @@ describe('a partial batch writes through the rows that landed', () => {
     ).rejects.toThrow();
 
     const after = await read();
-    expect(fetches()).toBe(1);
-    const rows = new Map(after.transactions.map((r) => [r.transaction_id as string, r]));
-    expect(rows.get(TX_BATCH_1)).toMatchObject({ category_id: CAT_NEW });
-    expect(rows.get(TX_BATCH_2)).toMatchObject({ category_id: CAT_OLD });
+    expect(after._cache_hit).toBe(false);
+    expect(fetches()).toBe(2);
     expect(local(TX_BATCH_1)).toMatchObject({ category_id: CAT_NEW });
     expect(local(TX_BATCH_2)).toMatchObject({ category_id: CAT_OLD });
   });
@@ -805,4 +807,89 @@ describe('a partial batch writes through the rows that landed', () => {
       expect(fetches()).toBe(2);
     }
   );
+});
+
+// ── A write that throws leaves the next read to the server (#832) ───────────
+//
+// A transport error or timeout can follow a write the server already applied,
+// and nothing in the error says whether it did. Every transaction write tool's
+// catch drops the cached month holding its target (create, which has no id
+// yet, drops the month of its date), so the next read asks the server instead
+// of serving the pre-write row from the cold tier for up to a week. Keyed by
+// the same derived tool list as the table above: a new transaction write tool
+// fails the first test until it has a case here.
+
+const MUTATION_OP: Record<string, string> = {
+  create_transaction: 'CreateTransaction',
+  split_transaction: 'SplitTransaction',
+  update_transaction: 'EditTransaction',
+  update_transactions: 'EditTransaction',
+  add_transaction_to_recurring: 'AddTransactionToRecurring',
+  review_transactions: 'BulkEditTransactions',
+  bulk_edit_transactions: 'BulkEditTransactions',
+  delete_transaction: 'DeleteTransaction',
+};
+
+describe('a transaction write that throws leaves the next read to the server (#832)', () => {
+  test('every transaction write tool names the mutation it throws from', () => {
+    expect(Object.keys(MUTATION_OP).sort()).toEqual(transactionWriteToolNames());
+  });
+
+  test.each(Object.keys(MUTATION_OP))(
+    '%s: the mutation throws, and the cached month is refetched',
+    async (toolName) => {
+      const c = CASES[toolName]!;
+      const { call, read, fetches } = setup({
+        [MUTATION_OP[toolName]!]: new Error('synthetic transport timeout'),
+      });
+      await read();
+      expect(fetches()).toBe(1);
+
+      await expect(call(toolName, c.args)).rejects.toThrow(/synthetic transport timeout/);
+
+      const after = await read();
+      expect(after._cache_hit).toBe(false);
+      expect(fetches()).toBe(2 + (c.expectedWriteFetches ?? 0));
+    }
+  );
+});
+
+// ── Transaction writes drop the accounts snapshot (#825) ────────────────────
+//
+// On a manual account Copilot recomputes the balance from its transactions, so
+// a transaction write can move it while get_accounts_live keeps serving the
+// snapshot (1-hour TTL). Every transaction write drops the snapshot, on
+// success and on a throw alike; same derived key set.
+
+/** Warm the accounts snapshot so a drop is observable. */
+async function warmAccounts(liveDb: LiveCopilotDatabase): Promise<void> {
+  await liveDb.getAccountsCache().read(async () => [{ id: ACCOUNT_ID } as AccountNode]);
+  expect(liveDb.getAccountsCache().peek()).toBeDefined();
+}
+
+describe('a transaction write drops the live accounts snapshot (#825)', () => {
+  test.each(Object.keys(CASES))('%s: success drops the snapshot', async (toolName) => {
+    const c = CASES[toolName]!;
+    const { call, read, liveDb } = setup(c.mocks);
+    await read();
+    await warmAccounts(liveDb);
+
+    await call(toolName, c.args);
+
+    expect(liveDb.getAccountsCache().peek()).toBeUndefined();
+  });
+
+  test.each(Object.keys(MUTATION_OP))('%s: a throw drops the snapshot', async (toolName) => {
+    const { call, read, liveDb } = setup({
+      [MUTATION_OP[toolName]!]: new Error('synthetic transport timeout'),
+    });
+    await read();
+    await warmAccounts(liveDb);
+
+    await expect(call(toolName, CASES[toolName]!.args)).rejects.toThrow(
+      /synthetic transport timeout/
+    );
+
+    expect(liveDb.getAccountsCache().peek()).toBeUndefined();
+  });
 });

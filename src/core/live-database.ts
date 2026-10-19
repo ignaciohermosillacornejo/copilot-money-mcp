@@ -782,6 +782,19 @@ export class LiveCopilotDatabase {
   }
 
   /**
+   * Drop the accounts snapshot after a transaction write (#825). On a manual
+   * account Copilot recomputes the balance from its transactions, so a
+   * create, delete, split or amount/date/type edit moves it, and the snapshot
+   * (1-hour TTL) would keep serving the old balance. Every transaction write
+   * calls this, not only manual-account ones: knowing the account is manual
+   * would need the snapshot this drops, and the cost is one Accounts request
+   * on the next read.
+   */
+  invalidateLiveBalances(): void {
+    this.accountsCache.invalidate();
+  }
+
+  /**
    * Drop the given YYYY-MM months from the window cache if cached, so the
    * next read refetches them. For a write that changed rows the cache can no
    * longer find by id — e.g. a split whose parent was already evicted when a
