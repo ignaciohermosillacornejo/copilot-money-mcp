@@ -52,18 +52,29 @@ One resolver for both modes, `resolveCategoryFilter` in `src/tools/category-filt
 An id carried only by a transaction in the queried date range is still accepted. Both modes
 judge that against the same corpus, the window's rows; the first version checked the whole
 cache in cache mode, so an out-of-window orphan id was a silent zero there and an error live
-(caught in review). `database.ts` now takes a resolved id set and does no matching of its own.
+(caught in review). The corpus also follows the call's own `exclude_deleted` /
+`exclude_split_parents` flags: a Plaid-deleted row or a split parent, which live never
+receives, counts only when the caller asked for such rows; otherwise an id carried only by one
+was accepted and then returned nothing. A lookup by `transaction_id` validates `category` too,
+against the whole cache that path searches. `database.ts` now takes a resolved id set and does
+no matching of its own.
 
 ## Detector
 
 `tests/tools/category-filter-parity.test.ts` drives both tools over one fixture: a parent with
 two children, a top-level category, an orphan id, and opaque ids. It requires the same ids
 from both modes, children included for a parent. It also requires a name, a substring, a case
-variant or a typo to be rejected in both modes, with the mode's own hint. Siblings: `transaction_type: "hsa_eligible"` matched Plaid-taxonomy slugs as substrings of
-the opaque category id in cache mode, the same defect, and used a different word list in live
-mode; #854 replaces both with one shared rule over the category NAME (#843). The test is per
-filter, not a sweep: other filters that take an id (`account_id`) still return zero rows for
-an unknown value.
+variant or a typo to be rejected in both modes, with the mode's own hint. Further cases pin
+the corpus: an orphan id outside its rows' window, and an id carried only by a Plaid-deleted
+row or only by a split parent, are rejected in both modes; with `exclude_deleted: false` /
+`exclude_split_parents: false` those rows are returned instead; a `transaction_id` lookup
+rejects an unknown `category` in both modes and accepts an orphan id its own row carries. The
+test is per filter, not a sweep: other filters that take an id (`account_id`) still return
+zero rows for an unknown value.
+
+Siblings: `transaction_type: "hsa_eligible"` matched Plaid-taxonomy slugs as substrings of the
+opaque category id in cache mode, the same defect, and used a different word list in live
+mode; #854 replaces both with one shared rule over the category NAME (#843).
 
 ## Lesson
 

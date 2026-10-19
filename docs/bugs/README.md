@@ -112,12 +112,12 @@ a class yet.
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 58 entries:
+this corpus actually says, across all 59 entries:
 
 | Found by | Count | |
 |---|---|---|
 | `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 15 | █████████████ |
-| `live-probe` — a probe or smoke against the real backend | 12 | ███████████ |
+| `live-probe` — a probe or smoke against the real backend | 13 | ████████████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
 | `incidental` — found while working on something else | 8 | ███████ |
 | `user-report` | 8 | ███████ |

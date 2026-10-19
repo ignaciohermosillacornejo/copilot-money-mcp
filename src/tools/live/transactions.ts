@@ -333,6 +333,23 @@ export class LiveTransactionsTools {
     };
   }
 
+  /**
+   * Live side of the shared `category` filter (#845). An id no category has is
+   * accepted when a row in the fetched window carries it; the server never
+   * returns deleted rows or split parents, so the window is already the set of
+   * rows this call can return.
+   */
+  private async resolveLiveCategoryFilter(
+    category: string,
+    windowNodes: readonly TransactionNode[]
+  ): Promise<Set<string>> {
+    const { nodes: categoryNodes } = await this.getCategoryIndex();
+    return resolveCategoryFilter(category, categoryNodes, {
+      listTool: 'get_categories_live',
+      knownElsewhere: windowNodes.some((n) => n.categoryId === category),
+    });
+  }
+
   private async singleTransactionLookup(
     opts: GetTransactionsLiveOptions
   ): Promise<GetTransactionsLiveResult> {
@@ -353,6 +370,12 @@ export class LiveTransactionsTools {
     } = await this.live.getTransactions({ from: start_date, to: end_date });
     const fetchedAtIso = new Date(oldest_fetched_at).toISOString();
     const newestIso = new Date(newest_fetched_at).toISOString();
+    // A lookup by id ignores the filters, but an unknown `category` is still
+    // an error here, as the schema promises and as cache mode does (#858
+    // review): otherwise {transaction_id, category: "Food"} silently ignored it.
+    if (opts.category !== undefined) {
+      await this.resolveLiveCategoryFilter(opts.category, nodes);
+    }
     // GraphQL guarantees the (id, accountId, itemId) triple is unique per transaction,
     // so find() returns at most one match. No tie-breaking needed.
     const match = nodes.find(
@@ -427,12 +450,7 @@ export class LiveTransactionsTools {
     // 3. category — the filter shared with cache mode (#845): exact id, a
     // parent includes its descendants, an unknown id is an error.
     if (opts.category !== undefined) {
-      const cid = opts.category;
-      const { nodes: categoryNodes } = await this.getCategoryIndex();
-      const ids = resolveCategoryFilter(cid, categoryNodes, {
-        listTool: 'get_categories_live',
-        knownElsewhere: nodes.some((n) => n.categoryId === cid),
-      });
+      const ids = await this.resolveLiveCategoryFilter(opts.category, nodes);
       result = result.filter((n) => n.categoryId !== null && ids.has(n.categoryId));
     }
 

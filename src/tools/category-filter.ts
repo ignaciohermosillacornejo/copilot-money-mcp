@@ -92,6 +92,6 @@ export function categoryFilterDescription(listTool: string): string {
   return (
     `Filter by category ID from ${listTool} (exact match, not a name). A parent ` +
     "category's id also returns its subcategories' rows. An id that belongs to no " +
-    'category and to no transaction in the date range is an error.'
+    'category and to no transaction the call looked at is an error.'
   );
 }

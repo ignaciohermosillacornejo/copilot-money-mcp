@@ -749,27 +749,39 @@ export class CopilotMoneyTools {
 
   /**
    * Cache-mode side of the shared `category` filter (#845): the same
-   * resolveCategoryFilter live mode uses, over the user's categories. A value
-   * missing from them is still accepted when a transaction IN THE QUERIED DATE
-   * RANGE carries it (an orphaned id stays reachable). That corpus is the one
-   * live mode can see — its fetched window — so the two modes accept and
-   * reject the same values; checking the whole cache here, as the first
-   * version did, made an out-of-window orphan id return zero rows silently in
-   * cache mode and throw in live mode (#858 review). A Plaid-taxonomy id with
-   * no row in range is rejected for the same reason: accepting it returned a
-   * silent zero.
+   * resolveCategoryFilter live mode uses, over the user's categories.
    *
-   * Cache mode allows a call with no date bounds (live mode does not); then
-   * the corpus is the whole cache and the error says so. The corpus read
-   * applies the date bounds and the main query's 50k cap but not its
-   * merchant/account/amount filters, so above 50k rows in range the two can
-   * truncate differently — unreachable in practice. It is a second in-memory
-   * pass over the transactions, on the miss path only.
+   * CLAIM: a value no category has is accepted exactly when a row IN THE
+   * WINDOW, MINUS THE TWO CLASSES LIVE NEVER RECEIVES, carries it: a
+   * transaction in the queried date range, without the Plaid-deleted rows and
+   * split parents that the call's own exclude_deleted / exclude_split_parents
+   * flags drop. The other filters (exclude_transfers, transaction_type,
+   * pending, tag, merchant, amount) are not applied to the corpus, in either
+   * mode: live's corpus is the raw server window too. An orphaned id stays
+   * reachable, and both modes accept and reject the same values.
+   *
+   * EXCEPTIONS, both stated rather than hidden:
+   *   - With no date bounds (cache allows that; live does not) the corpus is
+   *     the whole cache, and the error says "in the cache".
+   *   - The corpus read shares the main query's date bounds and 50k cap but
+   *     not its merchant/account/amount filters, so above 50k rows in range
+   *     the two could truncate differently. Unreachable in practice.
+   *
+   * WHY, dated: the first version checked the whole cache, so an
+   * out-of-window orphan id returned zero rows silently in cache mode and
+   * threw in live mode; accepting any Plaid-taxonomy id was the same silent
+   * zero. Live never receives Plaid-deleted rows or split parents, so a row
+   * of either class counts here only when the caller asked for it with
+   * exclude_deleted: false / exclude_split_parents: false — otherwise the id
+   * was accepted and then returned nothing (#858 review rounds 1, 4 and 5).
+   * The read is a second in-memory pass over the transactions, on the miss
+   * path only.
    */
   private async resolveCacheCategoryFilter(
     category: string,
     startDate: string | undefined,
-    endDate: string | undefined
+    endDate: string | undefined,
+    keep: { excludeDeleted: boolean; excludeSplitParents: boolean }
   ): Promise<Set<string>> {
     const userCategories = await this.db.getUserCategories();
     const nodes = userCategories.map((c) => ({
@@ -780,7 +792,10 @@ export class CopilotMoneyTools {
     const knownElsewhere =
       !nodes.some((n) => n.id === category) &&
       (await this.db.getTransactions({ startDate, endDate, limit: 50000 })).some(
-        (t) => t.category_id === category
+        (t) =>
+          t.category_id === category &&
+          !(keep.excludeDeleted && t.plaid_deleted) &&
+          !(keep.excludeSplitParents && t.children_transaction_ids?.length)
       );
     return resolveCategoryFilter(category, nodes, {
       listTool: 'get_categories',
@@ -1043,6 +1058,19 @@ export class CopilotMoneyTools {
     // MODE 1: Single transaction lookup by ID
     // ============================================
     if (transaction_id) {
+      // A lookup by id ignores the filters, but an unknown `category` is still
+      // an error, as the schema promises and as live mode does (#858 review):
+      // otherwise {transaction_id, category: "Food"} silently ignored it.
+      // Judged against the corpus this path actually searches — the whole
+      // cache, deleted rows and split parents included, with no date bounds —
+      // so the error says "in the cache", and an orphan id the looked-up row
+      // carries is accepted even when the row is outside a passed period.
+      if (category !== undefined) {
+        await this.resolveCacheCategoryFilter(category, undefined, undefined, {
+          excludeDeleted: false,
+          excludeSplitParents: false,
+        });
+      }
       const allTransactions = await this.db.getAllTransactions();
       const found = allTransactions.find((t) => t.transaction_id === transaction_id);
       if (!found) {
@@ -1075,7 +1103,10 @@ export class CopilotMoneyTools {
     // Query transactions with higher limit for post-filtering
     const categoryIds =
       category !== undefined
-        ? await this.resolveCacheCategoryFilter(category, start_date, end_date)
+        ? await this.resolveCacheCategoryFilter(category, start_date, end_date, {
+            excludeDeleted: exclude_deleted,
+            excludeSplitParents: exclude_split_parents,
+          })
         : undefined;
     let transactions = await this.db.getTransactions({
       startDate: start_date,

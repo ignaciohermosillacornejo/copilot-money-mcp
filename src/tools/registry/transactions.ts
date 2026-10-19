@@ -140,7 +140,9 @@ export const getTransactionsTool = defineTool({
         // NEW: Single transaction lookup
         transaction_id: {
           type: 'string',
-          description: 'Get a single transaction by ID (ignores other filters)',
+          description:
+            'Get a single transaction by ID (ignores other filters, though a `category` value ' +
+            'must still be a real id)',
         },
         // NEW: Text search
         query: {
