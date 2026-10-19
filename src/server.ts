@@ -122,6 +122,9 @@ export class CopilotMoneyServer {
           console.warn(
             '[copilot-money-mcp] authenticated uid changed mid-session — flushing all live caches'
           );
+          // The in-memory split record belongs to the previous login; the
+          // persisted one is uid-scoped already (#842).
+          this.tools.forgetSessionSplitParents();
           refreshCache.refresh({ scope: 'all' }).catch((e: unknown) => {
             // scope:'all' cannot reject today; keep future rejections visible.
             console.warn('[copilot-money-mcp] cache sweep after uid transition failed:', e);

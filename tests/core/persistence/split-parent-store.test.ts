@@ -90,7 +90,7 @@ describe('SplitParentStore', () => {
     expect(store(UID_A).has(PARENT_2)).toBe(false);
   });
 
-  test('an unwritable directory degrades with one warning, never a throw', () => {
+  test('an unwritable directory degrades with one warning, never a throw, and still knows the id', () => {
     // A regular file where the directory should be: mkdir and append fail.
     const blocker = join(dir, 'not-a-dir');
     writeFileSync(blocker, 'x');
@@ -100,6 +100,9 @@ describe('SplitParentStore', () => {
       expect(() => s.record(PARENT_1)).not.toThrow();
       expect(() => s.record(PARENT_2)).not.toThrow();
       expect(warn).toHaveBeenCalledTimes(1);
+      // The warning says the id stays recorded in memory; has() agrees.
+      expect(s.has(PARENT_1)).toBe(true);
+      expect(s.has(PARENT_2)).toBe(true);
     } finally {
       warn.mockRestore();
     }

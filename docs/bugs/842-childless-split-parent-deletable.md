@@ -70,13 +70,16 @@ rested on it and how to check it, and the parity test checked it. Nothing stoppe
   included, plus `children_transaction_ids` owners) into
   `AllCollectionsResult.splitParentIds`, in the same single pass.
   `CopilotDatabase.getSplitParentIds()` exposes it, and `splitParentEvidence` consults it in
-  live and cache-only mode. Live mode now decodes the local cache for this check when no
-  read has loaded it yet. Delete is rare and destructive, and the decode is the same cached
-  batch every cache read uses, so the first delete of a process pays a few seconds. An
-  unreadable cache still never blocks a delete.
+  live and cache-only mode. Live mode now decodes the local cache for this check when
+  nothing has loaded it yet or the loaded data is past the cache TTL, so a split made and
+  un-split in the app mid-session is seen too. Delete is rare and destructive, and the
+  decode is the same batch every cache read uses: usually seconds, at worst the decode
+  timeout (90 s by default). An unreadable or timed-out cache still never blocks a delete;
+  the guard then rests on the record and the live checks for that call.
 - **Persistence:** split records are written to `split-parents.<uid>.jsonl` beside the
   routing-id index (`~/.claude/copilot-money/`, append-only JSONL, uid-scoped, same opt-out),
-  so a parent split through this server stays refused after a restart.
+  so a parent split through this server stays refused after a restart. The in-memory half is
+  cleared on a mid-session login change, matching the uid-scoped file.
 - **Downstream:** the refusal no longer offers a retry and says the parent reappears as an
   ordinary row once its children are deleted. Both tool descriptions now say the same.
   Ledger: `Transaction.parentId:childlessParentHidden` (unverified) is replaced by
@@ -92,12 +95,14 @@ of the deleted children and no record from this server, is not known.
 deleted, a freshly fetched window returns the parent as an ordinary row, so the delete must
 still be refused and nothing sent), a real-LevelDB fixture with soft-deleted children that
 refuses the parent in live mode with an empty session and in cache-only mode, and a restart
-test across two tool instances sharing a store. Four new rows in `scripts/mutation-guards.ts`,
+test across two tool instances sharing a store, plus a delete past the cache TTL that must
+see a child deleted after the first decode. Five new rows in `scripts/mutation-guards.ts`,
 each **mutation-verified** by `bun run check:mutation-guards`:
 
 - `a fresh row never retires a split record`: the record check is removed;
 - `split-parent records survive a restart`: the persisted record is dropped from the check;
 - `delete reads the local cache's split evidence in live mode`: live mode skips it;
+- `split-parent evidence honours the cache TTL`: the id set is never re-read once loaded;
 - `soft-deleted split children still name their parent`: the decoder collects parent ids
   only from documents that produce a row.
 

@@ -115,15 +115,19 @@ export class SplitParentStore {
     if (!uid) return;
     const ids = this.idsFor(uid);
     if (ids.has(id)) return;
+    // Known for this process whether or not the append lands, so has() agrees
+    // with the warning below. A later record() of the same id does not retry
+    // the append: the id is already known here, and a disk that refused one
+    // append this session is not worth a retry per split.
+    ids.add(id);
     try {
       mkdirSync(this.baseDir, { recursive: true });
       appendFileSync(this.fileFor(uid), `${JSON.stringify({ i: id })}\n`);
-      ids.add(id);
     } catch (e) {
       if (!this.warnedAppend) {
         this.warnedAppend = true;
         console.warn(
-          `[copilot-money-mcp] persistent split-parent record append failed (${(e as Error).message}) — continuing in-memory.`
+          `[copilot-money-mcp] persistent split-parent record append failed (${(e as Error).message}) — the id stays recorded in memory for this process only.`
         );
       }
     }

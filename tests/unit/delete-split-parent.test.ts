@@ -356,13 +356,22 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
       (db as any)._transactions = [];
       (db as any)._splitParentIds = new Set<string>();
       (db as any)._allCollectionsLoaded = true;
+      (db as any)._cacheLoadedAt = Date.now();
       return Promise.resolve();
+    };
+    let fullReads = 0;
+    db.getAllTransactions = () => {
+      fullReads += 1;
+      return Promise.resolve([]);
     };
     const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
 
     await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
     await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
     expect(decodes).toBe(1);
+    // The row half reads only what is already in memory in live mode: one
+    // decode per delete at most, never a second full read (#852 review).
+    expect(fullReads).toBe(0);
     expect(deletes(client)).toHaveLength(2);
   });
 
@@ -723,6 +732,55 @@ describe('split-parent evidence that survives a restart (#842)', () => {
       tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
     ).rejects.toThrow(REFUSAL);
     expect(client._calls).toHaveLength(0);
+  });
+
+  test('past the cache TTL a delete re-reads the local cache and sees a newly deleted child', async () => {
+    // A long-running session: the first delete decoded the cache before the
+    // split happened. The user then splits a row in the app and deletes both
+    // children there; the desktop app syncs the soft-deleted children. Once
+    // the loaded cache is past its TTL, the next delete must decode again.
+    const dbPath = join(mkdtempSync(join(LEVELDB_DIR, 'ttl-')), 'leveldb');
+    const parentDoc = {
+      collection: 'transactions',
+      id: PARENT_ID,
+      fields: {
+        transaction_id: PARENT_ID,
+        ...routing,
+        amount: 100,
+        date: '2025-03-12',
+        name: 'Hardware Store',
+        category_id: CAT_B,
+      },
+    };
+    const plainDoc = {
+      collection: 'transactions',
+      id: PLAIN_ID,
+      fields: {
+        transaction_id: PLAIN_ID,
+        ...routing,
+        amount: 20,
+        date: '2025-03-10',
+        name: 'Bakery',
+        category_id: CAT_B,
+      },
+    };
+    await createTestDb(dbPath, [parentDoc, plainDoc]);
+    const client = createMockGraphQLClient({
+      ...WINDOW([inWindow(PARENT_ID, 100), inWindow(PLAIN_ID, 20)]),
+      DeleteTransaction: { deleteTransaction: true },
+    });
+    const db = new CopilotDatabase(dbPath);
+    const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
+    await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+
+    await createTestDb(dbPath, [parentDoc, deletedChild(CHILD_1, 60), deletedChild(CHILD_2, 40)]);
+    // Age the loaded cache past the TTL instead of waiting it out.
+    (db as any)._cacheLoadedAt = Date.now() - 24 * 60 * 60 * 1000;
+
+    await expect(
+      tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
+    ).rejects.toThrow(REFUSAL);
+    expect(deletes(client).map((c) => (c.variables as { id: string }).id)).toEqual([PLAIN_ID]);
   });
 
   test('a split recorded by one process is refused by the next one (persisted record)', async () => {

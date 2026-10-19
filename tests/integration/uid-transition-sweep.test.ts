@@ -56,7 +56,12 @@ const emptyTransactionsPage = {
   transactions: { edges: [], pageInfo: { endCursor: null, hasNextPage: false } },
 };
 
-test('mid-session uid transition flushes all live caches (#521)', async () => {
+/**
+ * Mock fetch: exchange #1 lands uid-A with expires_in 0, so every later
+ * GraphQL call re-exchanges; exchange #2+ lands uid-B. Returns the exchange
+ * count. Also disables the persistent stores, since the uid provider is real.
+ */
+function installTransitionFetch(): () => number {
   // The suite must never touch the real home directory: this test has a REAL
   // uid provider, so the persistent meta index must be disabled (#522).
   process.env.COPILOT_DISABLE_PERSISTENT_INDEX = '1';
@@ -100,6 +105,11 @@ test('mid-session uid transition flushes all live caches (#521)', async () => {
       headers: { 'Content-Type': 'application/json' },
     });
   }) as unknown as typeof fetch;
+  return () => exchanges;
+}
+
+test('mid-session uid transition flushes all live caches (#521)', async () => {
+  const exchangeCount = installTransitionFetch();
 
   // Provide a synthetic LevelDB so availability() passes on CI (no real DB).
   // The live tools never touch LevelDB; the DB only needs to satisfy the guard.
@@ -126,7 +136,7 @@ test('mid-session uid transition flushes all live caches (#521)', async () => {
     // 2) Any live-tier call re-exchanges (token expired) → uid-B →
     //    transition fires → all live caches flushed.
     await server.handleCallTool('get_transactions_live', { period: 'this_month' });
-    expect(exchanges).toBe(2);
+    expect(exchangeCount()).toBe(2);
     expect(warns.some((w) => w.includes('flushing all live caches'))).toBe(true);
 
     // 3) Without the sweep this is a fresh-TTL cache HIT serving uid-A's
@@ -134,6 +144,38 @@ test('mid-session uid transition flushes all live caches (#521)', async () => {
     const third = await server.handleCallTool('get_accounts_live', {});
     expect(JSON.stringify(third)).toContain('Account of B');
     expect(JSON.stringify(third)).not.toContain('Account of A');
+  } finally {
+    console.warn = origWarn;
+  }
+});
+
+test('mid-session uid transition drops the in-memory split-parent record (#842)', async () => {
+  // The persisted split record is uid-scoped; the in-memory half must follow
+  // the same login, so the sweep clears it.
+  const exchangeCount = installTransitionFetch();
+  tempDbDir = mkdtempSync(join(tmpdir(), 'copilot-sweep-'));
+  await createTestDb(tempDbDir, []);
+  const extractor = mock((): Promise<TokenCandidates> =>
+    Promise.resolve({
+      candidates: [{ token: 'AMf-r', browser: 'Chrome', scoped: true }],
+      checked: ['Chrome'],
+    })
+  );
+  const client = new GraphQLClient(new FirebaseAuth(extractor));
+  const server = new CopilotMoneyServer(tempDbDir, undefined, true, true, client);
+  const tools = (server as any).tools;
+  const PARENT_ID = 'Rt4yU9iO2pA7sD1fG6hK';
+
+  const origWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await server.handleCallTool('get_accounts_live', {});
+    tools.recordSplitParent(PARENT_ID);
+    expect(tools.isRecordedSplitParent(PARENT_ID)).toBe(true);
+
+    await server.handleCallTool('get_transactions_live', { period: 'this_month' });
+    expect(exchangeCount()).toBe(2);
+    expect(tools.isRecordedSplitParent(PARENT_ID)).toBe(false);
   } finally {
     console.warn = origWarn;
   }

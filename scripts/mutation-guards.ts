@@ -525,6 +525,28 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/unit/delete-split-parent.test.ts',
   },
   {
+    name: 'split-parent evidence honours the cache TTL',
+    file: 'src/core/database.ts',
+    invariant:
+      'In live mode nothing else reloads the local cache, so the split-parent id set read on ' +
+      'the first delete would otherwise be frozen for the process. A split made in the app ' +
+      'and un-split there afterwards would then never be known, and its childless parent ' +
+      'deleted (#842, #852 review): the set must be re-read once the cache is past its TTL.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: split-parent evidence honours the cache TTL\n' +
+        '    if (!this._allCollectionsLoaded || this.isCacheStale()) {',
+      with:
+        '    // mutation-guard: split-parent evidence honours the cache TTL\n' +
+        '    if (!this._allCollectionsLoaded) {',
+    },
+    expectFailingTests: [
+      'past the cache TTL a delete re-reads the local cache and sees a newly deleted child',
+    ],
+    expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
+  {
     name: 'soft-deleted split children still name their parent',
     file: 'src/core/decoder.ts',
     invariant:

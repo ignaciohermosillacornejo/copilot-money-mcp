@@ -706,15 +706,20 @@ export class CopilotDatabase {
   /**
    * Every id the local cache names as a split parent, soft-deleted split
    * children included (#842) — see AllCollectionsResult.splitParentIds.
-   * Runs the batch decode every read uses when nothing is loaded yet, and
-   * otherwise answers from what is loaded, as loadTransactions does. Empty
-   * when the loaded data did not come from a full decode pass (injected test
-   * data, the per-collection fallback), which carry no such evidence.
+   * Runs the batch decode every read uses when nothing is loaded yet or the
+   * loaded data is past the cache TTL, and otherwise answers from what is
+   * loaded. Honouring the TTL matters even in live mode, where nothing else
+   * reloads the local cache: a split made in the app, whose children are
+   * then deleted there, reaches the cache after the first decode, and a
+   * frozen set would never name its parent (#852 review). Empty when the
+   * loaded data did not come from a full decode pass (injected test data,
+   * the per-collection fallback), which carry no such evidence.
    * Throws when the cache cannot be read; callers that must not be blocked by
    * an unreadable cache catch it.
    */
   async getSplitParentIds(): Promise<ReadonlySet<string>> {
-    if (this._splitParentIds === null && !this._allCollectionsLoaded) {
+    // mutation-guard: split-parent evidence honours the cache TTL
+    if (!this._allCollectionsLoaded || this.isCacheStale()) {
       await this.loadAllCollections();
     }
     return this._splitParentIds ?? new Set();
