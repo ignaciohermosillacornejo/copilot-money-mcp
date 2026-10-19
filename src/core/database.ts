@@ -317,8 +317,8 @@ export class CopilotDatabase {
    */
   private readonly _splitParentIds = new Set<string>();
   /**
-   * When getSplitParentIds last attempted a decode, successful or not; null =
-   * never. Latches failures too, so a cache that keeps timing out costs one
+   * When getSplitParentIds' last decode attempt resolved, successful or not;
+   * null = never. Latches failures too, so a cache that keeps timing out costs one
    * attempt per splitEvidenceRereadMs(), not one per delete. Scoped to the
    * split-evidence path: reads that share loadAllCollections are unaffected.
    */
@@ -774,8 +774,17 @@ export class CopilotDatabase {
    */
   async getSplitParentIds(): Promise<ReadonlySet<string>> {
     if (this.splitEvidenceDue()) {
-      this._splitEvidenceAttemptAt = Date.now();
-      await this.loadAllCollections();
+      // The latch is stamped when the attempt RESOLVES, not when it starts: a
+      // concurrent delete arriving mid-decode must find the attempt still
+      // due and join the in-flight decode (loadAllCollections shares it),
+      // rather than answer at once from evidence the decode has not yet
+      // added (#852 review round 4).
+      // mutation-guard: the split-evidence latch waits for the decode
+      try {
+        await this.loadAllCollections();
+      } finally {
+        this._splitEvidenceAttemptAt = Date.now();
+      }
     }
     return this._splitParentIds;
   }

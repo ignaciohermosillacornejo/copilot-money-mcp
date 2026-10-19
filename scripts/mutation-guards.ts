@@ -591,6 +591,32 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/integration/uid-transition-sweep.test.ts',
   },
   {
+    name: 'the split-evidence latch waits for the decode',
+    file: 'src/core/database.ts',
+    invariant:
+      'The split-evidence latch rate-limits decode attempts. Stamped when an attempt starts, ' +
+      'it makes a second delete that arrives during the decode skip it and answer from ' +
+      'evidence the decode has not added yet, so a childless split parent named only by ' +
+      "the cache's soft-deleted children is deleted (#842, #852 review round 4). It must be " +
+      'stamped when the attempt resolves, so concurrent callers join the in-flight decode.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '      // mutation-guard: the split-evidence latch waits for the decode\n' +
+        '      try {\n' +
+        '        await this.loadAllCollections();',
+      with:
+        '      // mutation-guard: the split-evidence latch waits for the decode\n' +
+        '      this._splitEvidenceAttemptAt = Date.now();\n' +
+        '      try {\n' +
+        '        await this.loadAllCollections();',
+    },
+    expectFailingTests: [
+      'two deletes during one slow decode both see its evidence, and it decodes once',
+    ],
+    expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
+  {
     name: 'soft-deleted split children still name their parent',
     file: 'src/core/decoder.ts',
     invariant:

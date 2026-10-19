@@ -19,7 +19,7 @@ import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
-import { CopilotDatabase } from '../../src/core/database.js';
+import { CopilotDatabase, splitEvidenceRereadMs } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
 import { SplitParentStore } from '../../src/core/persistence/split-parent-store.js';
@@ -847,7 +847,7 @@ describe('split-parent evidence that survives a restart (#842)', () => {
       expect(reloads).toBe(0);
 
       // A minute on, the stale cache is re-read.
-      (db as any)._splitEvidenceAttemptAt = Date.now() - 61_000;
+      (db as any)._splitEvidenceAttemptAt = Date.now() - splitEvidenceRereadMs() - 1_000;
       await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
       expect(reloads).toBe(1);
       expect(deletes(client)).toHaveLength(3);
@@ -875,11 +875,61 @@ describe('split-parent evidence that survives a restart (#842)', () => {
     await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
     expect(attempts).toBe(1);
 
-    // Past the interval (the 5-minute default TTL), it is tried again.
-    (db as any)._splitEvidenceAttemptAt = Date.now() - 6 * 60 * 1000;
+    // Past the interval (the TTL, at least a minute), it is tried again.
+    (db as any)._splitEvidenceAttemptAt = Date.now() - splitEvidenceRereadMs() - 1_000;
     await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
     expect(attempts).toBe(2);
     expect(deletes(client)).toHaveLength(3);
+  });
+
+  test('two deletes during one slow decode both see its evidence, and it decodes once', async () => {
+    // A fresh, unloaded database whose only evidence is the soft-deleted
+    // children. Both deletes start before the (slow) decode finishes: the
+    // second must join it, not answer from the still-empty evidence.
+    const db = await fixtureDb();
+    const client = createMockGraphQLClient({
+      ...WINDOW([inWindow(PARENT_ID, 100)]),
+      DeleteTransaction: { deleteTransaction: true },
+    });
+    const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
+
+    const realLoad = (db as any).loadAllCollections.bind(db) as () => Promise<void>;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let decodes = 0;
+    let inflight: Promise<void> | null = null;
+    // Shares one in-flight decode across callers, as loadAllCollections does,
+    // with the decode held at the gate.
+    (db as any).loadAllCollections = () => {
+      if ((db as any)._allCollectionsLoaded) return Promise.resolve();
+      inflight ??= (async () => {
+        decodes += 1;
+        await gate;
+        await realLoad();
+      })().finally(() => {
+        inflight = null;
+      });
+      return inflight;
+    };
+
+    const both = Promise.allSettled([
+      tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing }),
+      tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing }),
+    ]);
+    // Let both calls reach the decode (or, with the latch stamped too early,
+    // let the second one run to completion) before the decode finishes.
+    await new Promise((r) => setTimeout(r, 20));
+    release();
+    const results = await both;
+
+    for (const r of results) {
+      expect(r.status).toBe('rejected');
+      expect(String((r as PromiseRejectedResult).reason)).toMatch(REFUSAL);
+    }
+    expect(decodes).toBe(1);
+    expect(deletes(client)).toHaveLength(0);
   });
 
   test('a stale reload that throws still refuses what earlier decodes named', async () => {

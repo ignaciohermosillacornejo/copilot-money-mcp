@@ -123,7 +123,10 @@ export class CopilotMoneyServer {
             '[copilot-money-mcp] authenticated uid changed mid-session — flushing all live caches'
           );
           // The in-memory split record belongs to the previous login; the
-          // persisted one is uid-scoped already (#842).
+          // persisted one is uid-scoped already (#842). This also marks the
+          // whole local cache stale, so the next read re-decodes it too —
+          // deliberately: rows loaded under the previous login must not be
+          // served under the new one.
           this.tools.forgetSessionSplitParents();
           refreshCache.refresh({ scope: 'all' }).catch((e: unknown) => {
             // scope:'all' cannot reject today; keep future rejections visible.

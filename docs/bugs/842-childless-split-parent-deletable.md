@@ -104,7 +104,8 @@ test across two tool instances sharing a store, plus a delete past the cache TTL
 see a child deleted after the first decode, a re-decode that no longer holds the children
 (still refused), a reload that throws (still refused), the attempt latch (one decode
 attempt per interval at a TTL of 0 and for a failing decode), and a login change that
-must re-decode a fresh cache. Seven new rows in `scripts/mutation-guards.ts`,
+must re-decode a fresh cache, plus two concurrent deletes during one slow decode (both
+refused, one decode). Eight new rows in `scripts/mutation-guards.ts`,
 each **mutation-verified** by `bun run check:mutation-guards`:
 
 - `a fresh row never retires a split record`: the record check is removed;
@@ -114,6 +115,8 @@ each **mutation-verified** by `bun run check:mutation-guards`:
 - `local split evidence only accumulates`: each decode replaces the set instead of adding;
 - `a login change re-reads split evidence`: the login change empties the set without
   marking the cache stale;
+- `the split-evidence latch waits for the decode`: the latch is stamped before the decode,
+  so a concurrent delete skips it;
 - `soft-deleted split children still name their parent`: the decoder collects parent ids
   only from documents that produce a row.
 
