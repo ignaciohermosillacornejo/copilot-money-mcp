@@ -543,6 +543,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // INCOME/INTERNAL_TRANSFER). Re-measured after rebasing onto main with #864
 // merged: main 83_705, 83_760 with #857 on top (~0.6% headroom), within the
 // 84_280 in force.
+//
+// UNMOVED by #861 (+234: the split-target refusal clauses on update_transaction,
+// add_transaction_to_recurring, split_transaction, bulk_edit_transactions and
+// create_recurring). Re-measured after rebasing onto main with #857 merged:
+// main 83_760, 83_994 with #861 on top (~0.3% headroom), within the 84_280
+// in force.
 const SCHEMA_TOTAL_BUDGET = 84_280;
 
 // ---------------------------------------------------------------------------
