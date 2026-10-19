@@ -718,6 +718,10 @@ describe('deleteTransaction', () => {
       },
     ];
     (mockDb as any)._allCollectionsLoaded = true;
+    // A fresh load time, as every real load and _injectDataForTesting set:
+    // delete_transaction's split check re-reads a stale cache (#842), which
+    // would clear these rows and try the real DB.
+    (mockDb as any)._cacheLoadedAt = Date.now();
   });
 
   test('dispatches DeleteTransaction with all three IDs and returns success', async () => {
