@@ -236,7 +236,8 @@
     "tests/unit/resolve-transaction-meta.test.ts",
     "tests/unit/split-target-refusal.test.ts",
     "tests/unit/split-transaction-resolution.test.ts",
-    "tests/unit/update-transaction.test.ts"
+    "tests/unit/update-transaction.test.ts",
+    "tests/unit/write-window-memo.test.ts"
   ],
   "exclude": ["node_modules", "dist"]
 }

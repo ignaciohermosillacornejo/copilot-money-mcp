@@ -154,11 +154,14 @@ export function createMockGraphQLClient(responsesByOp: MockResponsesByOp = {}): 
     }
     return Promise.resolve(entry);
   };
+  const mutate = mock(dispatch);
   const client = {
-    mutate: mock(dispatch),
+    mutate,
     // Same transport in production (GraphQLClient.query delegates to mutate);
     // mirror that here so live-read wrappers work against this mock too.
     query: mock(dispatch),
+    // As GraphQLClient.getMutationCount: every mutation issued, failed or not.
+    getMutationCount: () => mutate.mock.calls.length,
     _calls: calls,
   };
   return client as unknown as MockGraphQLClient;

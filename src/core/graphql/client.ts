@@ -274,11 +274,23 @@ export class GraphQLClient {
     this.auth.setUidTransitionListener(listener);
   }
 
+  /**
+   * How many mutations this client has been asked to send, counted when each
+   * is issued (so one that fails or times out counts too, since it may still
+   * have landed). A cheap "has anything been written since" stamp for
+   * short-lived memos of server reads (#838).
+   */
+  getMutationCount(): number {
+    return this.mutationCount;
+  }
+  private mutationCount = 0;
+
   async mutate<TVariables, TResponse>(
     operationName: string,
     query: string,
     variables: TVariables
   ): Promise<TResponse> {
+    this.mutationCount += 1;
     return this.request<TVariables, TResponse>('mutation', operationName, query, variables);
   }
 

@@ -944,11 +944,69 @@ export class CopilotMoneyTools {
     };
   }
 
-  /** The write-resolve window's rows ([] with no live layer). Rejects if the fetch fails. */
-  private async loadWriteResolveWindow(): Promise<TransactionNode[]> {
-    if (!this.liveDb) return [];
+  /**
+   * How long one write-resolve window load is reused (#838). A cleanup loop
+   * deleting N rows used to pay N window loads, because the window cache's
+   * live tier (the recent months) has a TTL of 0. Long enough to cover a burst
+   * of writes from one agent turn, short enough that a split made elsewhere
+   * shows up on the next call after it.
+   */
+  static readonly WINDOW_MEMO_MS = 15_000;
+  private windowMemo: { at: number; stamp: number; rows: Promise<TransactionNode[]> } | null = null;
+  /** DeleteTransaction mutations this instance has issued; see writeStamp(). */
+  private deletesIssued = 0;
+
+  /**
+   * Changes whenever this server issues a write that could change what the
+   * window holds, so a memoized window is never reused across one. Counted
+   * from the GraphQL client (every mutation, failed ones included), minus
+   * deletes: a delete only removes a row, and with no negative split evidence
+   * (#842) a removed row cannot turn a refusal into an acceptance, so a burst
+   * of deletes can share one load. null without a counting client: no memo.
+   */
+  private writeStamp(): number | null {
+    const client = this.graphqlClient as { getMutationCount?: () => number } | null;
+    if (typeof client?.getMutationCount !== 'function') return null;
+    return client.getMutationCount() - this.deletesIssued;
+  }
+
+  /**
+   * The write-resolve window's rows ([] with no live layer). Rejects if the
+   * fetch fails. Memoized for WINDOW_MEMO_MS across calls with no write in
+   * between (#838), so a burst of deletes shares one load.
+   *
+   * Why the memo cannot weaken a split-parent refusal: every split evidence
+   * source is positive (#842 — nothing retires a record or proves an id is
+   * NOT a parent), and splitParentEvidence checks the live window cache and
+   * the split record afresh on every call, so a split this server makes, or
+   * any row a write puts in the cache, is seen whatever the memo holds. What
+   * a memoized window CAN miss: a child row another client (the app, another
+   * device) created in the last few seconds, in a month not otherwise cached
+   * here. That is the same gap the window always had for a split made just
+   * after the fetch, widened by at most WINDOW_MEMO_MS.
+   */
+  private loadWriteResolveWindow(): Promise<TransactionNode[]> {
+    const liveDb = this.liveDb;
+    if (!liveDb) return Promise.resolve([]);
+    const stamp = this.writeStamp();
+    const now = Date.now();
+    const memo = this.windowMemo;
+    if (
+      memo &&
+      stamp !== null &&
+      memo.stamp === stamp &&
+      now - memo.at < CopilotMoneyTools.WINDOW_MEMO_MS
+    ) {
+      return memo.rows;
+    }
     const { from, to } = CopilotMoneyTools.writeResolveWindow();
-    return (await this.liveDb.getTransactions({ from, to })).rows;
+    const rows = liveDb.getTransactions({ from, to }).then((r) => r.rows);
+    this.windowMemo = stamp === null ? null : { at: now, stamp, rows };
+    // A failed load is not reused: the next call tries again.
+    rows.catch(() => {
+      if (this.windowMemo?.rows === rows) this.windowMemo = null;
+    });
+    return rows;
   }
 
   /**
@@ -4366,9 +4424,11 @@ export class CopilotMoneyTools {
    * checks.
    * Then the write-resolve window is loaded — the same windowed fetch write
    * resolution uses. Cold months are served from the cache, but the
-   * live-tier months (the recent ones, TTL 0) are refetched on every delete:
-   * typically one or two Transactions requests, a full window fetch when
-   * nothing is cached yet. Delete is rare and destructive, which is what
+   * live-tier months (the recent ones, TTL 0) are refetched: typically one
+   * or two Transactions requests, a full window fetch when nothing is cached
+   * yet. A load is reused for WINDOW_MEMO_MS (15 s) by any later call with no
+   * write but deletes in between (#838), so a burst of deletes pays for one.
+   * Delete is rare and destructive, which is what
    * makes the decode worth paying here when every other write path avoids it.
    */
   async deleteTransaction(args: {
@@ -4413,6 +4473,8 @@ export class CopilotMoneyTools {
     if (evidence.parentOfTarget) this.recordSplitParent(evidence.parentOfTarget);
 
     try {
+      // Counted before it is sent, as the client counts it (see writeStamp).
+      this.deletesIssued += 1;
       const deleted = await gqlDeleteTransaction(client, {
         id: transaction_id,
         accountId: account_id,
