@@ -657,6 +657,25 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/unit/split-target-refusal.test.ts',
   },
   {
+    name: 'a recurring is not seeded from a split parent',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'A recurring seeded from a split parent could count its amount on top of its ' +
+      "children's; the server's behaviour is unverified, so create_recurring refuses a known " +
+      'split parent before sending, as add_transaction_to_recurring does (#836).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: a recurring is not seeded from a split parent\n' +
+        '    if (evidence.isParent) {',
+      with:
+        '    // mutation-guard: a recurring is not seeded from a split parent\n' +
+        '    if (false) {',
+    },
+    expectFailingTests: ['create_recurring: a split parent is refused, nothing sent'],
+    expectFails: 'tests/unit/split-target-refusal.test.ts',
+  },
+  {
     name: 'a fresh row never retires a split record',
     file: 'src/tools/tools.ts',
     invariant:

@@ -1280,6 +1280,16 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'account, balance read before and after).',
   },
   {
+    surface: 'Mutation.createRecurring:splitParent',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'UNKNOWN: what a recurring seeded from a split parent counts (the parent and its ' +
+      'children, the same money twice?) and what amount it expects. create_recurring refuses ' +
+      'a known split parent. Never probed.',
+  },
+  {
     surface: 'Mutation.addTransactionToRecurring:splitParent',
     kind: 'operation',
     oracle: null,

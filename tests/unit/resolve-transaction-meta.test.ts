@@ -100,6 +100,9 @@ function stubLiveDb(overrides: {
     invalidateTransactionDerivedSnapshots: () => {},
     invalidateLiveMonthKeys: () => {},
     invalidateLiveTransactionMonths: () => {},
+    // create_recurring's split-parent check (#836): no split evidence here.
+    hasSplitChildOf: () => false,
+    lookupTransactionNodes: () => new Map(),
   } as unknown as LiveCopilotDatabase;
   return { liveDb, getTransactions };
 }

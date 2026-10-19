@@ -24,7 +24,11 @@ import { describe, test, expect, afterAll } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { CopilotMoneyTools } from '../../src/tools/tools.js';
+import {
+  CopilotMoneyTools,
+  buildBulkEditCachePatch,
+  buildEditCachePatch,
+} from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
@@ -135,6 +139,14 @@ const MUTATIONS: MockResponsesByOp = {
   },
   User: { user: { id: 'Cv6bN9mQ2wE5rT8yU1iO', budgetingConfig: null } },
   BulkEditTransactions: bulkEditEcho,
+  CreateRecurring: {
+    createRecurring: {
+      id: 'Rc5tY8uI1oP4aS7dF0gH',
+      name: 'Rent',
+      state: 'ACTIVE',
+      frequency: 'MONTHLY',
+    },
+  },
 };
 
 /**
@@ -459,5 +471,85 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
     await expect(
       tools.updateTransaction({ transaction_id: PARENT_ID, ...routing, amount: 150 })
     ).rejects.toThrow(UNVERIFIED);
+  });
+});
+
+describe('create_recurring from a split parent (#836)', () => {
+  test('create_recurring: a split parent is refused, nothing sent', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.createRecurring({ transaction_id: PARENT_ID, ...routing, frequency: 'MONTHLY' })
+    ).rejects.toThrow(/split parent.*unverified/s);
+    expect(sent('CreateRecurring')).toHaveLength(0);
+  });
+
+  test('an ordinary row still seeds a recurring', async () => {
+    const { tools, sent } = setup();
+    await tools.createRecurring({ transaction_id: PLAIN_ID, ...routing, frequency: 'MONTHLY' });
+    expect(sent('CreateRecurring')).toHaveLength(1);
+  });
+});
+
+describe('the local split index stays current (#836)', () => {
+  const SPLIT_FIELDS = ['parent_transaction_id', 'children_transaction_ids'];
+
+  test('neither cache patch builder ever writes a split field', () => {
+    // The index is only rebuilt on a new row array; a patch that wrote these
+    // fields in place would leave it stale. Every input key, every type.
+    for (const type of ['REGULAR', 'INCOME', 'INTERNAL_TRANSFER'] as const) {
+      // The server row both builders now read (#864) carries a parentId too:
+      // even that must not reach the local patch.
+      const server = { type, categoryId: CAT_A, tags: [{ id: 't' }], parentId: PARENT_ID };
+      const edit = buildEditCachePatch(
+        {
+          transaction_id: PLAIN_ID,
+          name: 'n',
+          category_id: CAT_A,
+          note: 'x',
+          tag_ids: [],
+          reviewed: true,
+          date: '2025-03-12',
+          amount: 1,
+          type,
+        },
+        server
+      );
+      const bulk = buildBulkEditCachePatch(
+        { category_id: CAT_A, reviewed: true, type, add_tag_ids: ['t'], remove_tag_ids: ['u'] },
+        server
+      );
+      for (const patch of [edit, bulk]) {
+        expect(Object.keys(patch).filter((k) => SPLIT_FIELDS.includes(k))).toEqual([]);
+      }
+    }
+  });
+
+  test('the first row naming a parent decides a split child', async () => {
+    // Two local rows for one id, the first without a parent: the parent named
+    // by the second still makes the id a split child (cache-only mode).
+    const client = createMockGraphQLClient(MUTATIONS);
+    const db = new CopilotDatabase('/nonexistent');
+    (db as any).dbPath = '/fake';
+    (db as any)._transactions = [
+      { transaction_id: CHILD_2, amount: 40 },
+      { transaction_id: CHILD_2, parent_transaction_id: PARENT_ID, amount: 40 },
+    ];
+    // split_transaction validates its children's categories first (#846).
+    (db as any)._userCategories = [
+      { category_id: CAT_A, name: 'A' },
+      { category_id: CAT_B, name: 'B' },
+    ];
+    db._markLoadedForTesting();
+    const tools = new CopilotMoneyTools(db, client);
+    await expect(
+      tools.splitTransaction({
+        transaction_id: CHILD_2,
+        ...routing,
+        splits: [
+          { name: 'A', date: '2025-03-12', amount: 10, category_id: CAT_A },
+          { name: 'B', date: '2025-03-12', amount: 30, category_id: CAT_B },
+        ],
+      })
+    ).rejects.toThrow(/is a split child/);
   });
 });

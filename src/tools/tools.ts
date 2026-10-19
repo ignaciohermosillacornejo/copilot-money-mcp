@@ -689,7 +689,7 @@ function serverCategory(
  *    (serverCategory), else the request-derived value, which includes the
  *    INCOME/INTERNAL_TRANSFER clear (verified live).
  */
-function buildEditCachePatch(
+export function buildEditCachePatch(
   edit: TransactionEdit,
   server: { type?: unknown; categoryId?: unknown; tags?: unknown }
 ): Partial<Transaction> {
@@ -723,6 +723,43 @@ function buildEditCachePatch(
   // filters read them (#864 review).
   if (edit.type !== undefined) {
     Object.assign(patch, typeFlagsPatch(knownTransactionType(server.type) ?? edit.type));
+  }
+  return patch;
+}
+
+/**
+ * The local cache patch for one row a bulk edit landed: the request's fields
+ * the local model mirrors, with category, the type-derived flags and the tag
+ * list taken from the row the SERVER returned (add/remove is applied by the
+ * server, not recomputed here). Exported so a test can pin that neither
+ * patch builder ever writes a split field (#836 index).
+ */
+export function buildBulkEditCachePatch(
+  edit: {
+    category_id?: string;
+    reviewed?: boolean;
+    type?: TransactionType;
+    add_tag_ids?: string[];
+    remove_tag_ids?: string[];
+  },
+  tx: { type?: unknown; categoryId?: unknown; tags?: unknown }
+): Partial<Transaction> {
+  const patch: Partial<Transaction> = {};
+  if (edit.category_id !== undefined) patch.category_id = edit.category_id;
+  if (edit.reviewed !== undefined) patch.user_reviewed = edit.reviewed;
+  if (edit.type === 'INCOME' || edit.type === 'INTERNAL_TRANSFER') patch.category_id = '';
+  // Category and the type-derived flags from the server's row (#864 review).
+  if (edit.category_id !== undefined || edit.type !== undefined) {
+    const category = serverCategory(tx, patch.category_id);
+    if (category !== undefined) patch.category_id = category;
+  }
+  if (edit.type !== undefined) {
+    Object.assign(patch, typeFlagsPatch(knownTransactionType(tx.type) ?? edit.type));
+  }
+  if (edit.add_tag_ids !== undefined || edit.remove_tag_ids !== undefined) {
+    // No tags array (drift): leave the cached list alone.
+    const tags = returnedTagIds(tx.tags);
+    if (tags !== undefined) patch.tag_ids = tags;
   }
   return patch;
 }
@@ -842,7 +879,6 @@ export class CopilotMoneyTools {
     const keys = splitParentRefusedKeys(edit);
     if (keys.length === 0) return;
     const evidence = await this.splitParentEvidence(edit.transaction_id, loadWindow);
-    CopilotMoneyTools.refuseUncheckedSplitTarget(evidence, edit.transaction_id, label);
     // mutation-guard: a split parent's amount, date and type are not edited
     if (evidence.isParent) {
       throw new Error(
@@ -854,6 +890,7 @@ export class CopilotMoneyTools {
           `can still be changed.`
       );
     }
+    CopilotMoneyTools.refuseUncheckedSplitTarget(evidence, edit.transaction_id, label);
   }
 
   /**
@@ -4493,9 +4530,12 @@ export class CopilotMoneyTools {
   /**
    * One-pass index of a row array's split facts, cached per array (#836
    * review): a batch checking N ids against tens of thousands of local rows
-   * would otherwise scan them N times on the event loop. Rebuilt when the
-   * array changes length (an in-place delete); field patches never touch the
-   * parent/children fields it reads.
+   * would otherwise scan them N times on the event loop. What keeps it
+   * current: the local cache REPLACES its row array on every reload,
+   * injection and delete (a new WeakMap key), and no field patch writes the
+   * parent/children fields it reads (pinned by a test over both patch
+   * builders). The length check is a second line, not the mechanism.
+   * `parentOf` holds split children only: an absent id reads as no parent.
    */
   private readonly splitRowIndexes = new WeakMap<
     readonly Transaction[],
@@ -4513,9 +4553,9 @@ export class CopilotMoneyTools {
     for (const t of rows) {
       if (t.parent_transaction_id) parents.add(t.parent_transaction_id);
       if ((t.children_transaction_ids?.length ?? 0) > 0) parents.add(t.transaction_id);
-      // First row for an id wins, as the scan this replaces did.
-      if (!parentOf.has(t.transaction_id) || parentOf.get(t.transaction_id) === null) {
-        parentOf.set(t.transaction_id, t.parent_transaction_id || null);
+      // First row naming a parent wins, as the scan this replaces did.
+      if (t.parent_transaction_id && !parentOf.has(t.transaction_id)) {
+        parentOf.set(t.transaction_id, t.parent_transaction_id);
       }
     }
     const index = { length: rows.length, parents, parentOf };
@@ -4586,11 +4626,6 @@ export class CopilotMoneyTools {
     // Split parents (#836): whether the recurring then counts the parent's
     // amount as well as its children's is unverified. Refused before sending.
     const evidence = await this.splitParentEvidence(transaction_id);
-    CopilotMoneyTools.refuseUncheckedSplitTarget(
-      evidence,
-      transaction_id,
-      'add_transaction_to_recurring'
-    );
     // mutation-guard: a split parent is not linked to a recurring
     if (evidence.isParent) {
       throw new Error(
@@ -4600,6 +4635,11 @@ export class CopilotMoneyTools {
           `money twice. Link the child transactions instead.`
       );
     }
+    CopilotMoneyTools.refuseUncheckedSplitTarget(
+      evidence,
+      transaction_id,
+      'add_transaction_to_recurring'
+    );
 
     try {
       const tx = await gqlAddTransactionToRecurring(client, {
@@ -4786,11 +4826,6 @@ export class CopilotMoneyTools {
     // One window load serves this check and the parent resolution below.
     const loadWindow = this.sharedWindowLoad();
     const splitEvidence = await this.splitParentEvidence(transaction_id, loadWindow);
-    CopilotMoneyTools.refuseUncheckedSplitTarget(
-      splitEvidence,
-      transaction_id,
-      'split_transaction'
-    );
     // mutation-guard: a split parent is not split again
     if (splitEvidence.isParent) {
       throw new Error(
@@ -4809,6 +4844,12 @@ export class CopilotMoneyTools {
           `amount twice. Edit the child's amount and category instead.`
       );
     }
+    // Checked last, so a refusal from evidence already held names the reason.
+    CopilotMoneyTools.refuseUncheckedSplitTarget(
+      splitEvidence,
+      transaction_id,
+      'split_transaction'
+    );
 
     // Resolve the parent's CONTENT (amount for the sum check, name/date for
     // defaults) — live-first via the window cache / windowed fetch; local
@@ -5373,7 +5414,6 @@ export class CopilotMoneyTools {
     if (type !== undefined) {
       for (const entry of entries) {
         const evidence = await this.splitParentEvidence(entry.id, loadWindow);
-        CopilotMoneyTools.refuseUncheckedSplitTarget(evidence, entry.id, 'bulk_edit_transactions');
         // mutation-guard: bulk_edit_transactions does not retype a split parent
         if (evidence.isParent) {
           throw new Error(
@@ -5384,6 +5424,7 @@ export class CopilotMoneyTools {
               `reviewed state can still be bulk-edited.`
           );
         }
+        CopilotMoneyTools.refuseUncheckedSplitTarget(evidence, entry.id, 'bulk_edit_transactions');
       }
     }
 
@@ -5407,23 +5448,10 @@ export class CopilotMoneyTools {
       'bulk_edit_transactions',
       (updated) => {
         for (const tx of updated) {
-          const patch: Partial<Transaction> = {};
-          if (category_id !== undefined) patch.category_id = category_id;
-          if (reviewed !== undefined) patch.user_reviewed = reviewed;
-          if (type === 'INCOME' || type === 'INTERNAL_TRANSFER') patch.category_id = '';
-          // Category and the type-derived flags from the server's row (#864 review).
-          if (category_id !== undefined || type !== undefined) {
-            const category = serverCategory(tx, patch.category_id);
-            if (category !== undefined) patch.category_id = category;
-          }
-          if (type !== undefined) {
-            Object.assign(patch, typeFlagsPatch(knownTransactionType(tx.type) ?? type));
-          }
-          if (add_tag_ids !== undefined || remove_tag_ids !== undefined) {
-            // No tags array (drift): leave the cached list alone.
-            const tags = returnedTagIds(tx.tags);
-            if (tags !== undefined) patch.tag_ids = tags;
-          }
+          const patch = buildBulkEditCachePatch(
+            { category_id, reviewed, type, add_tag_ids, remove_tag_ids },
+            tx
+          );
           if (Object.keys(patch).length > 0) {
             this.db.patchCachedTransaction(tx.id, patch);
           }
@@ -5860,6 +5888,22 @@ export class CopilotMoneyTools {
       }
       txnMeta = resolved;
     }
+
+    // Split parents (#836): a recurring seeded from one would count the
+    // parent's amount on top of its children's, and derive its expected
+    // amount from it; what the server does is unverified. Refused before
+    // sending, as add_transaction_to_recurring refuses it.
+    const evidence = await this.splitParentEvidence(args.transaction_id);
+    // mutation-guard: a recurring is not seeded from a split parent
+    if (evidence.isParent) {
+      throw new Error(
+        `create_recurring: transaction ${args.transaction_id} is a split parent, and a ` +
+          `recurring is not created from it. What Copilot does when a split parent seeds a ` +
+          `recurring is unverified: the series could count the parent's amount on top of its ` +
+          `children's, the same money twice. Create it from one of the child transactions.`
+      );
+    }
+    CopilotMoneyTools.refuseUncheckedSplitTarget(evidence, args.transaction_id, 'create_recurring');
 
     try {
       const result = await gqlCreateRecurring(client, {
