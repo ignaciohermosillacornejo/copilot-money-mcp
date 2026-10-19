@@ -151,10 +151,16 @@ function getISOWeekKey(dateStr: string): string {
 
 const SAFE_ID_RE = /^[A-Za-z0-9_-]+$/;
 
-/** Validate that a document ID contains only safe characters. */
+/**
+ * Validate that a document ID is a string of safe characters. The `string`
+ * parameter type is not enough: MCP arguments arrive unvalidated and are
+ * cast, and RegExp.test coerces, so 42 or null would pass as "42" / "null"
+ * and reach the wire (#836 review).
+ */
 function validateDocId(id: string, label: string): void {
-  if (!SAFE_ID_RE.test(id)) {
-    throw new Error(`Invalid ${label} format: ${id}`);
+  // mutation-guard: a non-string id is never coerced into a valid one
+  if (typeof id !== 'string' || !SAFE_ID_RE.test(id)) {
+    throw new Error(`Invalid ${label} format: ${String(id)}`);
   }
 }
 
@@ -3729,7 +3735,7 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * The pure, synchronous half of {@link validateEditFields}: every field
+   * The pure, synchronous half of an edit's field validation: every field
    * check that needs no lookup. Both update tools run it before the split
    * check's window load (#836 review), so an input no retry can make valid
    * neither pays the load nor is reported as a failed one. `label` prefixes
@@ -3800,12 +3806,12 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Per-field validation shared by update_transaction and update_transactions:
-   * the pure checks, then the category and tag lookups (the only I/O). Runs
-   * BEFORE any write so a rejected edit mutates nothing.
+   * The I/O half of an edit's field validation, shared by update_transaction
+   * and update_transactions: an unknown category_id or tag_id. Everything
+   * else, the id shapes included, already passed checkEditArgs before the
+   * window load. Runs BEFORE any write so a rejected edit mutates nothing.
    */
-  private async validateEditFields(edit: TransactionEdit, label: string): Promise<void> {
-    CopilotMoneyTools.validateEditFieldShapes(edit, label);
+  private async validateEditReferences(edit: TransactionEdit): Promise<void> {
     if ('category_id' in edit && edit.category_id !== undefined) {
       await this.validateCategoryId(edit.category_id);
     }
@@ -4005,8 +4011,9 @@ export class CopilotMoneyTools {
     const resolvedAccountId = route!.accountId;
     const resolvedItemId = route!.itemId;
 
-    // Per-field validation (runs BEFORE any write for atomicity).
-    await this.validateEditFields(args, 'update_transaction');
+    // The category and tag lookups (runs BEFORE any write for atomicity);
+    // every other field check ran in checkEditArgs, before the window load.
+    await this.validateEditReferences(args);
 
     try {
       const result = await editTransaction(client, {
@@ -4059,11 +4066,14 @@ export class CopilotMoneyTools {
    * difference.
    *
    * Ordering guarantees, in the order they run:
-   *  1. Structural checks, routing-id formats included (no I/O).
+   *  1. Every check that needs no I/O (checkEditArgs): structure, the id
+   *     formats, the routing pair, and every field's shape (name, type and
+   *     its category contradiction, reviewed, date, amount).
    *  2. The split-parent check on amount/date/type edits (#836).
    *  3. Account/item resolution for the WHOLE batch. Steps 2 and 3 share one
    *     windowed fetch, not one per row.
-   *  4. Per-field validation for every edit.
+   *  4. The category and tag lookups for every edit (validateEditReferences),
+   *     the only field checks left.
    *  5. Only then does the first write leave the process.
    * So a malformed edit at index 40 fails the call without edit 0 having been
    * written. This is the batch-level extension of the singular tool's
@@ -4153,9 +4163,10 @@ export class CopilotMoneyTools {
       loadWindow
     );
 
-    // --- Phase 4: per-field validation for every edit, still before any write ---
-    for (const [i, edit] of edits.entries()) {
-      await this.validateEditFields(edit, label(i));
+    // --- Phase 4: the category and tag lookups for every edit, still before
+    // any write (every other field check ran in Phase 1) ---
+    for (const edit of edits) {
+      await this.validateEditReferences(edit);
     }
 
     // --- Phase 5: write ---
@@ -5545,7 +5556,10 @@ export class CopilotMoneyTools {
     // fetch on a batch we were always going to reject. Counted off the raw args
     // because that is the caller's ask — resolution only fills in routing, it
     // never changes how many rows are targeted.
-    const requestedCount = (args.rows ?? args.transaction_ids)?.length ?? 0;
+    // rows-wins, like the block below and resolveBulkTargets; only an array
+    // has a count (a string's length is not one).
+    const targetList = args.rows !== undefined ? args.rows : args.transaction_ids;
+    const requestedCount = Array.isArray(targetList) ? targetList.length : 0;
     if (requestedCount > MAX_BULK_EDIT_TARGETS) {
       throw new Error(
         `bulk_edit_transactions: ${String(requestedCount)} targets exceeds the maximum of ` +
@@ -5570,17 +5584,11 @@ export class CopilotMoneyTools {
     for (const id of requestedIds) validateDocId(id, 'transaction_id');
     if (Array.isArray(args.rows)) {
       for (const row of args.rows) {
-        // A present routing id must be a string: validateDocId would coerce
-        // 42 to "42" and pass it (#836 review). A missing one is left to
-        // resolveBulkTargets, which reports the rows shape.
-        for (const key of ['account_id', 'item_id'] as const) {
-          const value: unknown = row?.[key];
-          if (value === undefined) continue;
-          if (typeof value !== 'string') {
-            throw new Error(`Invalid ${key} format: expected a string id, got ${typeof value}`);
-          }
-          validateDocId(value, key);
-        }
+        // A present routing id must be well-formed (validateDocId rejects a
+        // non-string too). A missing one is left to resolveBulkTargets, which
+        // reports the rows shape.
+        if (row?.account_id !== undefined) validateDocId(row.account_id, 'account_id');
+        if (row?.item_id !== undefined) validateDocId(row.item_id, 'item_id');
       }
     }
 

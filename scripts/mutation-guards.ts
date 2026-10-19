@@ -515,6 +515,27 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/tools/live-write-coherence.test.ts',
   },
   {
+    name: 'a non-string id is never coerced into a valid one',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'MCP arguments arrive unvalidated and are cast to their declared types, and RegExp.test ' +
+      'coerces its argument, so without a typeof check a number or null passes validateDocId ' +
+      'as "42" / "null" and is sent to Copilot as an id: a routing id the server may resolve ' +
+      'differently, or a transaction id no one meant. Every id validateDocId checks must be a ' +
+      'string (#836 review).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '  // mutation-guard: a non-string id is never coerced into a valid one\n' +
+        "  if (typeof id !== 'string' || !SAFE_ID_RE.test(id)) {",
+      with:
+        '  // mutation-guard: a non-string id is never coerced into a valid one\n' +
+        '  if (!SAFE_ID_RE.test(id)) {',
+    },
+    expectFailingTests: ['a numeric transaction_id is rejected, nothing sent'],
+    expectFails: 'tests/unit/split-target-refusal.test.ts',
+  },
+  {
     name: 'delete_transaction refuses a split parent',
     file: 'src/tools/tools.ts',
     invariant:

@@ -522,7 +522,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // the series tip, after #858 round 6), so 81_700
 // (~0.8%), still deliberately tight.
 //
-// IN FORCE (SCHEMA_TOTAL_BUDGET): 84_280, raised from 81_700 by #860, measured 83_447 (~1.0%). #860
+// Raised 81_700 -> 84_280 by #860, measured 83_447 (~1.0%). #860
 // is read-side description text across nine schemas (#825/#848): holdings vs
 // balance and hidden accounts on the holdings, accounts and investment-balance
 // tools; intraday repricing; the individually-excluded gap and recurring names
@@ -548,8 +548,17 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // add_transaction_to_recurring, split_transaction, bulk_edit_transactions and
 // create_recurring, each naming the refusal when the check cannot run).
 // Re-measured after rebasing onto main with #857 merged: main 83_760, 84_074
-// with #861 on top (~0.2% headroom), within the 84_280 in force.
-const SCHEMA_TOTAL_BUDGET = 84_280;
+// with #861 on top (~0.2% headroom), within the 84_280 then in force.
+//
+// IN FORCE (SCHEMA_TOTAL_BUDGET): 84_920, raised from 84_280 by #862, measured
+// 84_086 (~1.0%). Main measured 84_074 after #861; #862 adds +12 with
+// split_transaction's fail-closed clause reworded to parse ("a known split
+// parent or child is not split, nor one that cannot be checked", #861 round 9).
+// The raise is the policy, not this PR's text: #864, #857 and #861 each spent
+// headroom under the 84_280 #860 set, which left ~0.2%, below the ~1% this
+// ceiling is kept at, and too little for the next description fix to land
+// without a raise of its own.
+const SCHEMA_TOTAL_BUDGET = 84_920;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

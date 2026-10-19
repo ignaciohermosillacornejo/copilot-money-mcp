@@ -469,6 +469,10 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
       { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
       { transaction_id: CHILD_1, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 10 },
     ];
+    // Load-bearing: a loaded, fresh cache makes the split check take the
+    // readable branch, the one that used to copy. Without this marker the
+    // decode fails on '/fake', the check takes the peek-only branch, and the
+    // test would pass on the unfixed code too.
     db._markLoadedForTesting();
     const copies = spyOn(db, 'getAllTransactions');
     const tools = new CopilotMoneyTools(db, client);
@@ -699,9 +703,28 @@ describe('batch tools: input errors before I/O, and error precedence (#836)', ()
         rows: [{ transaction_id: PLAIN_ID, account_id: 42 as never, item_id: ITEM_ID }],
         type: 'REGULAR',
       })
-    ).rejects.toThrow(/Invalid account_id format: expected a string id, got number/);
+    ).rejects.toThrow(/Invalid account_id format: 42/);
     expect(sent('Transactions')).toHaveLength(0);
     expect(sent('BulkEditTransactions')).toHaveLength(0);
+  });
+
+  test('bulk_edit_transactions: the target cap counts only an array, rows-wins', async () => {
+    // A 600-character string is not 600 targets, and a null rows is not
+    // replaced by transaction_ids for the count.
+    const { tools, sent } = setup();
+    for (const args of [
+      { rows: 'x'.repeat(600) as never, type: 'INCOME' as const },
+      {
+        rows: null as never,
+        transaction_ids: Array.from({ length: 501 }, () => PLAIN_ID),
+        type: 'INCOME' as const,
+      },
+    ]) {
+      await expect(tools.bulkEditTransactions(args)).rejects.toThrow(
+        /rows must be a non-empty array/
+      );
+    }
+    expect(sent('Transactions')).toHaveLength(0);
   });
 
   test('bulk_edit_transactions: a malformed rows wins over transaction_ids (rows-wins)', async () => {
@@ -720,7 +743,7 @@ describe('batch tools: input errors before I/O, and error precedence (#836)', ()
 
 describe('update tools: every pure check runs before the window load (#836)', () => {
   const BAD: Array<[string, Record<string, unknown>, RegExp]> = [
-    ['a non-calendar date', { amount: 1, date: '2026-02-30' }, /date/i],
+    ['a non-calendar date', { amount: 1, date: '2026-02-30' }, /is not a real calendar date/],
     ['a bogus type', { type: 'BOGUS' }, /type must be one of/],
     ['an infinite amount', { amount: Infinity }, /amount must be a finite number/],
     ['half a routing pair', { amount: 1, account_id: ACCOUNT_ID }, /must be passed together/],
@@ -753,4 +776,42 @@ describe('update tools: every pure check runs before the window load (#836)', ()
       expect(sent('Transactions')).toHaveLength(0);
     }
   );
+});
+
+describe('a non-string id is rejected, not coerced (#836)', () => {
+  // validateDocId used to let RegExp.test coerce 42 to "42"; MCP arguments
+  // arrive unvalidated, so the type annotation alone never stopped it.
+  test('review_transactions: numeric routing ids in rows are rejected, nothing sent', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.reviewTransactions({
+        rows: [{ transaction_id: PLAIN_ID, account_id: 42 as never, item_id: 7 as never }],
+      })
+    ).rejects.toThrow(/Invalid account_id format: 42/);
+    expect(sent('BulkEditTransactions')).toHaveLength(0);
+    expect(sent('Transactions')).toHaveLength(0);
+  });
+
+  test('update_transaction: numeric routing ids are rejected, nothing sent', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.updateTransaction({
+        transaction_id: PLAIN_ID,
+        account_id: 42 as never,
+        item_id: 7 as never,
+        amount: 1,
+      })
+    ).rejects.toThrow(/Invalid account_id format: 42/);
+    expect(sent('EditTransaction')).toHaveLength(0);
+    expect(sent('Transactions')).toHaveLength(0);
+  });
+
+  test('update_transaction: a numeric transaction_id is rejected, nothing sent', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.updateTransaction({ transaction_id: 42 as never, ...routing, amount: 1 })
+    ).rejects.toThrow(/Invalid transaction_id format: 42/);
+    expect(sent('EditTransaction')).toHaveLength(0);
+    expect(sent('Transactions')).toHaveLength(0);
+  });
 });

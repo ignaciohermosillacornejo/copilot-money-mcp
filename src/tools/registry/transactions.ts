@@ -376,7 +376,7 @@ export const splitTransactionTool = defineTool({
       'reference it via parent_transaction_id); it reappears as an ordinary row once its ' +
       'children are all deleted. A split cannot be undone: there is no unsplit, ' +
       'and deleting the parent corrupts the balance (delete_transaction refuses it) — delete ' +
-      'the children to remove the split; a known split parent or child (or when unchecked) is not split. Splits ' +
+      'the children to remove the split; a known split parent or child is not split, nor one that cannot be checked. Splits ' +
       'accept no per-split tags/notes/reviewed — set those via update_transaction on each ' +
       'child afterwards.',
     inputSchema: {
