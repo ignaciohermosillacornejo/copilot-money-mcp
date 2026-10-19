@@ -3933,10 +3933,12 @@ export class CopilotMoneyTools {
    * difference.
    *
    * Ordering guarantees, in the order they run:
-   *  1. Structural checks + account/item resolution for the WHOLE batch (one
-   *     windowed fetch, not one per row).
-   *  2. Per-field validation for every edit.
-   *  3. Only then does the first write leave the process.
+   *  1. Structural checks, routing-id formats included (no I/O).
+   *  2. The split-parent check on amount/date/type edits (#836).
+   *  3. Account/item resolution for the WHOLE batch. Steps 2 and 3 share one
+   *     windowed fetch, not one per row.
+   *  4. Per-field validation for every edit.
+   *  5. Only then does the first write leave the process.
    * So a malformed edit at index 40 fails the call without edit 0 having been
    * written. This is the batch-level extension of the singular tool's
    * "validation runs BEFORE any write for atomicity" property, and it is the
@@ -3991,6 +3993,15 @@ export class CopilotMoneyTools {
         throw new Error(`${label(i)}: transaction_id is required`);
       }
       validateDocId(edit.transaction_id, 'transaction_id');
+      // Routing-id format here too, before Phase 2's window load (#836).
+      try {
+        if (edit.account_id !== undefined) validateDocId(edit.account_id, 'account_id');
+        if (edit.item_id !== undefined) validateDocId(edit.item_id, 'item_id');
+      } catch (e) {
+        throw new Error(`${label(i)}: ${e instanceof Error ? e.message : String(e)}`, {
+          cause: e,
+        });
+      }
       if (mutableEditKeys(edit).length === 0) {
         throw new Error(`${label(i)} requires at least one field to update`);
       }
@@ -5417,6 +5428,23 @@ export class CopilotMoneyTools {
       );
     }
 
+    // Pure format checks before any I/O: a malformed id must not pay the window
+    // load. A non-array target list falls through to resolveBulkTargets, which
+    // reports it.
+    const requested = Array.isArray(args.rows)
+      ? args.rows.map((r) => r?.transaction_id)
+      : args.transaction_ids;
+    const requestedIds = (Array.isArray(requested) ? requested : []).filter(
+      (id): id is string => typeof id === 'string'
+    );
+    for (const id of requestedIds) validateDocId(id, 'transaction_id');
+    if (Array.isArray(args.rows)) {
+      for (const row of args.rows) {
+        if (typeof row?.account_id === 'string') validateDocId(row.account_id, 'account_id');
+        if (typeof row?.item_id === 'string') validateDocId(row.item_id, 'item_id');
+      }
+    }
+
     const loadWindow = this.sharedWindowLoad();
     // Split parents (#836): a type change on one has the same unverified
     // balance effect as update_transaction's, so it is refused the same way,
@@ -5425,26 +5453,19 @@ export class CopilotMoneyTools {
     // resolution. Checked on the requested ids BEFORE resolution, which would
     // otherwise answer "not found" for a parent the window omits.
     if (type !== undefined) {
-      const requested =
-        (args.rows !== undefined
-          ? args.rows.map((r) => r?.transaction_id)
-          : args.transaction_ids) ?? [];
-      for (const id of Array.isArray(requested) ? requested : []) {
-        if (typeof id !== 'string') continue; // resolveBulkTargets reports it
-        validateDocId(id, 'transaction_id');
-        const entry = { id };
-        const evidence = await this.splitParentEvidence(entry.id, loadWindow);
+      for (const id of requestedIds) {
+        const evidence = await this.splitParentEvidence(id, loadWindow);
         // mutation-guard: bulk_edit_transactions does not retype a split parent
         if (evidence.isParent) {
           throw new Error(
-            `bulk_edit_transactions: transaction ${entry.id} is a split parent, and changing ` +
+            `bulk_edit_transactions: transaction ${id} is a split parent, and changing ` +
               `its type is refused. What Copilot does to the account balance when a split ` +
               `parent's type changes is unverified, and it could move the balance twice. Drop ` +
               `it from the targets and change its children instead; its category, tags and ` +
               `reviewed state can still be bulk-edited.`
           );
         }
-        CopilotMoneyTools.refuseUncheckedSplitTarget(evidence, entry.id, 'bulk_edit_transactions');
+        CopilotMoneyTools.refuseUncheckedSplitTarget(evidence, id, 'bulk_edit_transactions');
       }
     }
 
@@ -5926,8 +5947,7 @@ export class CopilotMoneyTools {
 
     let txnMeta: { accountId: string; itemId: string };
     if (args.account_id !== undefined && args.item_id !== undefined) {
-      validateDocId(args.account_id, 'account_id');
-      validateDocId(args.item_id, 'item_id');
+      // Formats were checked before the window load, above.
       txnMeta = { accountId: args.account_id, itemId: args.item_id };
     } else {
       // Resolve routing ids the same way update_transaction does — live-first

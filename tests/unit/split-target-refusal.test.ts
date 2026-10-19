@@ -630,3 +630,40 @@ describe('the batch tools check splits before routing resolution too (#836)', ()
     expect(sent('Transactions')).toHaveLength(0);
   });
 });
+
+describe('batch tools: input errors before I/O, and error precedence (#836)', () => {
+  test('bulk_edit_transactions with a non-array rows reports the structural error', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.bulkEditTransactions({ rows: null as never, type: 'INCOME' })
+    ).rejects.toThrow(/rows must be a non-empty array/);
+    expect(sent('Transactions')).toHaveLength(0);
+  });
+
+  test('malformed ids in the batch tools are rejected before any window load', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.bulkEditTransactions({ transaction_ids: [PLAIN_ID, 'bad id!'], type: 'INCOME' })
+    ).rejects.toThrow(/Invalid transaction_id/);
+    await expect(
+      tools.updateTransactions({
+        edits: [{ transaction_id: PLAIN_ID, account_id: 'bad id!', item_id: ITEM_ID, amount: 1 }],
+      })
+    ).rejects.toThrow(/edits\[0\]: Invalid account_id/);
+    expect(sent('Transactions')).toHaveLength(0);
+  });
+
+  test('a split parent named twice gets the split refusal, before the duplicate check', async () => {
+    const { tools } = setup();
+    await expect(
+      tools.bulkEditTransactions({ transaction_ids: [PARENT_ID, PARENT_ID], type: 'INCOME' })
+    ).rejects.toThrow(/is a split parent/);
+  });
+
+  test('an invalid type on a split parent gets the split refusal first', async () => {
+    const { tools } = setup();
+    await expect(
+      tools.updateTransaction({ transaction_id: PARENT_ID, ...routing, type: 'BOGUS' as never })
+    ).rejects.toThrow(/is a split parent/);
+  });
+});
