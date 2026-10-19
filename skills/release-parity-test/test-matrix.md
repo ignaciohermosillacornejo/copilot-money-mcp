@@ -68,7 +68,7 @@ need it.
 | P-04 | [P1] Manual account baseline | Ask the user which account is the test account; `get_accounts_live { account_type: "other", fields: ["id","itemId","name","balance","isManual"] }`; list its transactions over all dates | `isManual: true`. Record id, item id, balance, and every existing transaction id (DO NOT TOUCH) | 2026-10-18 PASS |
 | P-05 | [P1] No API drift before comparing | `bun run smoke` then `bun run smoke:cache` from the server's checkout | All PASS. A drift verdict ends the run: otherwise drift shows up as dozens of parity FAILs | 2026-10-18 PASS |
 | P-06 | [P1] Cache side and live side run the same code | `git rev-parse HEAD` where `cache-call.ts` runs equals the server checkout's HEAD; `bun install` done | Equal | 2026-10-18 PASS |
-| P-07 | [P2] The cache is fresh | `cache-call.ts getCacheInfo` newest transaction date vs live's newest | Within 1 day; otherwise every cache comparison this run is SKIP (stale), not PASS or FAIL. This compares transaction dates only: an account balance can lag on its own, so cache balances are checked per row in ACC-01 | 2026-10-18 PASS (transactions); one account balance lagged, see ACC-01 |
+| P-07 | [P2] The cache is fresh | `cache-call.ts getCacheInfo` newest transaction date vs live's newest | Within 1 day; otherwise every cache comparison this run is SKIP (stale), not PASS or FAIL. This compares transaction dates only: an account balance can lag on its own, so cache balances are checked per row in ACC-01 | 2026-10-18 PASS (finding: one account balance lagged, see ACC-01) |
 | P-08 | [P1] No leftovers from an earlier run | `get_transactions_live { start_date: "2015-01-01", end_date: <today + 400d>, query: "ZZ MCP", exclude_transfers: false, exclude_excluded: false }` across all accounts; `get_tags_live`, `get_categories_live`, `get_recurring_live` by name | Zero hits, or each hit listed and settled with the user before writes | 2026-10-18 PASS |
 | P-09 | [P2] Record the clock | Local time, UTC offset, UTC date; list which months are live tier (age ≤ 14 days by UTC date, `src/utils/date.ts`) | The chosen cold month is at least two months back, so it cannot change tier during the run | not run |
 
@@ -76,7 +76,7 @@ need it.
 
 | ID | Case | Compare | Expected | Last run |
 |---|---|---|---|---|
-| ACC-01 | [P1] Every visible account | live `get_accounts_live` default vs cache `getAccounts` default vs web Accounts page | Same id set; names identical; balances equal to the cent except intraday-repriced brokerage rows (ACC-03) | 2026-10-18 PASS (live, web; one brokerage row per ACC-03); cache SKIP (one checking balance lagged the desktop sync, P-07) |
+| ACC-01 | [P1] Every visible account | live `get_accounts_live` default vs cache `getAccounts` default vs web Accounts page | Same id set; names identical; balances equal to the cent except intraday-repriced brokerage rows (ACC-03) | 2026-10-18 PASS (live, web) (finding: one brokerage row differs per ACC-03); cache SKIP (one checking balance lagged the desktop sync, P-07) |
 | ACC-02 | [P1] Hidden accounts | live default vs `include_hidden: true`; cache `user_hidden`; web "Hidden" badge | For every id, live `isUserHidden` equals cache `user_hidden` and the web badge; default row counts equal across modes | 2026-10-18 PASS |
 | ACC-03 | [P1] Brokerage repriced intraday | live per-account `balance` vs web account figure; `get_investment_balance_live.current` vs web Investments "Live balance estimate" | Investment total equals web exactly; per-account `balance` is last-synced and may differ (documented in the description) | 2026-10-18 PASS on total; description gap #825 not re-checked |
 | ACC-04 | [P2] No nickname, `name` ≠ `official_name` | cache vs live `name` vs web | All three show `official_name` (#791) | 2026-10-14 PASS |
@@ -102,7 +102,7 @@ need it.
 | ID | Case | Compare | Expected | Last run |
 |---|---|---|---|---|
 | INV-01 | [P2] Position detail | live `get_holdings_live` row vs web holding detail (shares, value, average cost, total return) | Equal; return % may differ in the last rounding digit | 2026-10-14 PASS (rounding note #825) |
-| INV-02 | [P1] Holdings sum vs investment balance | Sum `institution_value` vs `get_investment_balance_live.current` | Equal unless a position includes unvested stock-plan shares; then documented | 2026-10-18 differs: unvested shares, Copilot's data (#825) |
+| INV-02 | [P1] Holdings sum vs investment balance | Sum `institution_value` vs `get_investment_balance_live.current` | Equal unless a position includes unvested stock-plan shares; then documented | 2026-10-18 PASS (finding: unvested shares, Copilot's data, #825) |
 | INV-03 | [P2] Cache vs live holdings | cache `getHoldings` vs live | Same securities and quantities; prices differ by cache age; cash ticker `CUR:USD` vs `USD` (#825) | 2026-10-14 PASS with known ticker diff |
 | INV-04 | [P1] Hidden account that holds something | Hide an investment account in the web (user approval required each run); `refresh_cache`; holdings default vs `include_hidden: true`; investment balance vs web; unhide | Holdings exclude it by default and include it on request; investment balance (live and web) still includes it | 2026-10-18 PASS; description gap #825 not re-checked |
 | INV-05 | [P2] Allocation | `get_investment_allocation_live` vs web allocation; sum vs `get_investment_balance_live.current`; then scoped to one account and unscoped again | Percentages sum to 100 ± 0.1; amounts equal the web; the second unscoped call equals the first, not the scoped one | not run |
@@ -173,6 +173,7 @@ need it.
 | REC-04 | [P2] Late evening local time | Run when the UTC date is a day ahead of local: cache "due" grouping and `get_upcoming_recurrings_live` vs web | Same (cache mixes UTC today with the local month, `tools.ts` ~2140) | not run |
 | REC-05 | [P1] Real recurrings don't adopt test rows | After every W create, read `recurring_id` on each test row not linked on purpose; re-run REC-01 | All null; upcoming bills unchanged | 2026-10-18 PASS |
 | REC-06 | [P3] Recurring category names in a fresh session | `get_recurring_live` as the first call after reconnect, before any categories read; then again after a categories read | Null at first (documented), then populated | not run |
+| REC-07 | [P2] Upcoming horizon | Early in a month (day 1–5): `get_upcoming_recurrings_live` vs web Recurrings page, every unpaid recurring due by month end | Either the tool returns every one due this month, or its description states the horizon (one read on 2026-10-18 suggested about 14 days, #844) | not run |
 
 ## GOAL — Goals (cache-only tools)
 
@@ -260,7 +261,7 @@ read once first so it is cached. Check `_cache_hit` and `_cache_oldest_fetched_a
 | ERR-08 | [P2] Unknown `period` | Rejected, listing valid periods | 2026-10-18 FAIL #825 |
 | ERR-09 | [P1] Well-formed but nonexistent `category_id` on `create_transaction` / a `split_transaction` child | Rejected before the write; expected FAIL by code (only the shape is checked, and the server accepts unknown ids) | 2026-10-18 FAIL #846 |
 | ERR-10 | [P2] Nonexistent `recurring_id` on `create_transaction` | Rejected before the write | not run |
-| ERR-11 | [P1] `delete_transaction` / `split_transaction` on a split parent | Rejected client-side (#822) | 2026-10-18 PASS for delete while children exist; re-split not run (#836) |
+| ERR-11 | [P1] `delete_transaction` / `split_transaction` on a split parent | Rejected client-side (#822) | 2026-10-18 PASS (delete while children exist); re-split SKIP (not run, #836) |
 | ERR-12 | [P1] `delete_transaction` with the right id and a wrong `item_id` | An error, not `success: true, deleted: false`; the row is still there | 2026-10-18 PASS |
 | ERR-13 | [P1] `bulk_edit_transactions` on [a live test row, an already-deleted test row] | Error names the skipped id and the count that landed; the web confirms the first row changed | 2026-10-18 PASS |
 | ERR-14 | [P2] `update_transaction` on a deleted id | Plain "not found", not "run `bun run smoke`" | not run |

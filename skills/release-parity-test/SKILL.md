@@ -129,7 +129,8 @@ recorded FAIL is never replaced by a SKIP (test-matrix.md, How to extend).
   databases. The helper prints the database it read to stderr; record it.
 
   Before each cache comparison, confirm with `getCacheInfo` that the desktop app
-  has synced (P-07). Wait at most 15 minutes, then mark the case SKIP (stale).
+  has synced (P-07). Wait at most 15 minutes, then mark that case's cache comparison
+  SKIP (stale); its live and web comparisons still count.
 - **Web**: Accounts, Investments (and a holding's detail panel),
   Transactions, Categories, Recurrings, Goals, Dashboard, for the same range.
 
