@@ -25,6 +25,7 @@ import {
 } from './field-selection.js';
 import type { LiveCopilotDatabase } from '../core/live-database.js';
 import type { SplitParentStore } from '../core/persistence/split-parent-store.js';
+import type { SnapshotCache } from '../core/cache/snapshot-cache.js';
 import type { GraphQLClient } from '../core/graphql/client.js';
 import { GraphQLError } from '../core/graphql/client.js';
 import {
@@ -3206,6 +3207,44 @@ export class CopilotMoneyTools {
     };
   }
 
+  /** Minimum gap between two miss-driven refetches of one reference list. */
+  static readonly REFERENCE_REFETCH_MIN_MS = 30_000;
+  private readonly lastReferenceRefetch = new Map<string, number>();
+
+  /**
+   * A live reference list (categories, tags) that holds every id in `ids`
+   * when the server does (#846 review). The list is cached for a day, so an
+   * id created in the app since would be refused; when a CACHED list misses
+   * an id it is refetched once before the caller rejects. Two limits keep a
+   * caller retrying an id that does not exist from paying a fetch per try:
+   * at most one such refetch per list per REFERENCE_REFETCH_MIN_MS, and a
+   * refetch that fails returns the rows already held, so the caller still
+   * reports the id as not found (the cache, dropped for the refetch, simply
+   * loads again on its next read).
+   */
+  private async referenceRows<T extends { id: string }>(
+    key: string,
+    cache: SnapshotCache<T>,
+    load: () => Promise<T[]>,
+    ids: readonly string[]
+  ): Promise<T[]> {
+    const first = await cache.read(load);
+    const missing = ids.some((id) => !first.rows.some((r) => r.id === id));
+    if (!missing || !first.hit) return first.rows;
+    const now = Date.now();
+    const last = this.lastReferenceRefetch.get(key);
+    if (last !== undefined && now - last < CopilotMoneyTools.REFERENCE_REFETCH_MIN_MS) {
+      return first.rows;
+    }
+    this.lastReferenceRefetch.set(key, now);
+    cache.invalidate();
+    try {
+      return (await cache.read(load)).rows;
+    } catch {
+      return first.rows;
+    }
+  }
+
   /**
    * Validate a category id against the authoritative source — the live
    * categories cache (fetch-on-cold, existing TTLs) in live mode; the local
@@ -3220,22 +3259,21 @@ export class CopilotMoneyTools {
    * only guard against a row pointing at no category.
    *
    * A miss on a cached list (1-day TTL) refetches once before rejecting, so a
-   * category created in the app since the list was cached is not refused.
+   * category created in the app since the list was cached is not refused (see
+   * referenceRows).
    */
   private async validateCategoryId(categoryId: string): Promise<void> {
     const liveDb = this.liveDb;
     if (liveDb) {
-      const cache = liveDb.getCategoriesCache();
-      const load = async () => {
-        const rollovers = await liveDb.resolveRolloversFlag();
-        return fetchCategories(liveDb.getClient(), { rollovers });
-      };
-      const first = await cache.read(load);
-      let rows = first.rows;
-      if (!rows.find((c) => c.id === categoryId) && first.hit) {
-        cache.invalidate();
-        rows = (await cache.read(load)).rows;
-      }
+      const rows = await this.referenceRows(
+        'categories',
+        liveDb.getCategoriesCache(),
+        async () => {
+          const rollovers = await liveDb.resolveRolloversFlag();
+          return fetchCategories(liveDb.getClient(), { rollovers });
+        },
+        [categoryId]
+      );
       if (!rows.find((c) => c.id === categoryId)) {
         throw new Error(`Category not found: ${categoryId}`);
       }
@@ -3252,7 +3290,12 @@ export class CopilotMoneyTools {
     if (tagIds.length === 0) return;
     const liveDb = this.liveDb;
     if (liveDb) {
-      const { rows } = await liveDb.getTagsCache().read(() => fetchTags(liveDb.getClient()));
+      const rows = await this.referenceRows(
+        'tags',
+        liveDb.getTagsCache(),
+        () => fetchTags(liveDb.getClient()),
+        tagIds
+      );
       for (const tagId of tagIds) {
         if (!rows.find((t) => t.id === tagId)) {
           throw new Error(`Tag not found: ${tagId}`);
@@ -3788,18 +3831,20 @@ export class CopilotMoneyTools {
       throw new Error(`type must be one of: ${TRANSACTION_TYPES.join(', ')}. Got: ${type}`);
     }
 
+    // Shape checks first: they are local, the existence checks below may fetch.
+    for (const tagId of args.tag_ids ?? []) {
+      validateDocId(tagId, 'tag_id');
+    }
+    if (args.recurring_id !== undefined) {
+      validateDocId(args.recurring_id, 'recurring_id');
+    }
+
     // Reference validation (runs BEFORE any write for atomicity). Copilot
     // stores an unknown category id verbatim (#846), so this is the only guard.
     // mutation-guard: create_transaction validates its category id
     await this.validateCategoryId(category_id);
     if (args.tag_ids !== undefined) {
-      for (const tagId of args.tag_ids) {
-        validateDocId(tagId, 'tag_id');
-      }
       await this.validateTagIds(args.tag_ids);
-    }
-    if (args.recurring_id !== undefined) {
-      validateDocId(args.recurring_id, 'recurring_id');
     }
 
     const input: CreateTransactionInput = {
@@ -5074,8 +5119,12 @@ export class CopilotMoneyTools {
     }
     // A budget on a category that does not exist is a write to nothing the app
     // can show; same single check as every other category reference (#846).
+    // Clearing (amount 0) is exempt, so a budget left on a category deleted in
+    // the app can still be cleared.
     validateDocId(args.category_id, 'category_id');
-    await this.validateCategoryId(args.category_id);
+    if (parseFloat(args.amount) !== 0) {
+      await this.validateCategoryId(args.category_id);
+    }
 
     try {
       const result = await gqlSetBudget(client, {

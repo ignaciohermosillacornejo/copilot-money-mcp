@@ -20,7 +20,7 @@
  * cannot pass by failing for some other reason.
  */
 
-import { describe, test, expect, afterAll } from 'bun:test';
+import { describe, test, expect, afterAll, afterEach, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -99,12 +99,17 @@ function setup() {
   return { call, mutationsSent };
 }
 
-/** Write tools whose input schema has a property `key` at any depth. */
-function writeToolsTaking(key: string): string[] {
+/**
+ * Write tools whose input schema has, at any depth, a property named `key` —
+ * or, for a RegExp, any property whose name matches it, so `start_date` or
+ * `budget_month` on a future write tool joins the date tables too.
+ */
+function writeToolsTaking(key: string | RegExp): string[] {
+  const matches = (name: string) => (typeof key === 'string' ? name === key : key.test(name));
   const has = (schema: unknown): boolean => {
     if (!schema || typeof schema !== 'object') return false;
     const s = schema as { properties?: Record<string, unknown>; items?: unknown };
-    if (s.properties && key in s.properties) return true;
+    if (s.properties && Object.keys(s.properties).some(matches)) return true;
     return Object.values(s.properties ?? {}).some(has) || has(s.items);
   };
   return WRITE_TOOL_DEFS.filter((def) => has(def.schema.inputSchema))
@@ -191,18 +196,48 @@ describe('category_id is validated on every write that stores one (#846)', () =>
       expect(mutationsSent().length).toBeGreaterThan(0);
     }
   );
+
+  test('set_budget: clearing (amount 0) skips the check, so a deleted category can be cleared', async () => {
+    const { call, mutationsSent } = setup();
+    await expect(call('set_budget', { category_id: CAT_UNKNOWN, amount: '0' })).rejects.toThrow(
+      /mutation reached the server/
+    );
+    expect(mutationsSent()).toEqual(['EditBudget']);
+  });
 });
 
-test('a category created since the list was cached is found by one refetch', async () => {
-  // The categories list is cached for a day; a miss on a cached list refetches
-  // once before rejecting, so a category made in the app meanwhile is accepted.
-  const known = [CAT_KNOWN];
-  let categoryFetches = 0;
+// ── reference lists cached for a day ─────────────────────────────────────────
+//
+// The categories and tags lists are cached for a day. A miss on a cached list
+// refetches once before rejecting, so an id created in the app meanwhile is
+// accepted; a retried unknown id pays at most one refetch per list per
+// REFERENCE_REFETCH_MIN_MS; a refetch that fails still reports "not found".
+
+afterEach(() => {
+  (Date.now as unknown as { mockRestore?: () => void }).mockRestore?.();
+});
+
+const TAG_KNOWN = 'Tg1hJ4kL7zX0cV3bN6mQ';
+
+/** A live setup whose Categories / Tags responses are read from mutable lists. */
+function referenceSetup() {
+  const categories = [CAT_KNOWN];
+  const tags = [TAG_KNOWN];
+  const fetches = { categories: 0, tags: 0 };
+  const failNext = { categories: false };
   const client = createMockGraphQLClient({
     ...liveCategoryMocks([]),
     Categories: () => {
-      categoryFetches += 1;
-      return liveCategoryMocks(known).Categories;
+      fetches.categories += 1;
+      if (failNext.categories) {
+        failNext.categories = false;
+        return new Error('synthetic network failure');
+      }
+      return liveCategoryMocks(categories).Categories;
+    },
+    Tags: () => {
+      fetches.tags += 1;
+      return { tags: tags.map((id) => ({ id, name: `Tag ${id}`, colorName: 'BLUE1' })) };
     },
     EditTransaction: new Error('synthetic: mutation reached the server'),
   });
@@ -217,22 +252,66 @@ test('a category created since the list was cached is found by one refetch', asy
     }),
   });
   const tools = new CopilotMoneyTools(db, client, liveDb);
-  const edit = (category_id: string) =>
-    tools.updateTransaction({ ...routing, transaction_id: TX_ID, category_id });
+  const edit = (fields: { category_id?: string; tag_ids?: string[] }) =>
+    tools.updateTransaction({ ...routing, transaction_id: TX_ID, ...fields });
+  const edits = () => client._calls.filter((c) => c.op === 'EditTransaction').length;
+  return { categories, tags, fetches, failNext, edit, edits };
+}
 
-  await expect(edit(CAT_KNOWN)).rejects.toThrow(/mutation reached/);
-  expect(categoryFetches).toBe(1);
+describe('reference lists: a miss on a cached list refetches once (#846)', () => {
+  test('a category created since the list was cached is accepted after one refetch', async () => {
+    const r = referenceSetup();
+    await expect(r.edit({ category_id: CAT_KNOWN })).rejects.toThrow(/mutation reached/);
+    expect(r.fetches.categories).toBe(1);
 
-  known.push(CAT_UNKNOWN); // created in the app after the list was cached
-  await expect(edit(CAT_UNKNOWN)).rejects.toThrow(/mutation reached/);
-  expect(categoryFetches).toBe(2);
+    r.categories.push(CAT_UNKNOWN); // created in the app after the list was cached
+    await expect(r.edit({ category_id: CAT_UNKNOWN })).rejects.toThrow(/mutation reached/);
+    expect(r.fetches.categories).toBe(2);
+  });
 
-  // Still unknown after its refetch: rejected, one more fetch, nothing sent.
-  const ghost = 'Op3aS6dF9gH2jK5lZ8xC';
-  const editsBefore = client._calls.filter((c) => c.op === 'EditTransaction').length;
-  await expect(edit(ghost)).rejects.toThrow(`Category not found: ${ghost}`);
-  expect(categoryFetches).toBe(3);
-  expect(client._calls.filter((c) => c.op === 'EditTransaction').length).toBe(editsBefore);
+  test('a tag created since the list was cached is accepted after one refetch', async () => {
+    const r = referenceSetup();
+    await expect(r.edit({ tag_ids: [TAG_KNOWN] })).rejects.toThrow(/mutation reached/);
+    expect(r.fetches.tags).toBe(1);
+
+    const newTag = 'Tn8mQ1wE4rT7yU0iO3pA';
+    r.tags.push(newTag);
+    await expect(r.edit({ tag_ids: [TAG_KNOWN, newTag] })).rejects.toThrow(/mutation reached/);
+    expect(r.fetches.tags).toBe(2);
+  });
+
+  test('a retried unknown id pays one refetch per REFERENCE_REFETCH_MIN_MS', async () => {
+    const r = referenceSetup();
+    const start = Date.now();
+    const clock = spyOn(Date, 'now').mockReturnValue(start);
+    const ghost = 'Op3aS6dF9gH2jK5lZ8xC';
+
+    await expect(r.edit({ category_id: ghost })).rejects.toThrow(`Category not found: ${ghost}`);
+    expect(r.fetches.categories).toBe(1); // a cold list: the load itself is fresh
+
+    await expect(r.edit({ category_id: ghost })).rejects.toThrow(`Category not found: ${ghost}`);
+    expect(r.fetches.categories).toBe(2); // cached list missed: one refetch
+
+    for (let i = 0; i < 3; i++) {
+      await expect(r.edit({ category_id: ghost })).rejects.toThrow('Category not found');
+    }
+    expect(r.fetches.categories).toBe(2); // throttled
+
+    clock.mockReturnValue(start + CopilotMoneyTools.REFERENCE_REFETCH_MIN_MS);
+    await expect(r.edit({ category_id: ghost })).rejects.toThrow('Category not found');
+    expect(r.fetches.categories).toBe(3);
+    expect(r.edits()).toBe(0);
+  });
+
+  test('a refetch that fails still reports the id as not found', async () => {
+    const r = referenceSetup();
+    await expect(r.edit({ category_id: CAT_KNOWN })).rejects.toThrow(/mutation reached/);
+    const ghost = 'Op3aS6dF9gH2jK5lZ8xC';
+    r.failNext.categories = true;
+    await expect(r.edit({ category_id: ghost })).rejects.toThrow(`Category not found: ${ghost}`);
+    expect(r.fetches.categories).toBe(2);
+    expect(r.edits()).toBe(1);
+  });
 });
 
 // ── dates ───────────────────────────────────────────────────────────────────
@@ -271,8 +350,8 @@ const MONTH_CASES: Record<
 
 describe('write dates must be real calendar dates (#825)', () => {
   test('every write tool taking a date or month has a case', () => {
-    expect(Object.keys(DATE_CASES).sort()).toEqual(writeToolsTaking('date'));
-    expect(Object.keys(MONTH_CASES).sort()).toEqual(writeToolsTaking('month'));
+    expect(Object.keys(DATE_CASES).sort()).toEqual(writeToolsTaking(/(^|_)date$/));
+    expect(Object.keys(MONTH_CASES).sort()).toEqual(writeToolsTaking(/(^|_)month$/));
   });
 
   test.each(Object.keys(DATE_CASES))(

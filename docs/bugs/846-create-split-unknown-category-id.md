@@ -4,7 +4,7 @@ title: create_transaction and split_transaction stored a nonexistent category id
 class: referential-integrity-gap
 status: fixed
 detected: live-probe # v3.0 release parity re-run (2026-10-18), row ERR-09: create_transaction with a made-up category id, then a live read
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/855
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/846
 date: 2026-10-18
 ---
@@ -48,9 +48,11 @@ itself the bug's shape: the fixtures could not have told an unknown id from a kn
   category id: `create_transaction`, each `split_transaction` child (once per distinct
   id), and `set_budget`, joining `update_transaction(s)`, `bulk_edit_transactions` and
   `update_recurring`. It is the one check; no tool has its own.
-- **Downstream:** a miss on a cached categories list (1-day TTL) now refetches once
-  before rejecting, so a category created in the app since the list was cached is not
-  refused by the wider check.
+- **Downstream:** a miss on a cached categories or tags list (1-day TTL) now refetches
+  once before rejecting, so an id created in the app since the list was cached is not
+  refused by the wider check. A retried unknown id pays at most one refetch per list per
+  30 s, and a failed refetch still reports "not found". `set_budget` with amount 0 skips
+  the check, so a budget on a category deleted in the app can still be cleared.
 - **Same PR, same class of "the server's error was the only check":** every write date
   (`create_transaction`, `update_transaction(s)`, split children) must be a real calendar
   date, and `set_budget`'s month must be 01–12 (#825). `2026-02-30` used to reach the
