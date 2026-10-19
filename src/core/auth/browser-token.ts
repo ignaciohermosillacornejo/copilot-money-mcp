@@ -478,12 +478,14 @@ interface ProfileMatch {
    */
   pick: string;
   /**
-   * The profile's absolute directory (Firefox). Used when two matches share a
-   * `pick` — the same directory name in both listing dirs of one root — so no
-   * `--browser-profile` value tells them apart; `--browser-data-dir` at the
-   * path does, since it accepts a single Firefox profile.
+   * The profile's absolute directory. Only Firefox can produce two matches
+   * that share a `pick` (the same directory name in both listing dirs of one
+   * root, or two out-of-root `profiles.ini` entries with one `Name=`); no
+   * `--browser-profile` value tells those apart, so the refusal names them by
+   * this path, for `--browser-data-dir`, which accepts a single Firefox
+   * profile. Required so that path is always there to print.
    */
-  path?: string;
+  path: string;
 }
 
 /**
@@ -508,17 +510,25 @@ function ambiguousProfileMessage(
     const choices = sortProfileNames(unique.map((m) => `"${m.pick}"`));
     offers.push(`Pick exactly one with --browser-profile ${joinList(choices, 'or')}.`);
   }
-  if (shared.length > 0) {
-    const paths = sortProfileNames(shared.map((m) => `"${m.path ?? m.pick}"`));
+  // One clause per shared value: two different shared values ARE told apart
+  // by name, only the matches within one group are not.
+  const groups = new Map<string, string[]>();
+  for (const m of shared) groups.set(m.pick, [...(groups.get(m.pick) ?? []), `"${m.path}"`]);
+  for (const paths of groups.values()) {
+    offers.push(`No --browser-profile value tells ${joinList(sortProfileNames(paths))} apart.`);
+  }
+  if (groups.size > 0) {
+    // Dropping --browser-profile matters: a name: value never matches a
+    // single profile directory, so keeping it would be refused at startup.
     offers.push(
-      `No --browser-profile value tells ${joinList(paths)} apart; select one of them by ` +
-        'pointing --browser-data-dir at its path.'
+      'Select one of those by dropping --browser-profile and pointing --browser-data-dir at ' +
+        'its path.'
     );
   }
   // Matches that share a value would read identically ("directory "a1.work"
   // and directory "a1.work""), so those carry their path.
   const described = matches.map((m) =>
-    count.get(m.pick) !== 1 && m.path ? `${m.how} at "${m.path}"` : m.how
+    count.get(m.pick) !== 1 ? `${m.how} at "${m.path}"` : m.how
   );
   return (
     `--browser-profile "${profile}" is ambiguous in ${browser}${root ? ` (${root})` : ''}: ` +
@@ -666,7 +676,11 @@ function selectChromiumProfile(
           : [];
     // Every match here is a listed directory, so `dir:` can always reach it.
     for (const dir of sortProfileNames(byDir)) {
-      matches.set(dir, { how: `directory "${dir}"`, pick: `dir:${dir}` });
+      matches.set(dir, {
+        how: `directory "${dir}"`,
+        pick: `dir:${dir}`,
+        path: join(userDataDir, dir),
+      });
     }
     const byDisplayName =
       namespace === 'dir'
@@ -676,7 +690,11 @@ function selectChromiumProfile(
             .map(([dir]) => dir);
     for (const dir of sortProfileNames(byDisplayName)) {
       if (!matches.has(dir)) {
-        matches.set(dir, { how: `the display name of directory "${dir}"`, pick: `dir:${dir}` });
+        matches.set(dir, {
+          how: `the display name of directory "${dir}"`,
+          pick: `dir:${dir}`,
+          path: join(userDataDir, dir),
+        });
       }
     }
     if (unavailable && namespace !== 'dir' && matches.size === 0) {
@@ -954,7 +972,7 @@ export function resolveBrowserSelection(
       namespace === 'any'
         ? `available: ${listing}`
         : `${namespace === 'name' ? `${names} are not listed; ` : ''}` +
-          `directories, usable with dir:, are: ${listing}`;
+          `profile directories include: ${listing}`;
     report.problem =
       `No ${browser} profile named "${profile}" was found ` +
       `(${listed}; checked: ${roots.join(', ')}).`;

@@ -827,13 +827,13 @@ describe('ambiguous --browser-profile', () => {
     writeLocalState(chrome, { Default: { name: 'Person A' } });
     const result = await mac({ browser: 'chrome', profile: 'name:Nobody' });
     expect(result.selection?.problem).toContain(
-      'display names are not listed; directories, usable with dir:, are: Default;'
+      'display names are not listed; profile directories include: Default;'
     );
     expect(result.selection?.problem).not.toContain('Person A');
 
     // dir: misses list the same thing, in the same terms.
     const dirMiss = await mac({ browser: 'chrome', profile: 'dir:Nobody' });
-    expect(dirMiss.selection?.problem).toContain('(directories, usable with dir:, are: Default;');
+    expect(dirMiss.selection?.problem).toContain('(profile directories include: Default;');
   });
 
   test('a Firefox name: miss speaks of profiles.ini names, not display names', async () => {
@@ -845,7 +845,7 @@ describe('ambiguous --browser-profile', () => {
     );
     const result = await mac({ browser: 'firefox', profile: 'name:Nope' });
     expect(result.selection?.problem).toContain(
-      'profiles.ini names are not listed; directories, usable with dir:, are: abc.default-release;'
+      'profiles.ini names are not listed; profile directories include: abc.default-release;'
     );
     expect(result.selection?.problem).not.toContain('display names');
     expect(result.selection?.problem).not.toContain('Someone');
@@ -1379,9 +1379,16 @@ describe('--browser-data-dir', () => {
       const problem = result.selection?.problem ?? '';
       // "dir:a1.work" would itself be ambiguous, so it must not be offered.
       expect(problem).not.toContain('"dir:a1.work"');
+      // Order-independent: the pair's order is a collation detail.
+      expect([
+        `No --browser-profile value tells "${flat}" and "${nested}" apart.`,
+        `No --browser-profile value tells "${nested}" and "${flat}" apart.`,
+      ]).toContain(
+        /No --browser-profile value tells "[^"]+" and "[^"]+" apart\./.exec(problem)?.[0]
+      );
       expect(problem).toContain(
-        `No --browser-profile value tells "${flat}" and "${nested}" apart; select one of them ` +
-          'by pointing --browser-data-dir at its path.'
+        'Select one of those by dropping --browser-profile and pointing --browser-data-dir at ' +
+          'its path.'
       );
       expect(problem).toContain(`directory "a1.work" at "${flat}"`);
       // And the offered remedy works for each.
@@ -1392,6 +1399,52 @@ describe('--browser-data-dir', () => {
         const one = await linux({ browser: 'firefox', dataDir: path });
         expect(one.candidates.map((c) => c.token)).toEqual([fakeToken(tag)]);
       }
+    });
+
+    test('Firefox: two out-of-root profiles.ini entries sharing a Name= are offered by path, without --browser-profile', async () => {
+      const root = join(home, 'ff-ini');
+      mkdirSync(root, { recursive: true });
+      const one = join(home, 'elsewhere-one/p1.one');
+      const two = join(home, 'elsewhere-two/p2.two');
+      plantFirefox(join(home, 'elsewhere-one'), 'p1.one', fakeToken('one'));
+      plantFirefox(join(home, 'elsewhere-two'), 'p2.two', fakeToken('two'));
+      writeFileSync(
+        join(root, 'profiles.ini'),
+        `[Profile0]\nName=Work\nIsRelative=0\nPath=${one}\n\n` +
+          `[Profile1]\nName=Work\nIsRelative=0\nPath=${two}\n`
+      );
+
+      const result = await linux({ browser: 'firefox', profile: 'work', dataDir: root });
+      expect(result.selection?.selectionError).toBe('ambiguous');
+      const problem = result.selection?.problem ?? '';
+      // Both would be "name:Work", which is itself ambiguous: offered by path instead.
+      expect(problem).not.toContain('"name:Work"');
+      expect(problem).toContain('dropping --browser-profile');
+      // Following the advice literally — no --browser-profile — selects each one.
+      for (const [path, tag] of [
+        [one, 'one'],
+        [two, 'two'],
+      ] as const) {
+        expect(problem).toContain(`"${path}"`);
+        const selected = parse({ browserFlag: 'firefox', dataDirFlag: path });
+        const found = await linux(selected!);
+        expect(found.candidates.map((c) => c.token)).toEqual([fakeToken(tag)]);
+      }
+      // Keeping a name: profile with a single-profile dir is what dropping avoids.
+      expect(() =>
+        parse({ browserFlag: 'firefox', profileFlag: 'name:Work', dataDirFlag: one })
+      ).toThrow('does not match --browser-profile');
+    });
+
+    test('two separate shared values get one clause each', async () => {
+      const root = join(home, 'ff-two-groups');
+      for (const dir of ['a1.work', 'b2.work']) {
+        plantFirefox(root, dir, fakeToken(`flat-${dir}`));
+        plantFirefox(join(root, 'Profiles'), dir, fakeToken(`nested-${dir}`));
+      }
+      const result = await linux({ browser: 'firefox', profile: 'work', dataDir: root });
+      const clauses = (result.selection?.problem ?? '').match(/No --browser-profile value tells/g);
+      expect(clauses).toHaveLength(2);
     });
 
     test('Safari: a data dir reaching extraction finds nothing and says why', async () => {
