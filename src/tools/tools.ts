@@ -628,10 +628,9 @@ function buildEditInput(edit: TransactionEdit): EditTransactionInput {
  * in-memory cache so a subsequent read returns the new value without needing
  * refresh_database + re-decode.
  *
- * `type` itself isn't mirrored: the local Transaction model stores Plaid's
- * `transaction_type`/`plaid_transaction_type`, not Copilot's
- * REGULAR/INCOME/INTERNAL_TRANSFER classification, so there's no field to
- * patch. Only its side-effect is patchable — INCOME/INTERNAL_TRANSFER clears
+ * `type` has one local counterpart: `internal_transfer`, which the decoder
+ * derives from Copilot's type (the model's `transaction_type` is Plaid's), so
+ * it is patched. The other effect patched is INCOME/INTERNAL_TRANSFER clearing
  * the category server-side (verified live), so mirror that so a follow-up read
  * doesn't show a stale category.
  */
@@ -647,6 +646,9 @@ function buildEditCachePatch(edit: TransactionEdit): Partial<Transaction> {
   if (edit.type === 'INCOME' || edit.type === 'INTERNAL_TRANSFER') {
     patch.category_id = '';
   }
+  // The local model's one counterpart of Copilot's type: the decoder derives
+  // internal_transfer from it, and get_transactions filters on it (#864 review).
+  if (edit.type !== undefined) patch.internal_transfer = edit.type === 'INTERNAL_TRANSFER';
   return patch;
 }
 
@@ -5036,9 +5038,8 @@ export class CopilotMoneyTools {
 
     const [first, ...rest] = entries;
     // Optimistic cache patch, per confirmed row, applied inside bulkEdit before
-    // any partial-batch error is thrown. `type` itself has no local
-    // counterpart (the cache stores Plaid's transaction_type, not Copilot's
-    // classification) — only its category-clearing side effect is patchable.
+    // any partial-batch error is thrown. `type` is mirrored through its one
+    // local counterpart, internal_transfer, and its category-clearing effect.
     // Tag add/remove is applied against the tag list the SERVER returned, not
     // recomputed locally, so the cache matches the authoritative result.
     const result = await this.bulkEdit(
@@ -5052,6 +5053,8 @@ export class CopilotMoneyTools {
           if (category_id !== undefined) patch.category_id = category_id;
           if (reviewed !== undefined) patch.user_reviewed = reviewed;
           if (type === 'INCOME' || type === 'INTERNAL_TRANSFER') patch.category_id = '';
+          // internal_transfer is the local counterpart of one type value.
+          if (type !== undefined) patch.internal_transfer = type === 'INTERNAL_TRANSFER';
           if (add_tag_ids !== undefined || remove_tag_ids !== undefined) {
             patch.tag_ids = tx.tags.map((t) => t.id);
           }

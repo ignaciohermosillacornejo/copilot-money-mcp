@@ -438,7 +438,7 @@ const CASES: Record<string, Case> = {
     },
     args: {
       edits: [
-        { ...routing, transaction_id: TX_BATCH_1, type: 'INCOME' as TransactionType },
+        { ...routing, transaction_id: TX_BATCH_1, type: 'INTERNAL_TRANSFER' as TransactionType },
         {
           ...routing,
           transaction_id: TX_BATCH_2,
@@ -450,7 +450,7 @@ const CASES: Record<string, Case> = {
       ],
     },
     verify: (rows) => {
-      expect(rows.get(TX_BATCH_1)).toMatchObject({ type: 'INCOME', category_id: null });
+      expect(rows.get(TX_BATCH_1)).toMatchObject({ type: 'INTERNAL_TRANSFER', category_id: null });
       expect(rows.get(TX_BATCH_2)).toMatchObject({
         category_id: CAT_NEW,
         user_reviewed: false,
@@ -607,6 +607,12 @@ describe('write → live-read coherence (#820, #821)', () => {
 // with the server's returned row (as the live read shows it) on every field
 // the local model mirrors — or, for a tool that removes the row from view, no
 // local row at all. Same derived key set as the tables above.
+//
+// Its reach is what the mocks model: a mock that only echoes the request can
+// catch a dropped field, not an unrequested server effect. When a server side
+// effect becomes known, add it to the case's mutation mock (as
+// add_transaction_to_recurring's category and the type change's cleared
+// category are) and this table then forces the local patch to mirror it.
 
 /** live read field → local (cache-model) field. */
 const MIRRORED_FIELDS: Record<string, string> = {
@@ -626,8 +632,8 @@ const MIRRORED_FIELDS: Record<string, string> = {
  * locally by design (the next refresh picks the row up), so it has neither.
  */
 const LOCAL_MIRROR: Record<string, { mirrored: string[]; removed: string[] }> = {
-  create_transaction: { mirrored: [], removed: [] },
-  split_transaction: { mirrored: [], removed: [TX_SPLIT_PARENT] },
+  create_transaction: { mirrored: [], removed: [TX_CREATED] },
+  split_transaction: { mirrored: [], removed: [TX_SPLIT_PARENT, TX_CHILD_1, TX_CHILD_2] },
   delete_transaction: { mirrored: [], removed: [TX_DELETE] },
   update_transaction: { mirrored: [TX_UPDATE], removed: [] },
   update_transactions: { mirrored: [TX_BATCH_1, TX_BATCH_2], removed: [] },
@@ -667,6 +673,14 @@ describe('the local cache agrees with the server after a write (#848)', () => {
             value: norm(server[liveKey]),
           });
         }
+        // Derived: internal_transfer is the local counterpart of the live type.
+        // A seeded local row may omit it (false); the patch must set it when a
+        // write changes the type.
+        expect({ id, field: 'internal_transfer', value: mine.internal_transfer === true }).toEqual({
+          id,
+          field: 'internal_transfer',
+          value: server.type === 'INTERNAL_TRANSFER',
+        });
       }
     }
   );

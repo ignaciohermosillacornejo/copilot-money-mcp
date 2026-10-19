@@ -1044,6 +1044,22 @@ describe('addTransactionToRecurring', () => {
     expect(result.transaction.category_id).toBeUndefined();
   });
 
+  test('the returned recurring id wins over the requested one', async () => {
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: {
+        addTransactionToRecurring: { transaction: { ...linkedTx, recurringId: 'rec-server' } },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.addTransactionToRecurring(validArgs);
+
+    const cached = (
+      (mockDb as any)._transactions as Array<{ transaction_id: string; recurring_id?: string }>
+    ).find((t) => t.transaction_id === 'tx1');
+    expect(cached?.recurring_id).toBe('rec-server');
+  });
+
   test("an empty returned category (Copilot's 'no category') is patched in", async () => {
     const client = createMockGraphQLClient({
       AddTransactionToRecurring: {
