@@ -38,10 +38,10 @@ export class SplitParentStore {
   private readonly uidProvider: () => string | null;
   /** Ids on disk per uid, read once per uid and kept current by record(). */
   private readonly loaded = new Map<string, Set<string>>();
-  private warnedLoad = false;
-  private warnedAppend = false;
-  // Per uid, as in TransactionMetaStore: a second login's torn file must
-  // still warn.
+  // Warn-once flags are per uid, as in TransactionMetaStore: a second
+  // login's unreadable, torn or unwritable file must still warn.
+  private readonly warnedLoadUids = new Set<string>();
+  private readonly warnedAppendUids = new Set<string>();
   private readonly warnedSkipUids = new Set<string>();
 
   constructor(opts: SplitParentStoreOptions) {
@@ -99,8 +99,8 @@ export class SplitParentStore {
         );
       }
     } catch (e) {
-      if (!this.warnedLoad) {
-        this.warnedLoad = true;
+      if (!this.warnedLoadUids.has(uid)) {
+        this.warnedLoadUids.add(uid);
         console.warn(
           `[copilot-money-mcp] persistent split-parent record unreadable (${(e as Error).message}) — continuing in-memory. File: ${file}`
         );
@@ -137,8 +137,8 @@ export class SplitParentStore {
       mkdirSync(this.baseDir, { recursive: true });
       appendFileSync(this.fileFor(uid), `${JSON.stringify({ i: id })}\n`);
     } catch (e) {
-      if (!this.warnedAppend) {
-        this.warnedAppend = true;
+      if (!this.warnedAppendUids.has(uid)) {
+        this.warnedAppendUids.add(uid);
         console.warn(
           `[copilot-money-mcp] persistent split-parent record append failed (${(e as Error).message}) — the id stays recorded in memory for this process only.`
         );

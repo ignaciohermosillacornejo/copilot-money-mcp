@@ -670,7 +670,7 @@ describe('split-parent evidence that survives a restart (#842)', () => {
   function age(db: CopilotDatabase): void {
     const past = Date.now() - 24 * 60 * 60 * 1000;
     (db as any)._cacheLoadedAt = past;
-    (db as any)._splitEvidenceAt = past;
+    (db as any)._splitEvidenceAttemptAt = past;
   }
 
   async function fixtureDb(): Promise<CopilotDatabase> {
@@ -823,27 +823,63 @@ describe('split-parent evidence that survives a restart (#842)', () => {
     expect(deletes(client).map((c) => (c.variables as { id: string }).id)).toEqual([PLAIN_ID]);
   });
 
-  test('past the TTL but within the re-read floor, a delete does not decode again', async () => {
-    // The evidence only accumulates, so it is re-read at most once per
-    // SPLIT_EVIDENCE_REREAD_MS even when the cache TTL (5 minutes by default,
-    // or 0) has long passed.
-    const db = await fixtureDb();
+  test('at a cache TTL of 0, a delete within a minute of the last decode does not decode again', async () => {
+    // TTL 0 makes the cache always stale; the re-read floor
+    // (splitEvidenceRereadMs: the TTL, at least a minute) still bounds the
+    // split check to one decode attempt per minute.
+    const prev = process.env.COPILOT_CACHE_TTL_MINUTES;
+    process.env.COPILOT_CACHE_TTL_MINUTES = '0';
+    try {
+      const db = await fixtureDb();
+      const client = createMockGraphQLClient({
+        ...WINDOW([inWindow(PLAIN_ID, 20)]),
+        DeleteTransaction: { deleteTransaction: true },
+      });
+      const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
+      await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+
+      let reloads = 0;
+      (db as any).loadAllCollections = () => {
+        reloads += 1;
+        return Promise.resolve();
+      };
+      await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+      expect(reloads).toBe(0);
+
+      // A minute on, the stale cache is re-read.
+      (db as any)._splitEvidenceAttemptAt = Date.now() - 61_000;
+      await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+      expect(reloads).toBe(1);
+      expect(deletes(client)).toHaveLength(3);
+    } finally {
+      if (prev === undefined) delete process.env.COPILOT_CACHE_TTL_MINUTES;
+      else process.env.COPILOT_CACHE_TTL_MINUTES = prev;
+    }
+  });
+
+  test('a failing decode is latched too: one attempt per re-read interval, not per delete', async () => {
     const client = createMockGraphQLClient({
       ...WINDOW([inWindow(PLAIN_ID, 20)]),
       DeleteTransaction: { deleteTransaction: true },
     });
-    const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
-    await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
-
-    let reloads = 0;
+    const db = new CopilotDatabase('/nonexistent');
+    (db as any).dbPath = '/fake';
+    let attempts = 0;
     (db as any).loadAllCollections = () => {
-      reloads += 1;
-      return Promise.resolve();
+      attempts += 1;
+      return Promise.reject(new Error('synthetic decode timeout'));
     };
-    (db as any)._cacheLoadedAt = Date.now() - 24 * 60 * 60 * 1000;
+    const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
+
     await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
-    expect(reloads).toBe(0);
-    expect(deletes(client)).toHaveLength(2);
+    await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+    expect(attempts).toBe(1);
+
+    // Past the interval (the 5-minute default TTL), it is tried again.
+    (db as any)._splitEvidenceAttemptAt = Date.now() - 6 * 60 * 1000;
+    await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+    expect(attempts).toBe(2);
+    expect(deletes(client)).toHaveLength(3);
   });
 
   test('a stale reload that throws still refuses what earlier decodes named', async () => {

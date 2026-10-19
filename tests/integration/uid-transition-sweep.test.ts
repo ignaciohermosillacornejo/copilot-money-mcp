@@ -185,3 +185,59 @@ test('mid-session uid transition drops the in-memory split-parent record (#842)'
     console.warn = origWarn;
   }
 });
+
+test('after a uid transition the next delete re-reads the local cache, even while it is fresh (#842)', async () => {
+  // forgetSplitParentIds empties the accumulated evidence; it must also make
+  // the next split check decode again, or a delete would answer from an
+  // empty set until the TTL. Here the transition is on an account whose
+  // local cache still holds a soft-deleted child naming PARENT_ID.
+  const exchangeCount = installTransitionFetch();
+  const PARENT_ID = 'Rt4yU9iO2pA7sD1fG6hK';
+  tempDbDir = mkdtempSync(join(tmpdir(), 'copilot-sweep-'));
+  await createTestDb(tempDbDir, [
+    {
+      collection: 'transactions',
+      id: 'Zx8cV3bN6mQ1wE4rT7yU',
+      fields: {
+        transaction_id: 'Zx8cV3bN6mQ1wE4rT7yU',
+        account_id: 'Vq3nR8kT2pX6wL9mZ4yB',
+        item_id: 'Hc7fJ1sD5gK8aQ3vN6tW',
+        amount: 60,
+        date: '2025-03-12',
+        name: 'Hardware Store',
+        parent_transaction_id: PARENT_ID,
+        user_deleted: true,
+      },
+    },
+  ]);
+  const extractor = mock((): Promise<TokenCandidates> =>
+    Promise.resolve({
+      candidates: [{ token: 'AMf-r', browser: 'Chrome', scoped: true }],
+      checked: ['Chrome'],
+    })
+  );
+  const client = new GraphQLClient(new FirebaseAuth(extractor));
+  const server = new CopilotMoneyServer(tempDbDir, undefined, true, true, client);
+  const db = (server as any).db;
+
+  const origWarn = console.warn;
+  console.warn = () => {};
+  try {
+    await server.handleCallTool('get_accounts_live', {});
+    expect((await db.getSplitParentIds()).has(PARENT_ID)).toBe(true);
+
+    await server.handleCallTool('get_transactions_live', { period: 'this_month' });
+    expect(exchangeCount()).toBe(2);
+    expect(db.peekSplitParentIds().has(PARENT_ID)).toBe(false);
+
+    const res = await server.handleCallTool('delete_transaction', {
+      transaction_id: PARENT_ID,
+      account_id: 'Vq3nR8kT2pX6wL9mZ4yB',
+      item_id: 'Hc7fJ1sD5gK8aQ3vN6tW',
+    });
+    expect(JSON.stringify(res)).toMatch(/split parent/);
+    expect(db.peekSplitParentIds().has(PARENT_ID)).toBe(true);
+  } finally {
+    console.warn = origWarn;
+  }
+});

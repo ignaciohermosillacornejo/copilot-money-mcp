@@ -536,10 +536,10 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'replace',
       find:
         '    // mutation-guard: split-parent evidence honours the cache TTL\n' +
-        '    if (!this._allCollectionsLoaded || this.splitEvidenceDue()) {',
+        '    return !this._allCollectionsLoaded || this.isCacheStale();',
       with:
         '    // mutation-guard: split-parent evidence honours the cache TTL\n' +
-        '    if (!this._allCollectionsLoaded) {',
+        '    return !this._allCollectionsLoaded;',
     },
     expectFailingTests: [
       'past the cache TTL a delete re-reads the local cache and sees a newly deleted child',
@@ -569,6 +569,26 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       'evidence only accumulates: a re-decode that no longer holds the children still refuses',
     ],
     expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
+  {
+    name: 'a login change re-reads split evidence',
+    file: 'src/core/database.ts',
+    invariant:
+      'A login change empties the accumulated split-parent ids. Unless it also marks the ' +
+      'loaded cache stale, the next delete answers from the empty set until the cache TTL ' +
+      "runs out, and a childless split parent named only by the cache's soft-deleted " +
+      'children is deleted (#842, #852 review round 3).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: a login change re-reads split evidence\n' +
+        '    this._cacheLoadedAt = null;',
+      with: '    // mutation-guard: a login change re-reads split evidence\n',
+    },
+    expectFailingTests: [
+      'after a uid transition the next delete re-reads the local cache, even while it is fresh',
+    ],
+    expectFails: 'tests/integration/uid-transition-sweep.test.ts',
   },
   {
     name: 'soft-deleted split children still name their parent',

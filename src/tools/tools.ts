@@ -3757,9 +3757,10 @@ export class CopilotMoneyTools {
    * is read, which runs the same batch decode every cache-mode read uses
    * when nothing has loaded the local cache yet, or when it is past the
    * cache TTL (5 minutes by default; COPILOT_CACHE_TTL_MINUTES, where 0
-   * means always stale) and the split evidence is over 30 minutes old
-   * (SPLIT_EVIDENCE_REREAD_MS). So a delete pays for at most one decode per
-   * 30 minutes even at a TTL of 0, and nothing in between. A decode usually
+   * means always stale), attempted at most once per TTL and at least a
+   * minute apart, failed attempts included (splitEvidenceRereadMs). So a
+   * delete pays for at most one decode attempt per TTL, or per minute at a
+   * TTL of 0, and nothing in between. A decode usually
    * takes seconds, but its worst case is the decode timeout
    * (getDecodeTimeoutMs, 90 s by default), which can outlast an MCP client's
    * request timeout. Nothing is sent until the check resolves, so a
@@ -3866,9 +3867,10 @@ export class CopilotMoneyTools {
    *      this is what still knows, after a restart, a parent whose children
    *      were deleted in the app or by an earlier process. The ids are the
    *      union over every decode this process ran, so they never shrink.
-   *      Decodes when nothing is loaded yet, or when the cache is past its
-   *      TTL (5 minutes by default, 0 = always) and the evidence is over 30
-   *      minutes old; worst case the decode timeout (see deleteTransaction).
+   *      Decodes when nothing is loaded yet or the cache is past its TTL (5
+   *      minutes by default, 0 = always), at most once per TTL and at least
+   *      a minute apart, failed attempts included; worst case the decode
+   *      timeout (see deleteTransaction).
    *      An unreadable or timed-out cache adds nothing for that call rather
    *      than blocking every delete; what earlier decodes named still
    *      refuses.

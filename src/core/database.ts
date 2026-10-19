@@ -222,18 +222,23 @@ function scrubPaths(text: string): string {
 const DEFAULT_CACHE_TTL_MINUTES = 5;
 
 /**
- * How often delete_transaction's split check may re-decode the local cache
- * for split-parent evidence (#842): at most once per this interval, and never
- * more often than the cache TTL allows. The evidence only accumulates (see
- * `_splitParentIds`), so a re-read can only add ids — what a slower re-read
- * costs is a split made AND un-split in the app within the interval, which a
- * delete in that window would not yet know. Independent of
- * COPILOT_CACHE_TTL_MINUTES on purpose: at the 5-minute default a cleanup
- * pass deleting a handful of split children over ten minutes would pay a
- * full decode two or three times, and with the TTL at 0 on every delete,
- * each with the decode timeout as its worst case.
+ * The shortest interval at which delete_transaction's split check may
+ * attempt to re-decode the local cache for split-parent evidence (#842). The
+ * check re-decodes when the cache is stale, but never more often than
+ * splitEvidenceRereadMs() — the cache TTL itself, or this minimum when the
+ * TTL is shorter. It matters only at COPILOT_CACHE_TTL_MINUTES=0 (always
+ * stale), where a cleanup pass would otherwise pay a full decode — worst case
+ * the decode timeout — on every delete. Not longer than the TTL on purpose: a
+ * split made and un-split in the app is invisible to the local evidence until
+ * the next re-read, which is #842's shape, so the evidence is kept as fresh as
+ * the rest of the cache contract (#852 review round 3).
  */
-export const SPLIT_EVIDENCE_REREAD_MS = 30 * 60 * 1000;
+export const MIN_SPLIT_EVIDENCE_REREAD_MS = 60_000;
+
+/** See MIN_SPLIT_EVIDENCE_REREAD_MS. */
+export function splitEvidenceRereadMs(): number {
+  return Math.max(getCacheTTLMs(), MIN_SPLIT_EVIDENCE_REREAD_MS);
+}
 
 /**
  * Get cache TTL in milliseconds.
@@ -311,8 +316,13 @@ export class CopilotDatabase {
    * change clears it (forgetSplitParentIds).
    */
   private readonly _splitParentIds = new Set<string>();
-  /** When a full decode last contributed to _splitParentIds; null = never. */
-  private _splitEvidenceAt: number | null = null;
+  /**
+   * When getSplitParentIds last attempted a decode, successful or not; null =
+   * never. Latches failures too, so a cache that keeps timing out costs one
+   * attempt per splitEvidenceRereadMs(), not one per delete. Scoped to the
+   * split-evidence path: reads that share loadAllCollections are unaffected.
+   */
+  private _splitEvidenceAttemptAt: number | null = null;
 
   // Promises for in-flight loads to prevent duplicate loading
   private _loadingTransactions: Promise<Transaction[]> | null = null;
@@ -545,6 +555,8 @@ export class CopilotDatabase {
     if (data.balanceHistory !== undefined) this._balanceHistory = data.balanceHistory;
     if (data.categoryNameMap !== undefined) this._categoryNameMap = data.categoryNameMap;
     if (data.accountNameMap !== undefined) this._accountNameMap = data.accountNameMap;
+    // Unions, like every decode: injecting [] does not reset the accumulated
+    // split-parent ids — only forgetSplitParentIds() does.
     for (const id of data.splitParentIds ?? []) this._splitParentIds.add(id);
     this._allCollectionsLoaded = true;
     this._cacheLoadedAt = Date.now();
@@ -746,22 +758,23 @@ export class CopilotDatabase {
    * soft-deleted split children included (#842) — the union over every
    * decode (see `_splitParentIds`), so it never shrinks.
    *
-   * Runs the batch decode every read uses when nothing is loaded yet, or when
-   * the loaded data is past the cache TTL (5 minutes by default,
-   * COPILOT_CACHE_TTL_MINUTES) AND the evidence is older than
-   * SPLIT_EVIDENCE_REREAD_MS (30 minutes) — so even at a TTL of 0 a delete
-   * pays for at most one decode per 30 minutes. Re-reading at all matters in
-   * live mode, where nothing else reloads the local cache: a split made and
-   * un-split in the app after the first decode reaches the cache later
-   * (#852 review). Any decode, a read's included, adds to the union.
+   * Runs the batch decode every read uses when the local cache is not loaded
+   * or is past its TTL (5 minutes by default, COPILOT_CACHE_TTL_MINUTES; 0
+   * means always stale) — but attempts it at most once per
+   * splitEvidenceRereadMs() (the TTL, at least a minute), failed attempts
+   * included. So a delete pays for at most one decode attempt per TTL, and
+   * per minute at a TTL of 0. Re-reading at all matters in live mode, where
+   * nothing else reloads the local cache: a split made and un-split in the
+   * app after the first decode reaches the cache later (#852 review). Any
+   * decode, a read's included, adds to the union.
    *
    * A decode that throws leaves the union as it was, but the caller sees the
    * throw; callers that must not be blocked by an unreadable cache catch it
    * and read peekSplitParentIds().
    */
   async getSplitParentIds(): Promise<ReadonlySet<string>> {
-    // mutation-guard: split-parent evidence honours the cache TTL
-    if (!this._allCollectionsLoaded || this.splitEvidenceDue()) {
+    if (this.splitEvidenceDue()) {
+      this._splitEvidenceAttemptAt = Date.now();
       await this.loadAllCollections();
     }
     return this._splitParentIds;
@@ -774,20 +787,25 @@ export class CopilotDatabase {
 
   /**
    * Forget the accumulated split-parent ids (#842). Only for a login change:
-   * the evidence belongs to the previous account's local cache.
+   * the evidence belongs to the previous account's local cache. Also marks
+   * the loaded cache stale and lifts the attempt latch, so the next split
+   * check re-decodes at once instead of answering from an empty set until the
+   * TTL (#852 review round 3). If the transition was a token anomaly on the
+   * same account, that re-decode simply restores the evidence.
    */
   forgetSplitParentIds(): void {
     this._splitParentIds.clear();
-    this._splitEvidenceAt = null;
+    this._splitEvidenceAttemptAt = null;
+    // mutation-guard: a login change re-reads split evidence
+    this._cacheLoadedAt = null;
   }
 
-  /** Whether getSplitParentIds should re-decode; see SPLIT_EVIDENCE_REREAD_MS. */
+  /** Whether getSplitParentIds should attempt a decode; see splitEvidenceRereadMs. */
   private splitEvidenceDue(): boolean {
-    if (!this.isCacheStale()) return false;
-    return (
-      this._splitEvidenceAt === null ||
-      Date.now() - this._splitEvidenceAt > SPLIT_EVIDENCE_REREAD_MS
-    );
+    const last = this._splitEvidenceAttemptAt;
+    if (last !== null && Date.now() - last < splitEvidenceRereadMs()) return false;
+    // mutation-guard: split-parent evidence honours the cache TTL
+    return !this._allCollectionsLoaded || this.isCacheStale();
   }
 
   /**
@@ -924,7 +942,6 @@ export class CopilotDatabase {
       this._balanceHistory = result.balanceHistory;
       // mutation-guard: local split evidence only accumulates
       for (const id of result.splitParentIds) this._splitParentIds.add(id);
-      this._splitEvidenceAt = Date.now();
 
       this._decodeStats = result.decodeStats;
 
