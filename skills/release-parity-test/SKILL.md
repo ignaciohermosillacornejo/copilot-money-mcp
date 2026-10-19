@@ -130,8 +130,8 @@ replaced by a SKIP (test-matrix.md, How to extend).
   databases. The helper prints the database it read to stderr; record it.
 
   Before each cache comparison, confirm with `getCacheInfo` that the desktop app
-  has synced (P-07). Wait at most 15 minutes, then mark that case's cache comparison
-  SKIP (stale); its live and web comparisons still count.
+  has synced (P-07). Wait at most 15 minutes, then mark that case's cache
+  comparison SKIP (stale); its live and web comparisons still count.
 - **Web**: Accounts, Investments (and a holding's detail panel),
   Transactions, Categories, Recurrings, Goals, Dashboard, for the same range.
 
@@ -198,7 +198,8 @@ out of the web app) runs last of all, because it ends the web session.
 1. Update **Last run** for every case you ran in `test-matrix.md` (date + PASS /
    FAIL #N / SKIP with reason; partial results per its How to extend). Rows you
    did not run keep their result; if it is anything but a plain PASS or
-   `not run`, set its `; not re-run <date>` stamp. Add rows for anything new you tested.
+   `not run`, set its `; not re-run <date>` stamp. Add rows for anything new
+   you tested.
 2. File each new defect as a GitHub issue: search first, use synthetic numbers,
    include reproduction steps, root cause if found, a fix direction, and a
    class-level detector (CONTRIBUTING.md "Bug Response Ritual"). Batch
