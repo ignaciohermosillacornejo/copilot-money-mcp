@@ -4,7 +4,7 @@ title: delete_transaction accepted a split parent once its children were deleted
 class: aggregation-double-count
 status: fixed
 detected: live-probe # v3.0 release parity test (2026-10-18), row W-23: split, delete both children, refresh_cache, fresh read of the month, then delete the parent
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/852
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/842
 date: 2026-10-18
 ---
