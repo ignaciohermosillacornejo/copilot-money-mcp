@@ -97,7 +97,8 @@ function stubLiveDb(overrides: {
     lookupTransactionMeta,
     getTransactions,
     upsertLiveTransaction: () => {},
-    invalidateLiveBalances: () => {},
+    invalidateTransactionDerivedSnapshots: () => {},
+    invalidateLiveMonthKeys: () => {},
     invalidateLiveTransactionMonths: () => {},
   } as unknown as LiveCopilotDatabase;
   return { liveDb, getTransactions };

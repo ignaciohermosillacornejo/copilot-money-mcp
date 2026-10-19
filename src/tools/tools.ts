@@ -707,9 +707,28 @@ export class CopilotMoneyTools {
    * tell the two apart without guessing, so it accepts the cost.
    */
   private invalidateAfterFailedWrite(ids: readonly string[], months: readonly string[] = []): void {
-    this.liveDb?.invalidateLiveTransactionMonths(ids);
-    if (months.length > 0) this.liveDb?.invalidateLiveMonthKeys(months);
-    this.liveDb?.invalidateLiveBalances();
+    try {
+      this.liveDb?.invalidateLiveTransactionMonths(ids);
+      if (months.length > 0) this.liveDb?.invalidateLiveMonthKeys(months);
+      this.liveDb?.invalidateTransactionDerivedSnapshots();
+    } catch {
+      // Never let cache housekeeping mask the write's own error, which the
+      // caller rethrows next and is the one that matters.
+    }
+  }
+
+  /**
+   * After a transaction write the server ACCEPTED: drop the live snapshots it
+   * can have made stale (balances, net worth, spend, upcoming recurrings;
+   * #825). The window cache is handled by each write's own write-through.
+   */
+  private afterTransactionWrite(): void {
+    this.liveDb?.invalidateTransactionDerivedSnapshots();
+  }
+
+  /** YYYY-MM of `date` when it is a string long enough to have one. */
+  private static monthOf(date: unknown): string[] {
+    return typeof date === 'string' && date.length >= 7 ? [date.slice(0, 7)] : [];
   }
 
   /** Whether this server has recorded `id` as a split parent (#822, #842). */
@@ -3620,7 +3639,7 @@ export class CopilotMoneyTools {
       // Live cache: patch from the server's returned row, not the local patch
       // (#821 — the snake_case patch never matched the camelCase node).
       this.liveDb?.upsertLiveTransaction(result.transaction);
-      this.liveDb?.invalidateLiveBalances();
+      this.afterTransactionWrite();
 
       return {
         success: true,
@@ -3628,7 +3647,8 @@ export class CopilotMoneyTools {
         updated,
       };
     } catch (e) {
-      this.invalidateAfterFailedWrite([transaction_id]);
+      // A date edit may have moved the row to another month: drop that one too.
+      this.invalidateAfterFailedWrite([transaction_id], CopilotMoneyTools.monthOf(args.date));
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }
@@ -3760,7 +3780,7 @@ export class CopilotMoneyTools {
           });
         } catch (e) {
           // Same as update_transaction (#832): the edit may have landed.
-          this.invalidateAfterFailedWrite([route.id]);
+          this.invalidateAfterFailedWrite([route.id], CopilotMoneyTools.monthOf(edit.date));
           throw e;
         }
         indexed.push({
@@ -3775,7 +3795,7 @@ export class CopilotMoneyTools {
           this.db.patchCachedTransaction(route.id, patch);
         }
         this.liveDb?.upsertLiveTransaction(result.transaction);
-        this.liveDb?.invalidateLiveBalances();
+        this.afterTransactionWrite();
       }
     );
 
@@ -3945,7 +3965,7 @@ export class CopilotMoneyTools {
       // lives inside upsertLiveTransaction.
       // mutation-guard: create_transaction writes through to the live cache
       this.liveDb?.upsertLiveTransaction(tx, { insert: true });
-      this.liveDb?.invalidateLiveBalances();
+      this.afterTransactionWrite();
 
       return {
         success: true,
@@ -4073,7 +4093,7 @@ export class CopilotMoneyTools {
       if (deleted) {
         this.db.patchCachedTransactionDelete(transaction_id);
         this.liveDb?.patchLiveTransactionDelete(transaction_id);
-        this.liveDb?.invalidateLiveBalances();
+        this.afterTransactionWrite();
       }
 
       return {
@@ -4297,7 +4317,7 @@ export class CopilotMoneyTools {
       // eviction-is-a-no-op contract.
       this.db.patchCachedTransaction(transaction_id, { recurring_id });
       this.liveDb?.upsertLiveTransaction(tx);
-      this.liveDb?.invalidateLiveBalances();
+      this.afterTransactionWrite();
 
       return {
         success: true,
@@ -4525,7 +4545,7 @@ export class CopilotMoneyTools {
       this.recordSplitParent(transaction_id);
       this.db.patchCachedTransactionDelete(transaction_id);
       this.liveDb?.patchLiveTransactionDelete(transaction_id);
-      this.liveDb?.invalidateLiveBalances();
+      this.afterTransactionWrite();
 
       try {
         return this.finishSplit(result);
@@ -4536,9 +4556,12 @@ export class CopilotMoneyTools {
     } catch (e) {
       // A split that landed and then errored leaves the parent cached while
       // its children exist server-side, double-counting the amount (#832). The
-      // parent's id finds its month; the children's months are unknown here,
-      // since the error carries no response.
-      this.invalidateAfterFailedWrite([transaction_id]);
+      // parent's id finds its month, and the children's months are the dates
+      // the split asked for.
+      this.invalidateAfterFailedWrite(
+        [transaction_id],
+        inputs.flatMap((i) => CopilotMoneyTools.monthOf(i.date))
+      );
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }
@@ -4803,7 +4826,7 @@ export class CopilotMoneyTools {
     // changed.
     onLanded(result.updated);
     // A type change can move a manual account's balance (#825).
-    this.liveDb?.invalidateLiveBalances();
+    this.afterTransactionWrite();
     if (result.failed.length > 0) {
       const detail = result.failed
         .map(

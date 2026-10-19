@@ -121,7 +121,7 @@ function stubLiveDb(overrides: {
     getTransactions,
     indexTransactionMeta,
     upsertLiveTransaction,
-    invalidateLiveBalances: () => {},
+    invalidateTransactionDerivedSnapshots: () => {},
     invalidateLiveTransactionMonths: () => {},
     patchLiveTransactionDelete: () => {},
     // Reached only when mapping a drifted split response throws.

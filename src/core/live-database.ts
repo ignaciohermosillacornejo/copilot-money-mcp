@@ -782,16 +782,45 @@ export class LiveCopilotDatabase {
   }
 
   /**
-   * Drop the accounts snapshot after a transaction write (#825). On a manual
-   * account Copilot recomputes the balance from its transactions, so a
-   * create, delete, split or amount/date/type edit moves it, and the snapshot
-   * (1-hour TTL) would keep serving the old balance. Every transaction write
-   * calls this, not only manual-account ones: knowing the account is manual
-   * would need the snapshot this drops, and the cost is one Accounts request
-   * on the next read.
+   * The snapshots a transaction write can make stale (#825), by cache key:
+   *  - `accounts`: on a manual account Copilot recomputes the balance from its
+   *    transactions, so a create, delete, split or amount/date/type edit moves it;
+   *  - `networth`: a sum of account balances;
+   *  - `monthly_spend`: the daily spend series, a function of each row's
+   *    amount, date, type and category;
+   *  - `upcoming_recurrings`: linking a transaction to a recurring can mark
+   *    a payment as made.
+   * Each is cached for an hour and would keep serving the pre-write figures.
+   * Not included: `categories`, whose budget rollovers derive from past
+   * spending but which is reference data cached for a day (a refetch there
+   * costs the category list; refresh_cache covers it).
    */
-  invalidateLiveBalances(): void {
-    this.accountsCache.invalidate();
+  static readonly TRANSACTION_DERIVED_SNAPSHOTS = [
+    'accounts',
+    'networth',
+    'monthly_spend',
+    'upcoming_recurrings',
+  ] as const;
+
+  /**
+   * Drop every snapshot a transaction write can make stale (see
+   * TRANSACTION_DERIVED_SNAPSHOTS). Every transaction write calls this,
+   * balance-neutral ones included: a category edit still moves the spend
+   * series, and telling which accounts are manual would need the very
+   * snapshot this drops. The cost is one request per dropped snapshot, on its
+   * next read only.
+   */
+  invalidateTransactionDerivedSnapshots(): void {
+    const byKey: Record<
+      (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number],
+      { invalidate(): void }
+    > = {
+      accounts: this.accountsCache,
+      networth: this.networthCache,
+      monthly_spend: this.monthlySpendCache,
+      upcoming_recurrings: this.upcomingRecurringsCache,
+    };
+    for (const key of LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS) byKey[key].invalidate();
   }
 
   /**

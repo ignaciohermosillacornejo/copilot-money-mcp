@@ -854,42 +854,133 @@ describe('a transaction write that throws leaves the next read to the server (#8
   );
 });
 
-// ── Transaction writes drop the accounts snapshot (#825) ────────────────────
+// ── Transaction writes drop the transaction-derived snapshots (#825) ───────
 //
 // On a manual account Copilot recomputes the balance from its transactions, so
 // a transaction write can move it while get_accounts_live keeps serving the
-// snapshot (1-hour TTL). Every transaction write drops the snapshot, on
-// success and on a throw alike; same derived key set.
+// snapshot (1-hour TTL); net worth, the monthly spend series and upcoming
+// recurrings go stale the same way. Every transaction write drops each
+// snapshot LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS names, on
+// success and on a throw alike; same derived tool key set.
 
-/** Warm the accounts snapshot so a drop is observable. */
-async function warmAccounts(liveDb: LiveCopilotDatabase): Promise<void> {
-  await liveDb.getAccountsCache().read(async () => [{ id: ACCOUNT_ID } as AccountNode]);
-  expect(liveDb.getAccountsCache().peek()).toBeDefined();
+type SnapshotKey = (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number];
+
+/** How to reach each named snapshot. A key added to the list without a getter here fails to compile. */
+const SNAPSHOT_GETTERS: Record<
+  SnapshotKey,
+  (db: LiveCopilotDatabase) => {
+    read(l: () => Promise<unknown[]>): Promise<unknown>;
+    peek(): unknown;
+  }
+> = {
+  accounts: (db) => db.getAccountsCache() as never,
+  networth: (db) => db.getNetworthCache() as never,
+  monthly_spend: (db) => db.getMonthlySpendCache() as never,
+  upcoming_recurrings: (db) => db.getUpcomingRecurringsCache() as never,
+};
+
+/** Warm every transaction-derived snapshot so a drop is observable. */
+async function warmSnapshots(liveDb: LiveCopilotDatabase): Promise<void> {
+  for (const key of LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS) {
+    const cache = SNAPSHOT_GETTERS[key](liveDb);
+    await cache.read(async () => [{ id: ACCOUNT_ID } as AccountNode]);
+    expect(cache.peek()).toBeDefined();
+  }
 }
 
-describe('a transaction write drops the live accounts snapshot (#825)', () => {
-  test.each(Object.keys(CASES))('%s: success drops the snapshot', async (toolName) => {
+function expectSnapshotsDropped(liveDb: LiveCopilotDatabase): void {
+  for (const key of LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS) {
+    expect({ key, rows: SNAPSHOT_GETTERS[key](liveDb).peek() }).toEqual({ key, rows: undefined });
+  }
+}
+
+describe('a transaction write drops the transaction-derived snapshots (#825)', () => {
+  test('the dropped set covers at least the accounts snapshot', () => {
+    expect(LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS).toContain('accounts');
+  });
+
+  test.each(Object.keys(CASES))('%s: success drops them', async (toolName) => {
     const c = CASES[toolName]!;
     const { call, read, liveDb } = setup(c.mocks);
     await read();
-    await warmAccounts(liveDb);
+    await warmSnapshots(liveDb);
 
     await call(toolName, c.args);
 
-    expect(liveDb.getAccountsCache().peek()).toBeUndefined();
+    expectSnapshotsDropped(liveDb);
   });
 
-  test.each(Object.keys(MUTATION_OP))('%s: a throw drops the snapshot', async (toolName) => {
+  test.each(Object.keys(MUTATION_OP))('%s: a throw drops them', async (toolName) => {
     const { call, read, liveDb } = setup({
       [MUTATION_OP[toolName]!]: new Error('synthetic transport timeout'),
     });
     await read();
-    await warmAccounts(liveDb);
+    await warmSnapshots(liveDb);
 
     await expect(call(toolName, CASES[toolName]!.args)).rejects.toThrow(
       /synthetic transport timeout/
     );
 
-    expect(liveDb.getAccountsCache().peek()).toBeUndefined();
+    expectSnapshotsDropped(liveDb);
+  });
+});
+
+// ── A throw also drops the month a write was moving rows INTO (#859 review) ──
+//
+// The id-keyed drop finds only the month a row is cached in now. A date edit,
+// or a split whose children are dated elsewhere, may have landed in another
+// cached month before the error; that month is named from the request.
+
+const OTHER_COLD_MONTH = { start: '2025-02-01', end: '2025-02-28' };
+
+describe('a throw drops the destination month too (#832)', () => {
+  async function seedBoth(
+    read: () => Promise<unknown>,
+    call: (n: string, a: Record<string, unknown>) => Promise<unknown>
+  ) {
+    await read();
+    await call('get_transactions_live', {
+      start_date: OTHER_COLD_MONTH.start,
+      end_date: OTHER_COLD_MONTH.end,
+      limit: 10,
+    });
+  }
+
+  const readOther = (call: (n: string, a: Record<string, unknown>) => Promise<unknown>) =>
+    call('get_transactions_live', {
+      start_date: OTHER_COLD_MONTH.start,
+      end_date: OTHER_COLD_MONTH.end,
+      limit: 10,
+    }) as Promise<{ _cache_hit: boolean }>;
+
+  test.each([
+    ['update_transaction', { ...routing, transaction_id: TX_UPDATE, date: '2025-02-10' }],
+    [
+      'update_transactions',
+      { edits: [{ ...routing, transaction_id: TX_BATCH_1, date: '2025-02-10' }] },
+    ],
+    [
+      'split_transaction',
+      {
+        ...routing,
+        transaction_id: TX_SPLIT_PARENT,
+        splits: [
+          { name: 'Part A', date: '2025-02-10', amount: 60, category_id: CAT_OLD },
+          { name: 'Part B', date: '2025-02-11', amount: 40, category_id: CAT_NEW },
+        ],
+      },
+    ],
+  ] as const)('%s: the month the request moved rows into is refetched', async (toolName, args) => {
+    const { call, read } = setup({
+      [MUTATION_OP[toolName]!]: new Error('synthetic transport timeout'),
+    });
+    await seedBoth(read, call);
+    expect((await readOther(call))._cache_hit).toBe(true);
+
+    await expect(call(toolName, args as Record<string, unknown>)).rejects.toThrow(
+      /synthetic transport timeout/
+    );
+
+    expect((await readOther(call))._cache_hit).toBe(false);
   });
 });
