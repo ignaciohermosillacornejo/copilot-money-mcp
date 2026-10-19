@@ -126,7 +126,8 @@ export class CopilotMoneyServer {
           // persisted one is uid-scoped already (#842). This also marks the
           // whole local cache stale, so the next read re-decodes it too —
           // deliberately: rows loaded under the previous login must not be
-          // served under the new one.
+          // served under the new one. The cost is one full LevelDB decode on
+          // the next cache-mode read (or delete).
           this.tools.forgetSessionSplitParents();
           refreshCache.refresh({ scope: 'all' }).catch((e: unknown) => {
             // scope:'all' cannot reject today; keep future rejections visible.
