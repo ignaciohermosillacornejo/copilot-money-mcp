@@ -133,6 +133,24 @@ describe('a burst of deletes shares one window load (#838)', () => {
     expect(windowRequests()).toBeGreaterThan(WINDOW_LOAD);
   });
 
+  test('an invalidation of the window cache (refresh_cache, login sweep) forces a reload', async () => {
+    const { tools, del, windowRequests } = setup();
+    await del(IDS[0]!);
+    expect(windowRequests()).toBe(WINDOW_LOAD);
+    // What refresh_cache's full flush and the uid-transition sweep both do.
+    (tools as any).liveDb.getTransactionsWindowCache().invalidate('all');
+    await del(IDS[1]!);
+    expect(windowRequests()).toBe(2 * WINDOW_LOAD);
+  });
+
+  test('a login change forgets the memo', async () => {
+    const { tools, del, windowRequests } = setup();
+    await del(IDS[0]!);
+    tools.forgetSessionSplitParents();
+    await del(IDS[1]!);
+    expect(windowRequests()).toBeGreaterThan(WINDOW_LOAD);
+  });
+
   test('a failed load is not reused', async () => {
     const { del, windowRequests } = setup({ failFirstLoad: true });
     await del(IDS[0]!); // the failed load does not block the delete

@@ -274,23 +274,30 @@ export class GraphQLClient {
     this.auth.setUidTransitionListener(listener);
   }
 
+  /** Mutations issued so far, per operation name; see getMutationCount. */
+  private readonly mutationCounts = new Map<string, number>();
+
   /**
    * How many mutations this client has been asked to send, counted when each
    * is issued (so one that fails or times out counts too, since it may still
-   * have landed). A cheap "has anything been written since" stamp for
-   * short-lived memos of server reads (#838).
+   * have landed), leaving out the operations named in `exclude`. Monotonic
+   * for any `exclude`, so it works as a "has anything (but these) been
+   * written since" stamp for short-lived memos of server reads (#838).
    */
-  getMutationCount(): number {
-    return this.mutationCount;
+  getMutationCount(opts: { exclude?: readonly string[] } = {}): number {
+    let total = 0;
+    for (const [op, n] of this.mutationCounts) {
+      if (!opts.exclude?.includes(op)) total += n;
+    }
+    return total;
   }
-  private mutationCount = 0;
 
   async mutate<TVariables, TResponse>(
     operationName: string,
     query: string,
     variables: TVariables
   ): Promise<TResponse> {
-    this.mutationCount += 1;
+    this.mutationCounts.set(operationName, (this.mutationCounts.get(operationName) ?? 0) + 1);
     return this.request<TVariables, TResponse>('mutation', operationName, query, variables);
   }
 

@@ -157,11 +157,14 @@ export function createMockGraphQLClient(responsesByOp: MockResponsesByOp = {}): 
   const mutate = mock(dispatch);
   const client = {
     mutate,
-    // Same transport in production (GraphQLClient.query delegates to mutate);
-    // mirror that here so live-read wrappers work against this mock too.
+    // Same transport in production (GraphQLClient.query and .mutate both go
+    // through request()); mirror that so live-read wrappers work against this
+    // mock too. Queries go through `query`, so they never bump the count below.
     query: mock(dispatch),
-    // As GraphQLClient.getMutationCount: every mutation issued, failed or not.
-    getMutationCount: () => mutate.mock.calls.length,
+    // As GraphQLClient.getMutationCount: every mutation issued, failed or not,
+    // minus the excluded operation names.
+    getMutationCount: (opts: { exclude?: readonly string[] } = {}) =>
+      mutate.mock.calls.filter((c) => !opts.exclude?.includes(c[0] as string)).length,
     _calls: calls,
   };
   return client as unknown as MockGraphQLClient;

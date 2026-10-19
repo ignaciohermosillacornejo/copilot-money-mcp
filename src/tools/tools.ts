@@ -823,6 +823,8 @@ export class CopilotMoneyTools {
     this.knownSplitParents.clear();
     // The local cache's accumulated evidence is the previous login's too.
     this.db.forgetSplitParentIds();
+    // So is a memoized window (#838).
+    this.windowMemo = null;
   }
 
   /**
@@ -887,7 +889,7 @@ export class CopilotMoneyTools {
   private async refuseSplitParentBalanceEdit(
     edit: TransactionEdit,
     label: string,
-    loadWindow?: () => Promise<TransactionNode[]>
+    loadWindow?: () => Promise<readonly TransactionNode[]>
   ): Promise<void> {
     const keys = splitParentRefusedKeys(edit);
     if (keys.length === 0) return;
@@ -936,8 +938,8 @@ export class CopilotMoneyTools {
    * function (#836): a batch that checks many ids, or a split that both checks
    * its target and resolves it. A failed load rejects every caller alike.
    */
-  private sharedWindowLoad(): () => Promise<TransactionNode[]> {
-    let pending: Promise<TransactionNode[]> | null = null;
+  private sharedWindowLoad(): () => Promise<readonly TransactionNode[]> {
+    let pending: Promise<readonly TransactionNode[]> | null = null;
     return () => {
       pending ??= this.loadWriteResolveWindow();
       return pending;
@@ -952,22 +954,30 @@ export class CopilotMoneyTools {
    * shows up on the next call after it.
    */
   static readonly WINDOW_MEMO_MS = 15_000;
-  private windowMemo: { at: number; stamp: number; rows: Promise<TransactionNode[]> } | null = null;
-  /** DeleteTransaction mutations this instance has issued; see writeStamp(). */
-  private deletesIssued = 0;
+  private windowMemo: {
+    at: number;
+    stamp: string;
+    rows: Promise<readonly TransactionNode[]>;
+  } | null = null;
 
   /**
-   * Changes whenever this server issues a write that could change what the
-   * window holds, so a memoized window is never reused across one. Counted
-   * from the GraphQL client (every mutation, failed ones included), minus
-   * deletes: a delete only removes a row, and with no negative split evidence
-   * (#842) a removed row cannot turn a refusal into an acceptance, so a burst
-   * of deletes can share one load. null without a counting client: no memo.
+   * Changes whenever something happens that could change what the window
+   * holds, so a memoized window is never reused across it:
+   *  - a write this server issues, counted by the GraphQL client (failed ones
+   *    included), except DeleteTransaction: a delete only removes a row, and
+   *    with no negative split evidence (#842) a removed row cannot turn a
+   *    refusal into an acceptance, so a burst of deletes can share one load;
+   *  - any invalidation of the live window cache (its generation): refresh_cache,
+   *    the mid-session login-change sweep, a failed write's month drop.
+   * null without a counting client or a window cache (test doubles): no memo.
    */
-  private writeStamp(): number | null {
-    const client = this.graphqlClient as { getMutationCount?: () => number } | null;
+  private writeStamp(): string | null {
+    const client = this.graphqlClient as Partial<Pick<GraphQLClient, 'getMutationCount'>> | null;
     if (typeof client?.getMutationCount !== 'function') return null;
-    return client.getMutationCount() - this.deletesIssued;
+    // Test doubles without a window cache get no memo either.
+    if (typeof this.liveDb?.getTransactionsWindowCache !== 'function') return null;
+    const writes = client.getMutationCount({ exclude: ['DeleteTransaction'] });
+    return `${writes}:${this.liveDb.getTransactionsWindowCache().generationId()}`;
   }
 
   /**
@@ -983,9 +993,12 @@ export class CopilotMoneyTools {
    * a memoized window CAN miss: a child row another client (the app, another
    * device) created in the last few seconds, in a month not otherwise cached
    * here. That is the same gap the window always had for a split made just
-   * after the fetch, widened by at most WINDOW_MEMO_MS.
+   * after the fetch, widened by at most WINDOW_MEMO_MS. The memo also serves
+   * routing resolution and split's parent lookup, where the same gap means a
+   * row another client created in the last few seconds can resolve as "not
+   * found": an error, never a write to the wrong row.
    */
-  private loadWriteResolveWindow(): Promise<TransactionNode[]> {
+  private loadWriteResolveWindow(): Promise<readonly TransactionNode[]> {
     const liveDb = this.liveDb;
     if (!liveDb) return Promise.resolve([]);
     const stamp = this.writeStamp();
@@ -3396,7 +3409,7 @@ export class CopilotMoneyTools {
    */
   private async resolveTransactionMeta(
     ids: string[],
-    loadWindow?: () => Promise<TransactionNode[]>
+    loadWindow?: () => Promise<readonly TransactionNode[]>
   ): Promise<{
     meta: Map<string, { accountId: string; itemId: string }>;
     liveWindowMonths: number | null;
@@ -3513,7 +3526,7 @@ export class CopilotMoneyTools {
    */
   private async resolveParentSnapshot(
     id: string,
-    loadWindow: () => Promise<TransactionNode[]> = () => this.loadWriteResolveWindow()
+    loadWindow: () => Promise<readonly TransactionNode[]> = () => this.loadWriteResolveWindow()
   ): Promise<{
     snapshot: { amount: number; date: string; name?: string } | null;
     liveWindowMonths: number | null;
@@ -3803,7 +3816,7 @@ export class CopilotMoneyTools {
   private async resolveEditRoutes(
     edits: TransactionEdit[],
     notFoundSuffix: string,
-    loadWindow?: () => Promise<TransactionNode[]>
+    loadWindow?: () => Promise<readonly TransactionNode[]>
   ): Promise<Array<{ id: string; accountId: string; itemId: string }>> {
     const needsResolution: string[] = [];
     for (const edit of edits) {
@@ -4473,8 +4486,6 @@ export class CopilotMoneyTools {
     if (evidence.parentOfTarget) this.recordSplitParent(evidence.parentOfTarget);
 
     try {
-      // Counted before it is sent, as the client counts it (see writeStamp).
-      this.deletesIssued += 1;
       const deleted = await gqlDeleteTransaction(client, {
         id: transaction_id,
         accountId: account_id,
@@ -4557,7 +4568,7 @@ export class CopilotMoneyTools {
    */
   private async splitParentEvidence(
     id: string,
-    loadWindow: () => Promise<TransactionNode[]> = () => this.loadWriteResolveWindow()
+    loadWindow: () => Promise<readonly TransactionNode[]> = () => this.loadWriteResolveWindow()
   ): Promise<{ isParent: boolean; parentOfTarget: string | null; windowChecked?: boolean }> {
     // mutation-guard: a fresh row never retires a split record
     if (this.isRecordedSplitParent(id)) return { isParent: true, parentOfTarget: null };
@@ -4567,7 +4578,7 @@ export class CopilotMoneyTools {
     const local = await this.localSplitEvidence(id);
     if (local.isParent || !this.liveDb) return local;
 
-    let fetched: TransactionNode[] = [];
+    let fetched: readonly TransactionNode[] = [];
     let windowChecked = true;
     try {
       fetched = await loadWindow();
@@ -5268,7 +5279,7 @@ export class CopilotMoneyTools {
       rows?: Array<{ transaction_id: string; account_id: string; item_id: string }>;
     },
     outOfWindowAction: string,
-    loadWindow?: () => Promise<TransactionNode[]>
+    loadWindow?: () => Promise<readonly TransactionNode[]>
   ): Promise<Array<{ id: string; accountId: string; itemId: string }>> {
     const { transaction_ids, rows } = args;
     if (rows !== undefined) {

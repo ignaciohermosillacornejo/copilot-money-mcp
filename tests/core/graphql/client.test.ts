@@ -884,3 +884,20 @@ describe('GraphQLClient — warn-mode READ response-shape validation (#537)', ()
     expect(getReadResponseDriftStats()).toEqual({});
   });
 });
+
+describe('GraphQLClient.getMutationCount (#838)', () => {
+  afterEach(() => restoreFetch());
+
+  test('counts issued mutations per operation, failed ones too, never queries', async () => {
+    const client = new GraphQLClient(createMockAuth(), { retryDelaysMs: [] });
+    mockFetch({ data: { ok: true } });
+    await client.mutate('EditTransaction', 'mutation EditTransaction { ok }', {});
+    await client.mutate('DeleteTransaction', 'mutation DeleteTransaction { ok }', {});
+    await client.query('Transactions', 'query Transactions { ok }', {});
+    mockFetch({}, 500);
+    await client.mutate('EditTransaction', 'mutation EditTransaction { ok }', {}).catch(() => {});
+
+    expect(client.getMutationCount()).toBe(3);
+    expect(client.getMutationCount({ exclude: ['DeleteTransaction'] })).toBe(2);
+  });
+});
