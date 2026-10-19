@@ -908,6 +908,30 @@ export const INCOME_CATEGORIES = new Set([
 ]);
 
 /**
+ * The name a category id is KNOWN by: the user's own name for it, else the
+ * Plaid-taxonomy name (exact id, then lower-cased), else `null`. No guessing —
+ * getCategoryName() adds the title-case / echo fallback on top of this, and the
+ * transaction_type rules use this alone so a rule never matches text inside a
+ * raw id (#854 review). Own-property lookup only: CATEGORY_NAMES is a plain
+ * object, so an id like `constructor` must not resolve to Object.prototype's
+ * function.
+ */
+export function lookupKnownCategoryName(
+  categoryId: string,
+  userCategoryMap?: Map<string, string>
+): string | null {
+  const userName = userCategoryMap?.get(categoryId);
+  if (userName) return userName;
+  for (const key of [categoryId, categoryId.toLowerCase()]) {
+    if (Object.prototype.hasOwnProperty.call(CATEGORY_NAMES, key)) {
+      const name = CATEGORY_NAMES[key];
+      if (name) return name;
+    }
+  }
+  return null;
+}
+
+/**
  * Get the human-readable name for a category ID.
  *
  * @param categoryId - The category ID (e.g., "13005000", "food_dining", or user-defined IDs)
@@ -916,25 +940,8 @@ export const INCOME_CATEGORIES = new Set([
  * @returns Human-readable category name, or the original ID if not found
  */
 export function getCategoryName(categoryId: string, userCategoryMap?: Map<string, string>): string {
-  // First, check user-defined categories (highest priority)
-  // These are custom categories created by the user in Copilot Money
-  if (userCategoryMap) {
-    const userName = userCategoryMap.get(categoryId);
-    if (userName) {
-      return userName;
-    }
-  }
-
-  // Check exact match in static Plaid categories
-  if (CATEGORY_NAMES[categoryId]) {
-    return CATEGORY_NAMES[categoryId];
-  }
-
-  // Try lowercase version
-  const lowerId = categoryId.toLowerCase();
-  if (CATEGORY_NAMES[lowerId]) {
-    return CATEGORY_NAMES[lowerId];
-  }
+  const known = lookupKnownCategoryName(categoryId, userCategoryMap);
+  if (known !== null) return known;
 
   // For unknown categories, try to make them human-readable
   // Convert snake_case to Title Case

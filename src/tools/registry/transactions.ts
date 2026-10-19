@@ -152,8 +152,10 @@ export const getTransactionsTool = defineTool({
           enum: [...TRANSACTION_TYPE_FILTERS],
           description:
             'Filter by special type. Cache-only: foreign (international) and duplicates ' +
-            '(potential duplicate transactions). ' +
-            TRANSACTION_TYPE_RULES_TEXT,
+            '(potential duplicate transactions, paired among the rows the other filters ' +
+            'keep; pass exclude_excluded: false to include excluded copies). ' +
+            TRANSACTION_TYPE_RULES_TEXT +
+            ' type_specific_data totals cover all matching rows, not just the returned page.',
         },
         // NEW: Tag filter
         tag: {

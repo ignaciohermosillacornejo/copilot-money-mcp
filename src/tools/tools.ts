@@ -83,9 +83,13 @@ import {
 } from '../utils/scheduled-smoke-status.js';
 import { computeTotalReturnPercent, roundAmount } from '../utils/round.js';
 import { pLimit } from '../utils/concurrency.js';
-import { getCategoryName, isTransferCategory, isKnownPlaidCategory } from '../utils/categories.js';
 import {
-  RULES_READING_CATEGORY_NAME,
+  getCategoryName,
+  isTransferCategory,
+  isKnownPlaidCategory,
+  lookupKnownCategoryName,
+} from '../utils/categories.js';
+import {
   TRANSACTION_TYPE_RULES,
   cacheTypeRuleRow,
   type SharedTransactionType,
@@ -755,16 +759,24 @@ export class CopilotMoneyTools {
    * leaves nothing to derive from.
    *
    * @param transactions - Raw cache documents
-   * @returns The same rows plus category_name, normalized_merchant, excluded
+   * @returns The same rows MINUS the internal fields (INTERNAL_TRANSACTION_FIELDS:
+   *   `income`), plus category_name, normalized_merchant, excluded
    */
-  private async enrichCacheTransactions(
-    transactions: Transaction[]
-  ): Promise<
-    Array<Transaction & { category_name?: string; normalized_merchant: string; excluded: boolean }>
+  private async enrichCacheTransactions(transactions: Transaction[]): Promise<
+    Array<
+      Omit<Transaction, 'income'> & {
+        category_name?: string;
+        normalized_merchant: string;
+        excluded: boolean;
+      }
+    >
   > {
     const excludedCategoryIds = await this.getExcludedCategoryIds();
     return Promise.all(
-      // `income` is internal — see INTERNAL_TRANSACTION_FIELDS.
+      // `income` is internal — see INTERNAL_TRANSACTION_FIELDS. The Omit in the
+      // return type makes surfacing it a compile error; the guard row makes it
+      // a test failure.
+      // mutation-guard: the internal income flag is never returned
       transactions.map(async ({ income: _internal, ...txn }) => ({
         ...txn,
         category_name: txn.category_id
@@ -1126,21 +1138,27 @@ export class CopilotMoneyTools {
     // ============================================
     // MODE 3: Special transaction types
     // ============================================
-    // Runs LAST among the filters, so `type_specific_data` totals are computed
-    // over exactly the rows this call returns (before pagination). It used to
-    // run before the exclusion filters, so totals summed rows the pipeline
-    // then dropped — excluded rows, transfers, and split parents counted
-    // against their own children (#854 review). Only the rules that read a
-    // category name pay for the name map.
+    // Runs LAST among the row filters and BEFORE pagination, so the selection
+    // and the `type_specific_data` totals cover ALL MATCHING ROWS — every row
+    // that survives the filters, not just the page returned (they pair with
+    // `total_count`, which counts the same set). It used to run before the
+    // exclusion filters, so totals summed rows the pipeline then dropped —
+    // excluded rows, transfers, and split parents counted against their own
+    // children (#854 review).
+    //
+    // `duplicates` is GROUP-wise, so for it the position is a semantic choice,
+    // not just an ordering: pairs are found among the rows the caller would
+    // see. A copy that is excluded, deleted, a transfer or a split parent no
+    // longer forms a pair with its twin (a one-child split parent used to be
+    // reported as a duplicate of its own child). To look for a pair whose
+    // other copy is excluded, pass exclude_excluded: false (#854 review).
     let typeSpecificData: Record<string, unknown> | undefined;
 
     if (transaction_type) {
       const result = this._filterByTransactionType(
         transactions,
         transaction_type,
-        RULES_READING_CATEGORY_NAME.has(transaction_type)
-          ? await this.getUserCategoryMap()
-          : new Map<string, string>()
+        await this.getUserCategoryMap()
       );
       transactions = result.transactions;
       typeSpecificData = result.typeSpecificData;
@@ -1189,7 +1207,9 @@ export class CopilotMoneyTools {
     // (#843), each through its own row adapter.
     const byRule = (rule: SharedTransactionType) =>
       transactions.filter((txn) =>
-        TRANSACTION_TYPE_RULES[rule](cacheTypeRuleRow(txn, userCategoryMap))
+        TRANSACTION_TYPE_RULES[rule](
+          cacheTypeRuleRow(txn, (id) => lookupKnownCategoryName(id, userCategoryMap))
+        )
       );
     switch (type) {
       case 'foreign': {

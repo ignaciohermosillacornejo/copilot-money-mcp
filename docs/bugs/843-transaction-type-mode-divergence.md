@@ -57,6 +57,17 @@ the shared rule table does not define. Mutation-checked: making the live adapter
 as REGULAR turns the `credits` case red. The detector covers this parameter only; other
 filters that exist in both modes (`category`, `exclude_excluded`) are not swept by it.
 
+## Residual gaps
+
+- The returned `category_name` field still differs for a category id that neither mode knows:
+  cache mode echoes or title-cases the id (`getCategoryName`), live mode omits the key. The
+  rules no longer read that fallback (they use `lookupKnownCategoryName`), but the field does.
+  Tracked as #867.
+- The Plaid-taxonomy name tier is cache-only: an old cache document can carry a Plaid id that
+  resolves to a name, while live rows carry opaque ids only. The same goes for the id
+  keyword checks in `inSpendingCategory`. Both widen cache mode; neither makes one row answer
+  differently in the two modes, because such a row has no live twin.
+
 ## Lesson
 
 A parameter both modes accept is one contract, so it needs one implementation and one test

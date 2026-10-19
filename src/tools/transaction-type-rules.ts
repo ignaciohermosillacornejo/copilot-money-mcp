@@ -15,9 +15,17 @@
  *
  * `foreign` and `duplicates` stay cache-only: they read location and
  * currency fields the GraphQL row does not carry.
+ *
+ * PIPELINE POSITION IS PART OF THE CONTRACT. Both modes apply these rules
+ * after their row filters (transfers, deleted, excluded, split parents,
+ * pending): live in postFilter step 9, cache in getTransactions' MODE 3. A
+ * rule is a row-wise predicate, so it commutes with those filters, but
+ * `exclude_excluded` sees different things in each mode, and keeping the
+ * rules after it is what makes that the ONLY documented divergence (#854
+ * review). Moving either mode's rule step changes parity.
  */
 
-import { CATEGORY_NAMES, isIncomeCategory, isTransferCategory } from '../utils/categories.js';
+import { isIncomeCategory, isTransferCategory } from '../utils/categories.js';
 import { getTransactionDisplayName, type Transaction } from '../models/index.js';
 import type { TransactionNode } from '../core/graphql/queries/transactions.js';
 
@@ -36,11 +44,31 @@ export interface TypeRuleRow {
   amount: number;
   /** `null` when uncategorized. Each adapter folds `''` into `null`. */
   category_id: string | null;
-  /** Resolved display name of `category_id`, `null` when uncategorized or unknown. */
-  category_name: string | null;
+  /**
+   * Resolved display name of `category_id`, `null` when uncategorized or
+   * unknown. LAZY in both adapters: computed by the adapter's `resolveName` on
+   * first read, so only a rule that reads it pays for it, and no side table of
+   * "rules that read the name" exists to fall out of date (#854 review).
+   */
+  readonly category_name: string | null;
   /** Display name of the transaction (merchant). Compared case-insensitively. */
   name: string;
   tag_ids: readonly string[];
+}
+
+/** Maps a non-empty category id to its known display name, or `null`. */
+export type CategoryNameResolver = (categoryId: string) => string | null;
+
+/** A `category_name` that calls `resolveName` once, on first read. */
+function lazyCategoryName(
+  categoryId: string | null,
+  resolveName: CategoryNameResolver
+): () => string | null {
+  let resolved: string | null | undefined;
+  return () => {
+    if (resolved === undefined) resolved = categoryId ? resolveName(categoryId) : null;
+    return resolved;
+  };
 }
 
 /**
@@ -49,17 +77,21 @@ export interface TypeRuleRow {
  * a REGULAR row. `category_id: ''` (what the decoder writes on income and
  * transfer rows) is folded into `null`.
  *
- * The category name is the user's name for the id, else the Plaid-taxonomy
- * name, else `null` — deliberately NOT getCategoryName(), which title-cases or
- * echoes an unknown id. That fallback would let `hsa_eligible` match keywords
- * inside a raw id in cache mode only, where live mode (names.get() ?? null)
- * sees nothing (#854 review).
+ * Callers pass `resolveName` = lookupKnownCategoryName over the user's
+ * categories (src/utils/categories.ts): the user's name, else the Plaid-taxonomy
+ * name, else `null` — never getCategoryName()'s title-case / echo of an unknown
+ * id, which would let `hsa_eligible` match text inside a raw id (#854 review).
+ *
+ * KNOWN CACHE-ONLY WIDENING: the Plaid-taxonomy tier. Old cache documents can
+ * carry a Plaid id (`medical_pharmacies_and_supplements`) that resolves to a
+ * name here; live rows carry opaque ids only, and live's resolver has no Plaid
+ * tier. A cache row with a Plaid id has no live twin to disagree with, so this
+ * widens cache mode rather than splitting a row's answer — the same shape as
+ * inSpendingCategory's id checks below.
  */
-export function cacheTypeRuleRow(
-  txn: Transaction,
-  userCategoryMap: Map<string, string>
-): TypeRuleRow {
+export function cacheTypeRuleRow(txn: Transaction, resolveName: CategoryNameResolver): TypeRuleRow {
   const categoryId = txn.category_id ? txn.category_id : null;
+  const categoryName = lazyCategoryName(categoryId, resolveName);
   return {
     kind:
       txn.internal_transfer === true
@@ -69,12 +101,9 @@ export function cacheTypeRuleRow(
           : 'regular',
     amount: txn.amount,
     category_id: categoryId,
-    category_name: categoryId
-      ? (userCategoryMap.get(categoryId) ??
-        CATEGORY_NAMES[categoryId] ??
-        CATEGORY_NAMES[categoryId.toLowerCase()] ??
-        null)
-      : null,
+    get category_name() {
+      return categoryName();
+    },
     name: getTransactionDisplayName(txn),
     tag_ids: txn.tag_ids ?? [],
   };
@@ -83,10 +112,15 @@ export function cacheTypeRuleRow(
 /**
  * Live-mode adapter. `kind` is GraphQL's own `type`, and the empty
  * `categoryId` the server returns on income and transfer rows is folded into
- * `null`. `names` is the categories cache's id -> name map.
+ * `null`. Callers pass `resolveName` = the categories cache's id -> name map,
+ * `?? null`; there is no Plaid tier in live mode.
  */
-export function liveTypeRuleRow(n: TransactionNode, names: Map<string, string>): TypeRuleRow {
+export function liveTypeRuleRow(
+  n: TransactionNode,
+  resolveName: CategoryNameResolver
+): TypeRuleRow {
   const categoryId = n.categoryId ? n.categoryId : null;
+  const categoryName = lazyCategoryName(categoryId, resolveName);
   return {
     kind:
       n.type === 'INCOME'
@@ -96,7 +130,9 @@ export function liveTypeRuleRow(n: TransactionNode, names: Map<string, string>):
           : 'regular',
     amount: n.amount,
     category_id: categoryId,
-    category_name: categoryId ? (names.get(categoryId) ?? null) : null,
+    get category_name() {
+      return categoryName();
+    },
     name: n.name,
     tag_ids: n.tags.map((t) => t.id),
   };
@@ -203,16 +239,6 @@ export const TRANSACTION_TYPE_RULES = {
 } as const satisfies Record<string, (row: TypeRuleRow) => boolean>;
 
 export type SharedTransactionType = keyof typeof TRANSACTION_TYPE_RULES;
-
-/**
- * The rules that read `category_name`. Only these make a mode resolve category
- * names (a categories round trip in live mode); for the others both adapters
- * are handed an empty name map, so `category_name` is null and unread. A new
- * rule that reads the name must be added here, or it sees null in both modes
- * (agreeing, and wrong); the parity test catches that only through a fixture
- * row the rule should match by name (#854 review).
- */
-export const RULES_READING_CATEGORY_NAME: ReadonlySet<string> = new Set(['hsa_eligible']);
 
 export const SHARED_TRANSACTION_TYPES = Object.keys(
   TRANSACTION_TYPE_RULES

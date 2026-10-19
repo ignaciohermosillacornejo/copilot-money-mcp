@@ -686,6 +686,27 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     ],
     expectFails: 'tests/core/auth/browser-selection.test.ts',
   },
+  {
+    name: 'the internal income flag is never returned',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'Cache rows must never carry the decoded `income` flag (#854). It exists only so the ' +
+      'shared transaction_type rules can recognise an INCOME row in cache mode; live rows ' +
+      'have no such field, so surfacing it reopens the cache/live field-name divergence ' +
+      '#843 closed. Not a write-safety invariant like the rows above: registered at review ' +
+      'request because it is a one-line strip whose only other defence is a type.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '      // mutation-guard: the internal income flag is never returned\n' +
+        '      transactions.map(async ({ income: _internal, ...txn }) => ({',
+      with:
+        '      // mutation-guard: the internal income flag is never returned\n' +
+        '      transactions.map(async (txn) => ({',
+    },
+    expectFailingTests: ['the internal `income` flag is never returned'],
+    expectFails: 'tests/tools/transaction-type-parity.test.ts',
+  },
 ];
 
 // ---------------------------------------------------------------------------

@@ -162,7 +162,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // what refunds / credits / hsa_eligible / tagged select — the same sentence
   // get_transactions_live carries, because the two modes used to select
   // different rows with neither rule written down. Measured 6_677 (~2.3%).
-  get_transactions: 6_830,
+  //
+  // Raised 6_830 -> 7_020 in the #854 round-3 review: the param now says the
+  // totals cover all matching rows, not the returned page, and that
+  // `duplicates` pairs only the rows the other filters keep. Both were
+  // behaviour changes the reorder made, and the reviewer asked for them to be
+  // stated where callers read. Measured 6_859 (~2.3%).
+  get_transactions: 7_020,
   get_cache_info: 640,
   refresh_database: 485,
   // Raised from 1_315 by #597 Tier 2: adds the `fields` param (shared
@@ -441,7 +447,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // — ~1.75% headroom, the tightest this has run, and deliberately left there.
 // Raising it to restore ~2.5% would spend the one check that notices every
 // tool creeping at once in order to make room for the next creep.
-const SCHEMA_TOTAL_BUDGET = 79_600;
+//
+// Raised 79_600 -> 80_400 by #843/#854: the shared transaction_type rule text
+// on both transaction tools, plus the totals and duplicates wording above.
+// Measured 79_767 (~0.8%), deliberately tight.
+const SCHEMA_TOTAL_BUDGET = 80_400;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

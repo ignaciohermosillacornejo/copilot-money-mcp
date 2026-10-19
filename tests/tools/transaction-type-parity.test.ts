@@ -23,7 +23,13 @@ import {
   LiveTransactionsTools,
   LIVE_TRANSACTION_TYPES,
 } from '../../src/tools/live/transactions.js';
-import { SHARED_TRANSACTION_TYPES } from '../../src/tools/transaction-type-rules.js';
+import {
+  SHARED_TRANSACTION_TYPES,
+  TRANSACTION_TYPE_RULES,
+  cacheTypeRuleRow,
+  liveTypeRuleRow,
+} from '../../src/tools/transaction-type-rules.js';
+import { lookupKnownCategoryName } from '../../src/utils/categories.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
 import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
@@ -268,27 +274,11 @@ async function liveTools(): Promise<LiveTransactionsTools> {
 const RANGE = { start_date: '2026-03-01', end_date: '2026-03-31' } as const;
 
 describe('transaction_type totals and internal fields (#854 review)', () => {
-  test('cache totals cover exactly the rows returned, after the exclusion filters', async () => {
+  /** A cache db over `transactions`, with the fixture's categories. */
+  function cacheToolsOver(transactions: Transaction[]): CopilotMoneyTools {
     const db = new CopilotDatabase('/fake/path');
-    const refund = (id: string, amount: number, extra: Partial<Transaction> = {}): Transaction => ({
-      transaction_id: id,
-      amount,
-      date: '2026-03-10',
-      name: 'OUTDOOR STORE',
-      category_id: CAT_SHOPPING,
-      ...extra,
-    });
     db._injectDataForTesting({
-      transactions: [
-        refund('Ra1kW9mQ2nR7tV4xL8sP', -40),
-        // Individually excluded: dropped by exclude_excluded, so not in the total.
-        refund('Rb2mX2nR8tW5qK9vL3sQ', -25, { excluded: true }),
-        // A split parent and its child: only the child is returned and counted.
-        refund('Rc3nY3pS9vX6rL2wM4tR', -30, {
-          children_transaction_ids: ['Rd4pZ4qT2wY7sM3xN5vS'],
-        }),
-        refund('Rd4pZ4qT2wY7sM3xN5vS', -30, { parent_transaction_id: 'Rc3nY3pS9vX6rL2wM4tR' }),
-      ],
+      transactions,
       accounts: [],
       recurring: [],
       budgets: [],
@@ -301,7 +291,34 @@ describe('transaction_type totals and internal fields (#854 review)', () => {
       categoryNameMap: new Map(CATEGORIES.map((c) => [c.id, c.name])),
       accountNameMap: new Map(),
     });
-    const result = await new CopilotMoneyTools(db).getTransactions({
+    return new CopilotMoneyTools(db);
+  }
+
+  const row = (
+    id: string,
+    amount: number,
+    extra: Partial<Transaction> = {},
+    name = 'OUTDOOR STORE'
+  ): Transaction => ({
+    transaction_id: id,
+    amount,
+    date: '2026-03-10',
+    name,
+    category_id: CAT_SHOPPING,
+    ...extra,
+  });
+
+  const REFUND_ROWS: Transaction[] = [
+    row('Ra1kW9mQ2nR7tV4xL8sP', -40),
+    // Individually excluded: dropped by exclude_excluded, so not in the total.
+    row('Rb2mX2nR8tW5qK9vL3sQ', -25, { excluded: true }),
+    // A split parent and its child: only the child matches and is counted.
+    row('Rc3nY3pS9vX6rL2wM4tR', -30, { children_transaction_ids: ['Rd4pZ4qT2wY7sM3xN5vS'] }),
+    row('Rd4pZ4qT2wY7sM3xN5vS', -30, { parent_transaction_id: 'Rc3nY3pS9vX6rL2wM4tR' }),
+  ];
+
+  test('cache totals cover all matching rows after the exclusion filters', async () => {
+    const result = await cacheToolsOver(REFUND_ROWS).getTransactions({
       ...RANGE,
       transaction_type: 'refunds',
       fields: ['all'],
@@ -310,9 +327,76 @@ describe('transaction_type totals and internal fields (#854 review)', () => {
       'Ra1kW9mQ2nR7tV4xL8sP',
       'Rd4pZ4qT2wY7sM3xN5vS',
     ]);
-    const returnedSum = result.transactions.reduce((sum, t) => sum + Math.abs(t.amount ?? 0), 0);
-    expect(result.type_specific_data?.total_refunded).toBe(returnedSum);
-    expect(returnedSum).toBe(70);
+    // The pre-#854-review ordering summed all four rows: 125.
+    expect(result.type_specific_data?.total_refunded).toBe(70);
+  });
+
+  // #854 review, finding F: the totals are over ALL matching rows, not the
+  // returned page — they pair with total_count. limit: 1 makes the two differ.
+  test('cache totals cover all matching rows, not just the returned page (limit: 1)', async () => {
+    const result = await cacheToolsOver(REFUND_ROWS).getTransactions({
+      ...RANGE,
+      transaction_type: 'refunds',
+      limit: 1,
+      fields: ['all'],
+    });
+    expect(result.count).toBe(1);
+    expect(result.total_count).toBe(2);
+    expect(Math.abs(result.transactions[0]!.amount ?? 0)).toBeLessThan(70);
+    expect(result.type_specific_data?.total_refunded).toBe(70);
+  });
+
+  // #854 review, finding A: `duplicates` is group-wise, so running it after the
+  // row filters is a semantic choice. Pairs are found among the rows the
+  // caller would see; an excluded twin or a split parent forms no pair.
+  describe('duplicates groups the post-filter rows', () => {
+    const DUP_ROWS: Transaction[] = [
+      // A real pair: both copies visible.
+      row('Da1kW9mQ2nR7tV4xL8sP', 12, {}, 'COFFEE BAR'),
+      row('Db2mX2nR8tW5qK9vL3sQ', 12, {}, 'COFFEE BAR'),
+      // A pair whose second copy is individually excluded.
+      row('Dc3nY3pS9vX6rL2wM4tR', 30, {}, 'BOOK SHOP'),
+      row('Dd4pZ4qT2wY7sM3xN5vS', 30, { excluded: true }, 'BOOK SHOP'),
+      // A one-child split parent: identical to its own child by name/amount/date.
+      row(
+        'De5qA5rV3xZ8tN4yP6wT',
+        50,
+        { children_transaction_ids: ['Df6rB6sW4yA9vP5zQ7xV'] },
+        'HARDWARE'
+      ),
+      row(
+        'Df6rB6sW4yA9vP5zQ7xV',
+        50,
+        { parent_transaction_id: 'De5qA5rV3xZ8tN4yP6wT' },
+        'HARDWARE'
+      ),
+    ];
+
+    test('by default only the fully visible pair is a duplicate group', async () => {
+      const result = await cacheToolsOver(DUP_ROWS).getTransactions({
+        ...RANGE,
+        transaction_type: 'duplicates',
+      });
+      expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual([
+        'Da1kW9mQ2nR7tV4xL8sP',
+        'Db2mX2nR8tW5qK9vL3sQ',
+      ]);
+      expect(result.type_specific_data?.duplicate_groups).toBe(1);
+    });
+
+    test('exclude_excluded: false brings back the pair with an excluded copy', async () => {
+      const result = await cacheToolsOver(DUP_ROWS).getTransactions({
+        ...RANGE,
+        transaction_type: 'duplicates',
+        exclude_excluded: false,
+      });
+      expect(result.type_specific_data?.duplicate_groups).toBe(2);
+      expect(result.transactions.map((t) => t.transaction_id)).toContain('Dd4pZ4qT2wY7sM3xN5vS');
+      // The split parent is still not reported as its own child's duplicate.
+      expect(result.transactions.map((t) => t.transaction_id)).not.toContain(
+        'De5qA5rV3xZ8tN4yP6wT'
+      );
+    });
   });
 
   test('the internal `income` flag is never returned, and is not a selectable field', async () => {
@@ -351,6 +435,51 @@ describe('transaction_type parity across modes (#843)', () => {
       const live = await (await liveTools()).getTransactions(args);
       expect(cache.transactions.map((t) => t.transaction_id)).not.toContain(paycheck);
       expect(live.transactions.map((t) => t.transaction_id)).not.toContain(paycheck);
+    }
+  });
+});
+
+// #854 review, findings C/G: no side table of "rules that read a name". Each
+// adapter resolves category_name lazily, so a rule pays for names only if it
+// reads one, and the cache-only Plaid tier is the only resolver difference.
+describe('category names are resolved lazily (#854 review)', () => {
+  test('a rule that never reads category_name never calls the resolver', () => {
+    let calls = 0;
+    const resolveName = () => {
+      calls++;
+      return 'Shopping';
+    };
+    const txn = toCacheRow(SPECS[1]!);
+    expect(TRANSACTION_TYPE_RULES.refunds(cacheTypeRuleRow(txn, resolveName))).toBe(true);
+    expect(TRANSACTION_TYPE_RULES.tagged(liveTypeRuleRow(toLiveNode(SPECS[1]!), resolveName))).toBe(
+      false
+    );
+    expect(calls).toBe(0);
+  });
+
+  test('hsa_eligible reads the name once per row, in both adapters', () => {
+    let calls = 0;
+    const resolveName = () => {
+      calls++;
+      return 'Health & Medical';
+    };
+    const spec = { ...SPECS[0]!, name: 'Corner Store' };
+    const cacheRow = cacheTypeRuleRow(toCacheRow(spec), resolveName);
+    expect(TRANSACTION_TYPE_RULES.hsa_eligible(cacheRow)).toBe(true);
+    expect(cacheRow.category_name).toBe('Health & Medical');
+    const liveRow = liveTypeRuleRow(toLiveNode(spec), resolveName);
+    expect(TRANSACTION_TYPE_RULES.hsa_eligible(liveRow)).toBe(true);
+    expect(calls).toBe(2);
+  });
+});
+
+describe('lookupKnownCategoryName (#854 review)', () => {
+  test('user name, then Plaid name, else null; never an Object.prototype key', () => {
+    const user = new Map([[CAT_HEALTH, 'Health & Medical']]);
+    expect(lookupKnownCategoryName(CAT_HEALTH, user)).toBe('Health & Medical');
+    expect(lookupKnownCategoryName('Ux9visionK4mT7qR2wL5s', user)).toBeNull();
+    for (const key of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+      expect(lookupKnownCategoryName(key)).toBeNull();
     }
   });
 });
