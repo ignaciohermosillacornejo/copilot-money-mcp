@@ -862,7 +862,7 @@ describe('ambiguous --browser-profile', () => {
       env: {},
       selection: { browser: 'firefox', profile: 'dir:x', dataDir: empty },
     });
-    expect(none.selection?.problem).toContain('(no profile directories were found;');
+    expect(none.selection?.problem).toContain('(no profile directories were recognized;');
     expect(none.selection?.problem).not.toContain('dir:<directory>');
     expect(result.selection?.problem).not.toContain('Someone');
   });
@@ -1397,9 +1397,12 @@ describe('--browser-data-dir', () => {
       expect(problem).not.toContain('"dir:a1.work"');
       // Either order: the pair's order is a collation detail.
       const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const either = `(?:${esc(flat)}|${esc(nested)})`;
+      const [f, n] = [esc(flat), esc(nested)];
+      // Both orders spelled out, so the same path twice cannot match.
       expect(problem).toMatch(
-        new RegExp(`No --browser-profile value tells "${either}" and "${either}" apart\\.`)
+        new RegExp(
+          `No --browser-profile value tells (?:"${f}" and "${n}"|"${n}" and "${f}") apart\\.`
+        )
       );
       expect(problem).toContain(
         'Select one by dropping --browser-profile and pointing --browser-data-dir at one of ' +
