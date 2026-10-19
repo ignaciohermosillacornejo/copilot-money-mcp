@@ -213,57 +213,77 @@ describe('category_id is validated on every write that stores one (#846)', () =>
 // The same rule for the other reference type: Copilot drops an unknown tag id
 // silently, so every write that takes tag ids validates them first.
 
-/** Args for one write, with `tagId` in its tag-id position. */
+/**
+ * Args for one write, with `tagId` in one tag-id field. Keyed by
+ * `<tool>.<field>`, so a tool taking two tag lists (bulk edit's add and
+ * remove) needs a case for each.
+ */
 const TAG_CASES: Record<string, (tagId: string) => Record<string, unknown>> = {
-  create_transaction: (tagId) => ({
+  'create_transaction.tag_ids': (tagId) => ({
     ...CATEGORY_CASES.create_transaction!(CAT_KNOWN),
     tag_ids: [tagId],
   }),
-  update_transaction: (tagId) => ({ ...routing, transaction_id: TX_ID, tag_ids: [tagId] }),
-  update_transactions: (tagId) => ({
+  'update_transaction.tag_ids': (tagId) => ({
+    ...routing,
+    transaction_id: TX_ID,
+    tag_ids: [tagId],
+  }),
+  'update_transactions.tag_ids': (tagId) => ({
     edits: [{ ...routing, transaction_id: TX_ID, tag_ids: [TAG_IN_LIST, tagId] }],
   }),
-  bulk_edit_transactions: (tagId) => ({
+  'bulk_edit_transactions.add_tag_ids': (tagId) => ({
     rows: [{ ...routing, transaction_id: TX_ID }],
     add_tag_ids: [tagId],
   }),
+  // Removal is validated like addition today (ledger:
+  // Mutation.deleteTag:cascades-to-transactions). If that entry settles that
+  // Copilot keeps deleted tags on rows, this is the case to change.
+  'bulk_edit_transactions.remove_tag_ids': (tagId) => ({
+    rows: [{ ...routing, transaction_id: TX_ID }],
+    remove_tag_ids: [tagId],
+  }),
 };
 
+/** `<tool>.<field>` for every write-tool schema property matching `pattern`, at any depth. */
+function writeFieldsMatching(pattern: RegExp): string[] {
+  const out = new Set<string>();
+  const walk = (tool: string, schema: unknown): void => {
+    if (!schema || typeof schema !== 'object') return;
+    const sc = schema as { properties?: Record<string, unknown>; items?: unknown };
+    for (const [name, sub] of Object.entries(sc.properties ?? {})) {
+      if (pattern.test(name)) out.add(`${tool}.${name}`);
+      walk(tool, sub);
+    }
+    walk(tool, sc.items);
+  };
+  for (const def of WRITE_TOOL_DEFS) walk(def.name, def.schema.inputSchema);
+  return [...out].sort();
+}
+
+const callTag = (key: string, tagId: string) =>
+  [key.slice(0, key.indexOf('.')), TAG_CASES[key]!(tagId)] as const;
+
 describe('tag ids are validated on every write that takes them (#846)', () => {
-  test('every write tool taking tag ids has a case', () => {
-    expect(Object.keys(TAG_CASES).sort()).toEqual(writeToolsTaking(/(^|_)tag_ids$/));
+  test('every tag-id field of every write tool has a case', () => {
+    expect(Object.keys(TAG_CASES).sort()).toEqual(writeFieldsMatching(/(^|_)tag_ids$/));
   });
 
   test.each(Object.keys(TAG_CASES))(
     '%s: an unknown tag id is rejected with nothing sent',
-    async (tool) => {
+    async (key) => {
       const { call, mutationsSent } = setup();
-      await expect(call(tool, TAG_CASES[tool]!(TAG_UNKNOWN))).rejects.toThrow(
+      await expect(call(...callTag(key, TAG_UNKNOWN))).rejects.toThrow(
         `Tag not found: ${TAG_UNKNOWN}`
       );
       expect(mutationsSent()).toEqual([]);
     }
   );
 
-  test('bulk_edit_transactions: an unknown tag in remove_tag_ids is rejected too', async () => {
-    // Removal is validated like addition today (ledger:
-    // Mutation.deleteTag:cascades-to-transactions). If that entry settles that
-    // Copilot keeps deleted tags on rows, this is the test to change.
-    const { call, mutationsSent } = setup();
-    await expect(
-      call('bulk_edit_transactions', {
-        rows: [{ ...routing, transaction_id: TX_ID }],
-        remove_tag_ids: [TAG_UNKNOWN],
-      })
-    ).rejects.toThrow(`Tag not found: ${TAG_UNKNOWN}`);
-    expect(mutationsSent()).toEqual([]);
-  });
-
   test.each(Object.keys(TAG_CASES))(
     '%s: control — a known tag id reaches the mutation',
-    async (tool) => {
+    async (key) => {
       const { call, mutationsSent } = setup();
-      await expect(call(tool, TAG_CASES[tool]!(TAG_IN_LIST))).rejects.toThrow(
+      await expect(call(...callTag(key, TAG_IN_LIST))).rejects.toThrow(
         /mutation reached the server/
       );
       expect(mutationsSent().length).toBeGreaterThan(0);
@@ -321,7 +341,8 @@ function referenceSetup() {
   const edit = (fields: { category_id?: string; tag_ids?: string[] }) =>
     tools.updateTransaction({ ...routing, transaction_id: TX_ID, ...fields });
   const edits = () => client._calls.filter((c) => c.op === 'EditTransaction').length;
-  return { tools, categories, tags, fetches, failNext, edit, edits };
+  const mutationsSent = () => client._calls.filter((c) => !READ_OPS.has(c.op)).map((c) => c.op);
+  return { tools, categories, tags, fetches, failNext, edit, edits, mutationsSent };
 }
 
 describe('reference lists: a miss on a cached list refetches once (#846)', () => {
@@ -357,6 +378,7 @@ describe('reference lists: a miss on a cached list refetches once (#846)', () =>
     await expect(
       r.tools.setBudget({ category_id: 'Dd4fG7hJ0kL3zX6cV9bN', amount: '0' })
     ).rejects.toThrow(/mutation reached/);
+    expect(r.mutationsSent()).toEqual(['EditTransaction', 'EditBudget']);
     expect(r.fetches.categories).toBe(1);
     // A category created in the app right after is still accepted.
     r.categories.push(CAT_UNKNOWN);
