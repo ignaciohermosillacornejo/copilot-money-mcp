@@ -1016,9 +1016,8 @@ export function isIncomeCategory(categoryId: string | undefined): boolean {
  * @returns true if the category is a known Plaid category
  */
 export function isKnownPlaidCategory(categoryId: string): boolean {
-  // Check exact match
-  if (categoryId in CATEGORY_NAMES) return true;
-
-  // Check lowercase version
-  return categoryId.toLowerCase() in CATEGORY_NAMES;
+  // Own-property lookup (exact id, then lower-cased) through the one shared
+  // lookup: the `in` operator this used walks the prototype chain, so an id
+  // like `constructor` counted as a known Plaid category (#854 review).
+  return lookupKnownCategoryName(categoryId) !== null;
 }

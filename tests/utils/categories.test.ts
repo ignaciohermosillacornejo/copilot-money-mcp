@@ -160,6 +160,12 @@ describe('categories.ts coverage tests', () => {
   });
 
   describe('isKnownPlaidCategory', () => {
+    test('never treats an Object.prototype key as a known category (#854 review)', () => {
+      for (const key of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
+        expect(isKnownPlaidCategory(key)).toBe(false);
+      }
+    });
+
     test('should return true for exact match snake_case category', () => {
       expect(isKnownPlaidCategory('food_and_drink')).toBe(true);
     });

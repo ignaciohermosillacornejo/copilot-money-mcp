@@ -16,13 +16,21 @@
  * `foreign` and `duplicates` stay cache-only: they read location and
  * currency fields the GraphQL row does not carry.
  *
- * PIPELINE POSITION IS PART OF THE CONTRACT. Both modes apply these rules
- * after their row filters (transfers, deleted, excluded, split parents,
- * pending): live in postFilter step 9, cache in getTransactions' MODE 3. A
- * rule is a row-wise predicate, so it commutes with those filters, but
- * `exclude_excluded` sees different things in each mode, and keeping the
- * rules after it is what makes that the ONLY documented divergence (#854
- * review). Moving either mode's rule step changes parity.
+ * WHERE THE TYPE STEP RUNS, and why (#854 review). Both modes run it after
+ * their row filters and before pagination: live in postFilter step 9, cache
+ * in getTransactions' MODE 3. Two invariants depend on that, and parity is
+ * not one of them: the shared rules here are row-wise predicates, so they
+ * commute with the row filters, and the one cross-mode difference
+ * (`exclude_excluded`, which live mode can only apply per category) comes
+ * from how each mode computes exclusion, not from ordering.
+ *
+ *   - BEFORE PAGINATION, so the selection, and cache mode's
+ *     `type_specific_data` totals, cover every matching row and pair with
+ *     `total_count` rather than with the page.
+ *   - AFTER THE ROW FILTERS, for the cache-only group-wise types: `duplicates`
+ *     buckets rows, and `foreign`'s `total_fx_fees` / `countries` aggregate
+ *     them; bucketing and aggregating do not commute with row filters, so
+ *     those types describe the rows a caller would see.
  */
 
 import { isIncomeCategory, isTransferCategory } from '../utils/categories.js';

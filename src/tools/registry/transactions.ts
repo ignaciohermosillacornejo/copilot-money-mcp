@@ -153,7 +153,8 @@ export const getTransactionsTool = defineTool({
           description:
             'Filter by special type. Cache-only: foreign (international) and duplicates ' +
             '(potential duplicate transactions, paired among the rows the other filters ' +
-            'keep; pass exclude_excluded: false to include excluded copies). ' +
+            'keep; pass the matching exclude_*: false, e.g. exclude_deleted: false, to bring ' +
+            'a hidden copy back). ' +
             TRANSACTION_TYPE_RULES_TEXT +
             ' type_specific_data totals cover all matching rows, not just the returned page.',
         },

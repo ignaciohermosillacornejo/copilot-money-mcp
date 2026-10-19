@@ -1151,7 +1151,9 @@ export class CopilotMoneyTools {
     // see. A copy that is excluded, deleted, a transfer or a split parent no
     // longer forms a pair with its twin (a one-child split parent used to be
     // reported as a duplicate of its own child). To look for a pair whose
-    // other copy is excluded, pass exclude_excluded: false (#854 review).
+    // other copy is hidden, pass the matching exclude_*: false —
+    // exclude_deleted: false for a Plaid-superseded copy, exclude_excluded:
+    // false for an excluded one (#854 review).
     let typeSpecificData: Record<string, unknown> | undefined;
 
     if (transaction_type) {

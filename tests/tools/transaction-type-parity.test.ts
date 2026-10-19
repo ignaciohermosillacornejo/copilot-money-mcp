@@ -29,7 +29,7 @@ import {
   cacheTypeRuleRow,
   liveTypeRuleRow,
 } from '../../src/tools/transaction-type-rules.js';
-import { lookupKnownCategoryName } from '../../src/utils/categories.js';
+import { isKnownPlaidCategory, lookupKnownCategoryName } from '../../src/utils/categories.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
 import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
@@ -342,7 +342,7 @@ describe('transaction_type totals and internal fields (#854 review)', () => {
     });
     expect(result.count).toBe(1);
     expect(result.total_count).toBe(2);
-    expect(Math.abs(result.transactions[0]!.amount ?? 0)).toBeLessThan(70);
+    expect([40, 30]).toContain(Math.abs(result.transactions[0]!.amount ?? 0));
     expect(result.type_specific_data?.total_refunded).toBe(70);
   });
 
@@ -480,6 +480,9 @@ describe('lookupKnownCategoryName (#854 review)', () => {
     expect(lookupKnownCategoryName('Ux9visionK4mT7qR2wL5s', user)).toBeNull();
     for (const key of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
       expect(lookupKnownCategoryName(key)).toBeNull();
+      // The sibling that used the `in` operator, which walks the prototype chain.
+      expect(isKnownPlaidCategory(key)).toBe(false);
     }
+    expect(isKnownPlaidCategory('food_and_drink')).toBe(true);
   });
 });

@@ -167,7 +167,8 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // totals cover all matching rows, not the returned page, and that
   // `duplicates` pairs only the rows the other filters keep. Both were
   // behaviour changes the reorder made, and the reviewer asked for them to be
-  // stated where callers read. Measured 6_859 (~2.3%).
+  // stated where callers read. Measured 6_859; 6_896 after the round-4
+  // wording (the duplicates escape hatch names exclude_deleted), ~1.8%.
   get_transactions: 7_020,
   get_cache_info: 640,
   refresh_database: 485,
@@ -450,7 +451,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 //
 // Raised 79_600 -> 80_400 by #843/#854: the shared transaction_type rule text
 // on both transaction tools, plus the totals and duplicates wording above.
-// Measured 79_767 (~0.8%), deliberately tight.
+// Measured 79_767; 79_804 after round 4 (~0.7%), deliberately tight.
 const SCHEMA_TOTAL_BUDGET = 80_400;
 
 // ---------------------------------------------------------------------------
