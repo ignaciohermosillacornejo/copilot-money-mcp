@@ -957,8 +957,22 @@ export class CopilotMoneyTools {
   private windowMemo: {
     at: number;
     stamp: string;
+    /** Never replaced: the failed-load eviction keys on its identity. */
     rows: Promise<readonly TransactionNode[]>;
+    /** Ids this server removed from the live cache since the load; filtered at read. */
+    removed: Set<string>;
   } | null = null;
+
+  /**
+   * The one way a write removes a row from the live window cache: it also
+   * keeps the memoized window (#838) from serving that row, so the invariant
+   * "the memo never serves a row this server removed" holds at every removal
+   * site rather than by a different reason at each.
+   */
+  private evictLiveTransaction(id: string): void {
+    this.liveDb?.patchLiveTransactionDelete(id);
+    this.windowMemo?.removed.add(id);
+  }
 
   /**
    * Changes whenever something happens that could change what the window
@@ -1024,11 +1038,13 @@ export class CopilotMoneyTools {
       memo.stamp === stamp &&
       now - memo.at < CopilotMoneyTools.WINDOW_MEMO_MS
     ) {
-      return memo.rows;
+      if (memo.removed.size === 0) return memo.rows;
+      const removed = memo.removed;
+      return memo.rows.then((rows) => rows.filter((r) => !removed.has(r.id)));
     }
     const { from, to } = CopilotMoneyTools.writeResolveWindow();
     const rows = liveDb.getTransactions({ from, to }).then((r) => r.rows);
-    this.windowMemo = stamp === null ? null : { at: now, stamp, rows };
+    this.windowMemo = stamp === null ? null : { at: now, stamp, rows, removed: new Set() };
     // A failed load is not reused: the next call tries again.
     rows.catch(() => {
       if (this.windowMemo?.rows === rows) this.windowMemo = null;
@@ -4511,14 +4527,9 @@ export class CopilotMoneyTools {
       // state honest with whatever the server thinks is real.
       if (deleted) {
         this.db.patchCachedTransactionDelete(transaction_id);
-        this.liveDb?.patchLiveTransactionDelete(transaction_id);
-        // The memoized window (#838) must not serve the deleted row either:
-        // split's parent lookup reads it on a cache miss.
-        if (this.windowMemo) {
-          const memo = this.windowMemo;
-          memo.rows = memo.rows.then((rows) => rows.filter((r) => r.id !== transaction_id));
-          memo.rows.catch(() => {});
-        }
+        // Also hides the row from the memoized window (#838): split's parent
+        // lookup reads it on a cache miss.
+        this.evictLiveTransaction(transaction_id);
         this.afterTransactionWrite();
       }
 
@@ -5094,7 +5105,7 @@ export class CopilotMoneyTools {
         .map((d) => d.slice(0, 7));
       this.recordSplitParent(transaction_id);
       this.db.patchCachedTransactionDelete(transaction_id);
-      this.liveDb?.patchLiveTransactionDelete(transaction_id);
+      this.evictLiveTransaction(transaction_id);
       this.afterTransactionWrite();
 
       try {
