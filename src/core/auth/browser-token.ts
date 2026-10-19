@@ -477,12 +477,21 @@ interface ProfileMatch {
    * `profiles.ini` keeps outside the listed profiles dir).
    */
   pick: string;
+  /**
+   * The profile's absolute directory (Firefox). Used when two matches share a
+   * `pick` — the same directory name in both listing dirs of one root — so no
+   * `--browser-profile` value tells them apart; `--browser-data-dir` at the
+   * path does, since it accepts a single Firefox profile.
+   */
+  path?: string;
 }
 
 /**
  * The refusal for a `--browser-profile` that names more than one profile. It
  * names directories, never display names (often a person's real name), and
- * offers a prefixed form for each match that selects exactly that one.
+ * offers, for each match, a value that selects exactly that one: a prefixed
+ * `--browser-profile`, or — when two matches would share that value — the
+ * profile's path for `--browser-data-dir`.
  */
 function ambiguousProfileMessage(
   profile: string,
@@ -490,11 +499,30 @@ function ambiguousProfileMessage(
   matches: ProfileMatch[],
   root?: string
 ): string {
-  const choices = sortProfileNames(matches.map((m) => `"${m.pick}"`));
+  const count = new Map<string, number>();
+  for (const m of matches) count.set(m.pick, (count.get(m.pick) ?? 0) + 1);
+  const unique = matches.filter((m) => count.get(m.pick) === 1);
+  const shared = matches.filter((m) => count.get(m.pick) !== 1);
+  const offers: string[] = [];
+  if (unique.length > 0) {
+    const choices = sortProfileNames(unique.map((m) => `"${m.pick}"`));
+    offers.push(`Pick exactly one with --browser-profile ${joinList(choices, 'or')}.`);
+  }
+  if (shared.length > 0) {
+    const paths = sortProfileNames(shared.map((m) => `"${m.path ?? m.pick}"`));
+    offers.push(
+      `No --browser-profile value tells ${joinList(paths)} apart; select one of them by ` +
+        'pointing --browser-data-dir at its path.'
+    );
+  }
+  // Matches that share a value would read identically ("directory "a1.work"
+  // and directory "a1.work""), so those carry their path.
+  const described = matches.map((m) =>
+    count.get(m.pick) !== 1 && m.path ? `${m.how} at "${m.path}"` : m.how
+  );
   return (
     `--browser-profile "${profile}" is ambiguous in ${browser}${root ? ` (${root})` : ''}: ` +
-    `it matches ${joinList(matches.map((m) => m.how))}. Pick exactly one with ` +
-    `--browser-profile ${joinList(choices, 'or')}.`
+    `it matches ${joinList(described)}. ${offers.join(' ')}`
   );
 }
 
@@ -720,7 +748,7 @@ function selectFirefoxProfile(
       const path = resolve(profilesDir, dir);
       listedPaths.add(path);
       if (matchesFirefoxProfileName(dir, profile) && !matches.has(path)) {
-        matches.set(path, { how: `directory "${dir}"`, pick: `dir:${dir}` });
+        matches.set(path, { how: `directory "${dir}"`, pick: `dir:${dir}`, path });
       }
     }
   }
@@ -746,6 +774,7 @@ function selectFirefoxProfile(
       if (!matches.has(path)) {
         matches.set(path, {
           how: `the profiles.ini Name= of "${entry.path}"`,
+          path,
           pick: listedPaths.has(path) ? `dir:${basename(path)}` : `name:${entry.name}`,
         });
       }
@@ -914,17 +943,21 @@ export function resolveBrowserSelection(
     report.problem = picked.ambiguous;
     report.selectionError = 'ambiguous';
   } else if (picked.paths.length === 0) {
-    // Directory names only: display names are often people's real names, and
-    // this message travels back to the MCP client. For a `name:` miss that
-    // makes the list one of `dir:` inputs, so it says so.
+    // Directory names only: display names and profiles.ini names are often
+    // people's real names, and this message travels back to the MCP client.
+    // With a prefix, say which namespace the list is in.
     const available = sortProfileNames(picked.available);
     const listing = available.length ? available.join(', ') : 'none';
+    const { namespace } = parseProfileQuery(profile);
+    const names = location.kind === 'firefox' ? 'profiles.ini names' : 'display names';
+    const listed =
+      namespace === 'any'
+        ? `available: ${listing}`
+        : `${namespace === 'name' ? `${names} are not listed; ` : ''}` +
+          `directories, usable with dir:, are: ${listing}`;
     report.problem =
-      parseProfileQuery(profile).namespace === 'name'
-        ? `No ${browser} profile named "${profile}" was found (display names are not listed; ` +
-          `directories, usable with dir:, are: ${listing}; checked: ${roots.join(', ')}).`
-        : `No ${browser} profile named "${profile}" was found ` +
-          `(available: ${listing}; checked: ${roots.join(', ')}).`;
+      `No ${browser} profile named "${profile}" was found ` +
+      `(${listed}; checked: ${roots.join(', ')}).`;
     report.selectionError = 'no-such-profile';
   } else if (picked.unusableOnly) {
     report.selectionError = 'unusable-profile';
@@ -1122,7 +1155,8 @@ export function noCopilotSessionError(checked: string[], selection?: SelectionRe
     if (selection.selectionError === 'unusable-profile') {
       return new Error(
         `No Copilot Money session found in ${selection.label}.${details} ` +
-          `Make that profile directory readable, or name another profile or browser with ` +
+          `Make that profile directory readable or fix its profiles.ini Path=, or name ` +
+          `another profile or browser with ` +
           `${flags}. Other browsers were not searched.`
       );
     }

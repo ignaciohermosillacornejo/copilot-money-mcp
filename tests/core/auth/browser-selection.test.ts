@@ -13,7 +13,7 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import {
@@ -639,6 +639,9 @@ describe('ambiguous --browser-profile', () => {
         '"Profile 1" and the display name of directory "Default". Pick exactly one with ' +
         '--browser-profile "dir:Default" or "dir:Profile 1".'
     );
+    // The README quotes this exact refusal; keep the two from drifting apart.
+    const readme = readFileSync(new URL('../../../README.md', import.meta.url), 'utf8');
+    expect(readme).toContain(`\`${result.selection?.problem}\``);
     const message = noCopilotSessionError(result.checked, result.selection).message;
     expect(message).toStartWith(
       'Did not search Microsoft Edge (profile "Profile 1") for a Copilot Money session. ' +
@@ -827,6 +830,25 @@ describe('ambiguous --browser-profile', () => {
       'display names are not listed; directories, usable with dir:, are: Default;'
     );
     expect(result.selection?.problem).not.toContain('Person A');
+
+    // dir: misses list the same thing, in the same terms.
+    const dirMiss = await mac({ browser: 'chrome', profile: 'dir:Nobody' });
+    expect(dirMiss.selection?.problem).toContain('(directories, usable with dir:, are: Default;');
+  });
+
+  test('a Firefox name: miss speaks of profiles.ini names, not display names', async () => {
+    const root = join(appSupport, 'Firefox');
+    plantFirefox(join(root, 'Profiles'), 'abc.default-release', fakeToken('a'));
+    writeFileSync(
+      join(root, 'profiles.ini'),
+      '[Profile0]\nName=Someone\nIsRelative=1\nPath=Profiles/abc.default-release\n'
+    );
+    const result = await mac({ browser: 'firefox', profile: 'name:Nope' });
+    expect(result.selection?.problem).toContain(
+      'profiles.ini names are not listed; directories, usable with dir:, are: abc.default-release;'
+    );
+    expect(result.selection?.problem).not.toContain('display names');
+    expect(result.selection?.problem).not.toContain('Someone');
   });
 
   test('Firefox: a suffix and the same profile’s own Name= are one match', async () => {
@@ -1342,6 +1364,34 @@ describe('--browser-data-dir', () => {
       const wrong = await linux({ browser: 'firefox', profile: 'other', dataDir: profileDir });
       expect(wrong.candidates).toEqual([]);
       expect(wrong.selection?.problem).toContain('is the Firefox profile "p1.default"');
+    });
+
+    test('Firefox: the same directory name in both listing dirs is told apart by path, via --browser-data-dir', async () => {
+      const root = join(home, 'ff-merged');
+      const flat = join(root, 'a1.work');
+      const nested = join(root, 'Profiles/a1.work');
+      plantFirefox(root, 'a1.work', fakeToken('flat'));
+      plantFirefox(join(root, 'Profiles'), 'a1.work', fakeToken('nested'));
+
+      const result = await linux({ browser: 'firefox', profile: 'work', dataDir: root });
+      expect(result.candidates).toEqual([]);
+      expect(result.selection?.selectionError).toBe('ambiguous');
+      const problem = result.selection?.problem ?? '';
+      // "dir:a1.work" would itself be ambiguous, so it must not be offered.
+      expect(problem).not.toContain('"dir:a1.work"');
+      expect(problem).toContain(
+        `No --browser-profile value tells "${flat}" and "${nested}" apart; select one of them ` +
+          'by pointing --browser-data-dir at its path.'
+      );
+      expect(problem).toContain(`directory "a1.work" at "${flat}"`);
+      // And the offered remedy works for each.
+      for (const [path, tag] of [
+        [flat, 'flat'],
+        [nested, 'nested'],
+      ] as const) {
+        const one = await linux({ browser: 'firefox', dataDir: path });
+        expect(one.candidates.map((c) => c.token)).toEqual([fakeToken(tag)]);
+      }
     });
 
     test('Safari: a data dir reaching extraction finds nothing and says why', async () => {
