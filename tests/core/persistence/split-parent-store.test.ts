@@ -75,9 +75,18 @@ describe('SplitParentStore', () => {
       join(dir, `split-parents.${UID_A}.jsonl`),
       `${JSON.stringify({ i: PARENT_1 })}\n{"i":"Wq2eR7t\n${JSON.stringify({ i: 7 })}\n`
     );
-    const s = store(UID_A);
-    expect(s.has(PARENT_1)).toBe(true);
-    expect(s.has(PARENT_2)).toBe(false);
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const s = store(UID_A);
+      expect(s.has(PARENT_1)).toBe(true);
+      expect(s.has(PARENT_2)).toBe(false);
+      expect(s.has(PARENT_1)).toBe(true);
+      // One warning, with the count of lines lost.
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(String(warn.mock.calls[0]?.[0])).toContain('skipped 2 unparseable line(s)');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test('COPILOT_DISABLE_PERSISTENT_INDEX=1 disables both directions', () => {

@@ -40,6 +40,9 @@ export class SplitParentStore {
   private readonly loaded = new Map<string, Set<string>>();
   private warnedLoad = false;
   private warnedAppend = false;
+  // Per uid, as in TransactionMetaStore: a second login's torn file must
+  // still warn.
+  private readonly warnedSkipUids = new Set<string>();
 
   constructor(opts: SplitParentStoreOptions) {
     this.baseDir = opts.baseDir;
@@ -76,14 +79,24 @@ export class SplitParentStore {
     const file = this.fileFor(uid);
     try {
       if (!existsSync(file)) return ids;
+      let skipped = 0;
       for (const line of readFileSync(file, 'utf8').split('\n')) {
         if (!line.trim()) continue;
         try {
           const rec = JSON.parse(line) as { i?: unknown };
           if (typeof rec.i === 'string' && rec.i.length > 0) ids.add(rec.i);
+          else skipped += 1;
         } catch {
           // torn/corrupt line (crash mid-append) — skip; the rest still counts.
+          skipped += 1;
         }
+      }
+      // A lost line is a forgotten split parent, so say so (once per uid).
+      if (skipped > 0 && !this.warnedSkipUids.has(uid)) {
+        this.warnedSkipUids.add(uid);
+        console.warn(
+          `[copilot-money-mcp] persistent split-parent record: skipped ${skipped} unparseable line(s) — those split parents are no longer known after a restart. File: ${file}`
+        );
       }
     } catch (e) {
       if (!this.warnedLoad) {

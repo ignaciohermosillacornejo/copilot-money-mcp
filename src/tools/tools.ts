@@ -656,6 +656,8 @@ export class CopilotMoneyTools {
    */
   forgetSessionSplitParents(): void {
     this.knownSplitParents.clear();
+    // The local cache's accumulated evidence is the previous login's too.
+    this.db.forgetSplitParentIds();
   }
 
   /** Whether this server has recorded `id` as a split parent (#822, #842). */
@@ -3752,15 +3754,20 @@ export class CopilotMoneyTools {
    *
    * Cost, per call (not just the first): a recorded parent or a cached child
    * row refuses with no request. Otherwise the local cache's split evidence
-   * is read, which decodes the local cache when nothing has loaded it yet or
-   * the loaded data is past the cache TTL (the same batch decode every
-   * cache-mode read uses; free while fresh). A decode usually takes seconds,
-   * but its worst case is the decode timeout (getDecodeTimeoutMs, 90 s by
-   * default), which can outlast an MCP client's request timeout. Nothing is
-   * sent until the check resolves, so a client-side timeout leaves no
-   * half-done delete, and the decode it started keeps running for the next
-   * call. A decode that times out or fails contributes no evidence: the
-   * guard then rests on the split record and the live checks alone.
+   * is read, which runs the same batch decode every cache-mode read uses
+   * when nothing has loaded the local cache yet, or when it is past the
+   * cache TTL (5 minutes by default; COPILOT_CACHE_TTL_MINUTES, where 0
+   * means always stale) and the split evidence is over 30 minutes old
+   * (SPLIT_EVIDENCE_REREAD_MS). So a delete pays for at most one decode per
+   * 30 minutes even at a TTL of 0, and nothing in between. A decode usually
+   * takes seconds, but its worst case is the decode timeout
+   * (getDecodeTimeoutMs, 90 s by default), which can outlast an MCP client's
+   * request timeout. Nothing is sent until the check resolves, so a
+   * client-side timeout leaves no half-done delete, and the decode it
+   * started keeps running for the next call. A decode that times out or
+   * fails adds no new evidence, but loses none either: the ids earlier
+   * decodes named still refuse, alongside the split record and the live
+   * checks.
    * Then the write-resolve window is loaded — the same windowed fetch write
    * resolution uses. Cold months are served from the cache, but the
    * live-tier months (the recent ones, TTL 0) are refetched on every delete:
@@ -3857,12 +3864,14 @@ export class CopilotMoneyTools {
    *      parent_transaction_id in the cache (ledger:
    *      FirestoreTransaction.parent_transaction_id:survivesSoftDelete), so
    *      this is what still knows, after a restart, a parent whose children
-   *      were deleted in the app or by an earlier process. Decodes the local
-   *      cache when nothing is loaded yet or the loaded data is past the
-   *      cache TTL; worst case the decode timeout (see deleteTransaction).
-   *      An unreadable or timed-out cache contributes nothing rather than
-   *      blocking every delete, which leaves the record and the live checks
-   *      as the only evidence for that call.
+   *      were deleted in the app or by an earlier process. The ids are the
+   *      union over every decode this process ran, so they never shrink.
+   *      Decodes when nothing is loaded yet, or when the cache is past its
+   *      TTL (5 minutes by default, 0 = always) and the evidence is over 30
+   *      minutes old; worst case the decode timeout (see deleteTransaction).
+   *      An unreadable or timed-out cache adds nothing for that call rather
+   *      than blocking every delete; what earlier decodes named still
+   *      refuses.
    *
    * Live mode (liveDb present — the shipped CLI always runs writes this way,
    * since --write implies --live-reads) adds, before the local cache (free)
@@ -3907,30 +3916,42 @@ export class CopilotMoneyTools {
 
   /**
    * Split evidence for `id` in the local cache (#822, #842): the ids its
-   * documents name as split parents, soft-deleted children included
-   * (CopilotDatabase.getSplitParentIds), and its rows — a parent when its own
+   * documents have named as split parents this process, soft-deleted
+   * children included (CopilotDatabase.getSplitParentIds, a union that never
+   * shrinks), and its rows — a parent when its own
    * row carries children_transaction_ids or any row's parent_transaction_id
    * is `id`; `parentOfTarget` is its own row's parent_transaction_id. The
    * rows matter when no full decode produced the id set (injected data); in
-   * live mode only rows already in memory are read.
-   * An unreadable local cache yields no evidence rather than an error.
+   * live mode, or after a failed decode, only rows already in memory are
+   * read. An unreadable local cache yields no new evidence rather than an
+   * error.
    */
   private async localSplitEvidence(
     id: string
   ): Promise<{ isParent: boolean; parentOfTarget: string | null }> {
+    let readable = true;
+    try {
+      await this.db.getSplitParentIds();
+    } catch {
+      // No readable local cache (unreadable, timed out). The accumulated set
+      // keeps every id earlier decodes named — a failed reload never leaves
+      // less evidence than the call started with — and the record and the
+      // live checks still apply.
+      readable = false;
+    }
+    if (this.db.peekSplitParentIds().has(id)) return { isParent: true, parentOfTarget: null };
     let rows: readonly Transaction[] = [];
     try {
-      if ((await this.db.getSplitParentIds()).has(id)) {
-        return { isParent: true, parentOfTarget: null };
-      }
-      // Live mode reads only rows already in memory: the decode above loaded
-      // them when it ran, and a second full read (the per-collection
-      // fallback) is never worth paying on a delete.
-      rows = this.liveDb
-        ? (this.db.peekLoadedTransactions() ?? [])
-        : await this.db.getAllTransactions();
+      // Rows already in memory only, in live mode or after a failed decode:
+      // the decode above loaded them when it ran, and neither a second full
+      // read (the per-collection fallback) nor a retried decode is worth
+      // paying on a delete.
+      rows =
+        this.liveDb || !readable
+          ? (this.db.peekLoadedTransactions() ?? [])
+          : await this.db.getAllTransactions();
     } catch {
-      // No readable local cache: the record and the live checks still apply.
+      // Same as above.
     }
     return this.splitEvidenceInRows(id, rows);
   }

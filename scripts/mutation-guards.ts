@@ -536,13 +536,37 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'replace',
       find:
         '    // mutation-guard: split-parent evidence honours the cache TTL\n' +
-        '    if (!this._allCollectionsLoaded || this.isCacheStale()) {',
+        '    if (!this._allCollectionsLoaded || this.splitEvidenceDue()) {',
       with:
         '    // mutation-guard: split-parent evidence honours the cache TTL\n' +
         '    if (!this._allCollectionsLoaded) {',
     },
     expectFailingTests: [
       'past the cache TTL a delete re-reads the local cache and sees a newly deleted child',
+    ],
+    expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
+  {
+    name: 'local split evidence only accumulates',
+    file: 'src/core/database.ts',
+    invariant:
+      'A split parent never stops being one, so an id a decode once named must stay named ' +
+      'for the process even when a later decode does not (the app purged the soft-deleted ' +
+      'children, or a partial read missed them). Replacing the set on each decode would let ' +
+      "a re-read past the TTL retire evidence the session held, and the childless parent's " +
+      'delete through (#842, #852 review round 2).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '      // mutation-guard: local split evidence only accumulates\n' +
+        '      for (const id of result.splitParentIds) this._splitParentIds.add(id);',
+      with:
+        '      // mutation-guard: local split evidence only accumulates\n' +
+        '      this._splitParentIds.clear();\n' +
+        '      for (const id of result.splitParentIds) this._splitParentIds.add(id);',
+    },
+    expectFailingTests: [
+      'evidence only accumulates: a re-decode that no longer holds the children still refuses',
     ],
     expectFails: 'tests/unit/delete-split-parent.test.ts',
   },

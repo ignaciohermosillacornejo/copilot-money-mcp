@@ -222,6 +222,20 @@ function scrubPaths(text: string): string {
 const DEFAULT_CACHE_TTL_MINUTES = 5;
 
 /**
+ * How often delete_transaction's split check may re-decode the local cache
+ * for split-parent evidence (#842): at most once per this interval, and never
+ * more often than the cache TTL allows. The evidence only accumulates (see
+ * `_splitParentIds`), so a re-read can only add ids — what a slower re-read
+ * costs is a split made AND un-split in the app within the interval, which a
+ * delete in that window would not yet know. Independent of
+ * COPILOT_CACHE_TTL_MINUTES on purpose: at the 5-minute default a cleanup
+ * pass deleting a handful of split children over ten minutes would pay a
+ * full decode two or three times, and with the TTL at 0 on every delete,
+ * each with the decode timeout as its worst case.
+ */
+export const SPLIT_EVIDENCE_REREAD_MS = 30 * 60 * 1000;
+
+/**
  * Get cache TTL in milliseconds.
  * Can be configured via COPILOT_CACHE_TTL_MINUTES environment variable.
  * Defaults to 5 minutes. Set to 0 to disable caching (always reload).
@@ -288,8 +302,17 @@ export class CopilotDatabase {
   private _tags: Tag[] | null = null;
   private _holdingsHistory: HoldingsHistory[] | null = null;
   private _balanceHistory: BalanceHistory[] | null = null;
-  /** See AllCollectionsResult.splitParentIds (#842). */
-  private _splitParentIds: ReadonlySet<string> | null = null;
+  /**
+   * The union of AllCollectionsResult.splitParentIds over every decode this
+   * process has run (#842). Monotone on purpose: an id a decode once named
+   * stays named even if a later decode does not (the app purged the
+   * soft-deleted children, or a partial read missed them), because a split
+   * parent never stops being one. clearCache() leaves it alone; only a login
+   * change clears it (forgetSplitParentIds).
+   */
+  private readonly _splitParentIds = new Set<string>();
+  /** When a full decode last contributed to _splitParentIds; null = never. */
+  private _splitEvidenceAt: number | null = null;
 
   // Promises for in-flight loads to prevent duplicate loading
   private _loadingTransactions: Promise<Transaction[]> | null = null;
@@ -450,7 +473,7 @@ export class CopilotDatabase {
     this._holdingsHistory = null;
     this._tags = null;
     this._balanceHistory = null;
-    this._splitParentIds = null;
+    // _splitParentIds survives on purpose: split evidence only accumulates.
 
     // Clear in-flight loading promises
     this._loadingTransactions = null;
@@ -522,7 +545,20 @@ export class CopilotDatabase {
     if (data.balanceHistory !== undefined) this._balanceHistory = data.balanceHistory;
     if (data.categoryNameMap !== undefined) this._categoryNameMap = data.categoryNameMap;
     if (data.accountNameMap !== undefined) this._accountNameMap = data.accountNameMap;
-    if (data.splitParentIds !== undefined) this._splitParentIds = new Set(data.splitParentIds);
+    for (const id of data.splitParentIds ?? []) this._splitParentIds.add(id);
+    this._allCollectionsLoaded = true;
+    this._cacheLoadedAt = Date.now();
+  }
+
+  /**
+   * Mark hand-built fixture state as a fresh full load (#852 review), the way
+   * every real load and _injectDataForTesting do. A fixture that sets
+   * `_allCollectionsLoaded` without a load time counts as stale, and
+   * delete_transaction's split check then clears it and tries the database
+   * path — a failure that check swallows, so the test silently weakens.
+   * @internal
+   */
+  _markLoadedForTesting(): void {
     this._allCollectionsLoaded = true;
     this._cacheLoadedAt = Date.now();
   }
@@ -696,33 +732,62 @@ export class CopilotDatabase {
 
   /**
    * The transactions already decoded into memory, or null when none are.
-   * Never triggers a decode — for write paths that may use local evidence
-   * when it is free but must not pay for a LevelDB decode (#822).
+   * Never triggers a decode or the per-collection fallback read. Write paths
+   * use it where a read must stay free: resolution never pays for a LevelDB
+   * decode, and delete_transaction's split check (#842), which may already
+   * have paid for one through getSplitParentIds, never pays for a second.
    */
   peekLoadedTransactions(): readonly Transaction[] | null {
     return this._transactions;
   }
 
   /**
-   * Every id the local cache names as a split parent, soft-deleted split
-   * children included (#842) — see AllCollectionsResult.splitParentIds.
-   * Runs the batch decode every read uses when nothing is loaded yet or the
-   * loaded data is past the cache TTL, and otherwise answers from what is
-   * loaded. Honouring the TTL matters even in live mode, where nothing else
-   * reloads the local cache: a split made in the app, whose children are
-   * then deleted there, reaches the cache after the first decode, and a
-   * frozen set would never name its parent (#852 review). Empty when the
-   * loaded data did not come from a full decode pass (injected test data,
-   * the per-collection fallback), which carry no such evidence.
-   * Throws when the cache cannot be read; callers that must not be blocked by
-   * an unreadable cache catch it.
+   * Every id the local cache has named as a split parent this process,
+   * soft-deleted split children included (#842) — the union over every
+   * decode (see `_splitParentIds`), so it never shrinks.
+   *
+   * Runs the batch decode every read uses when nothing is loaded yet, or when
+   * the loaded data is past the cache TTL (5 minutes by default,
+   * COPILOT_CACHE_TTL_MINUTES) AND the evidence is older than
+   * SPLIT_EVIDENCE_REREAD_MS (30 minutes) — so even at a TTL of 0 a delete
+   * pays for at most one decode per 30 minutes. Re-reading at all matters in
+   * live mode, where nothing else reloads the local cache: a split made and
+   * un-split in the app after the first decode reaches the cache later
+   * (#852 review). Any decode, a read's included, adds to the union.
+   *
+   * A decode that throws leaves the union as it was, but the caller sees the
+   * throw; callers that must not be blocked by an unreadable cache catch it
+   * and read peekSplitParentIds().
    */
   async getSplitParentIds(): Promise<ReadonlySet<string>> {
     // mutation-guard: split-parent evidence honours the cache TTL
-    if (!this._allCollectionsLoaded || this.isCacheStale()) {
+    if (!this._allCollectionsLoaded || this.splitEvidenceDue()) {
       await this.loadAllCollections();
     }
-    return this._splitParentIds ?? new Set();
+    return this._splitParentIds;
+  }
+
+  /** The accumulated split-parent ids, never triggering a decode (#842). */
+  peekSplitParentIds(): ReadonlySet<string> {
+    return this._splitParentIds;
+  }
+
+  /**
+   * Forget the accumulated split-parent ids (#842). Only for a login change:
+   * the evidence belongs to the previous account's local cache.
+   */
+  forgetSplitParentIds(): void {
+    this._splitParentIds.clear();
+    this._splitEvidenceAt = null;
+  }
+
+  /** Whether getSplitParentIds should re-decode; see SPLIT_EVIDENCE_REREAD_MS. */
+  private splitEvidenceDue(): boolean {
+    if (!this.isCacheStale()) return false;
+    return (
+      this._splitEvidenceAt === null ||
+      Date.now() - this._splitEvidenceAt > SPLIT_EVIDENCE_REREAD_MS
+    );
   }
 
   /**
@@ -857,7 +922,9 @@ export class CopilotDatabase {
       this._holdingsHistory = result.holdingsHistory;
       this._tags = result.tags;
       this._balanceHistory = result.balanceHistory;
-      this._splitParentIds = new Set(result.splitParentIds);
+      // mutation-guard: local split evidence only accumulates
+      for (const id of result.splitParentIds) this._splitParentIds.add(id);
+      this._splitEvidenceAt = Date.now();
 
       this._decodeStats = result.decodeStats;
 

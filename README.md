@@ -193,7 +193,11 @@ COPILOT_WRITE_RESOLVE_WINDOW_MONTHS=30 copilot-money-mcp --write
 # never amounts or names) persist whenever live reads are enabled (including
 # --write mode), keyed by the logged-in account, so cross-session writes
 # skip the live window fetch.
-# Disable entirely:
+# The same switch also disables the persisted split-parent record
+# (split-parents.<uid>.jsonl, opaque ids only): delete_transaction then
+# remembers a parent split through this server only until it restarts, and
+# after a restart relies on the local cache to refuse it (#842).
+# Disable both entirely:
 COPILOT_DISABLE_PERSISTENT_INDEX=1 copilot-money-mcp --write
 ```
 

@@ -172,10 +172,15 @@ test('mid-session uid transition drops the in-memory split-parent record (#842)'
     await server.handleCallTool('get_accounts_live', {});
     tools.recordSplitParent(PARENT_ID);
     expect(tools.isRecordedSplitParent(PARENT_ID)).toBe(true);
+    // And the local cache's accumulated evidence, which is per login too.
+    const db = (server as any).db;
+    db._injectDataForTesting({ splitParentIds: [PARENT_ID] });
+    expect(db.peekSplitParentIds().has(PARENT_ID)).toBe(true);
 
     await server.handleCallTool('get_transactions_live', { period: 'this_month' });
     expect(exchangeCount()).toBe(2);
     expect(tools.isRecordedSplitParent(PARENT_ID)).toBe(false);
+    expect(db.peekSplitParentIds().has(PARENT_ID)).toBe(false);
   } finally {
     console.warn = origWarn;
   }

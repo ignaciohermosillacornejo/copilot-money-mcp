@@ -49,8 +49,7 @@ function makeDb(transactions: unknown[] = []): CopilotDatabase {
   (db as any)._transactions = transactions;
   (db as any)._userCategories = [];
   (db as any)._tags = [];
-  (db as any)._allCollectionsLoaded = true;
-  (db as any)._cacheLoadedAt = Date.now();
+  db._markLoadedForTesting();
   return db;
 }
 
@@ -354,9 +353,7 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
     (db as any).loadAllCollections = () => {
       decodes += 1;
       (db as any)._transactions = [];
-      (db as any)._splitParentIds = new Set<string>();
-      (db as any)._allCollectionsLoaded = true;
-      (db as any)._cacheLoadedAt = Date.now();
+      db._markLoadedForTesting();
       return Promise.resolve();
     };
     let fullReads = 0;
@@ -669,6 +666,13 @@ describe('split-parent evidence that survives a restart (#842)', () => {
     },
   });
 
+  /** Age the loaded cache past its TTL and the split-evidence re-read floor. */
+  function age(db: CopilotDatabase): void {
+    const past = Date.now() - 24 * 60 * 60 * 1000;
+    (db as any)._cacheLoadedAt = past;
+    (db as any)._splitEvidenceAt = past;
+  }
+
   async function fixtureDb(): Promise<CopilotDatabase> {
     const dbPath = join(mkdtempSync(join(LEVELDB_DIR, 'db-')), 'leveldb');
     await createTestDb(dbPath, [
@@ -774,13 +778,96 @@ describe('split-parent evidence that survives a restart (#842)', () => {
     await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
 
     await createTestDb(dbPath, [parentDoc, deletedChild(CHILD_1, 60), deletedChild(CHILD_2, 40)]);
-    // Age the loaded cache past the TTL instead of waiting it out.
-    (db as any)._cacheLoadedAt = Date.now() - 24 * 60 * 60 * 1000;
+    // Age the loaded cache and its split evidence past the TTL and the
+    // re-read floor instead of waiting them out.
+    age(db);
 
     await expect(
       tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
     ).rejects.toThrow(REFUSAL);
     expect(deletes(client).map((c) => (c.variables as { id: string }).id)).toEqual([PLAIN_ID]);
+  });
+
+  test('evidence only accumulates: a re-decode that no longer holds the children still refuses', async () => {
+    // Decode 1 learns the parent from its soft-deleted children. By the next
+    // delete, past the TTL, the app has purged those documents (or a partial
+    // read missed them): decode 2 names nothing. The parent stays refused.
+    const db = await fixtureDb();
+    const client = createMockGraphQLClient({
+      ...WINDOW([inWindow(PARENT_ID, 100), inWindow(PLAIN_ID, 20)]),
+      DeleteTransaction: { deleteTransaction: true },
+    });
+    const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
+    await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+
+    await createTestDb(db.getDbPath()!, [
+      {
+        collection: 'transactions',
+        id: PARENT_ID,
+        fields: {
+          transaction_id: PARENT_ID,
+          ...routing,
+          amount: 100,
+          date: '2025-03-12',
+          name: 'Hardware Store',
+          category_id: CAT_B,
+        },
+      },
+    ]);
+    age(db);
+    await expect(
+      tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
+    ).rejects.toThrow(REFUSAL);
+    // Decode 2 did run: its rows are the rewritten fixture's.
+    expect((await db.getAllTransactions()).map((t) => t.transaction_id)).toEqual([PARENT_ID]);
+    expect(deletes(client).map((c) => (c.variables as { id: string }).id)).toEqual([PLAIN_ID]);
+  });
+
+  test('past the TTL but within the re-read floor, a delete does not decode again', async () => {
+    // The evidence only accumulates, so it is re-read at most once per
+    // SPLIT_EVIDENCE_REREAD_MS even when the cache TTL (5 minutes by default,
+    // or 0) has long passed.
+    const db = await fixtureDb();
+    const client = createMockGraphQLClient({
+      ...WINDOW([inWindow(PLAIN_ID, 20)]),
+      DeleteTransaction: { deleteTransaction: true },
+    });
+    const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
+    await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+
+    let reloads = 0;
+    (db as any).loadAllCollections = () => {
+      reloads += 1;
+      return Promise.resolve();
+    };
+    (db as any)._cacheLoadedAt = Date.now() - 24 * 60 * 60 * 1000;
+    await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+    expect(reloads).toBe(0);
+    expect(deletes(client)).toHaveLength(2);
+  });
+
+  test('a stale reload that throws still refuses what earlier decodes named', async () => {
+    const db = await fixtureDb();
+    const client = createMockGraphQLClient({
+      ...WINDOW([inWindow(PARENT_ID, 100), inWindow(PLAIN_ID, 20)]),
+      DeleteTransaction: { deleteTransaction: true },
+    });
+    const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
+    await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+
+    let reloads = 0;
+    (db as any).loadAllCollections = () => {
+      reloads += 1;
+      // What a stale reload does before its decode fails.
+      db.clearCache();
+      return Promise.reject(new Error('synthetic decode timeout'));
+    };
+    age(db);
+    await expect(
+      tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
+    ).rejects.toThrow(REFUSAL);
+    expect(reloads).toBe(1);
+    expect(deletes(client)).toHaveLength(1);
   });
 
   test('a split recorded by one process is refused by the next one (persisted record)', async () => {
