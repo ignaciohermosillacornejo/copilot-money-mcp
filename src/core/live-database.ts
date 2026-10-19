@@ -794,7 +794,7 @@ export class LiveCopilotDatabase {
    *    (unverified: Mutation.addTransactionToRecurring:marksPaymentPaid).
    * Each would keep serving the pre-write figures until its TTL. Every other
    * refresh_cache scope is listed, with its reason, in
-   * NOT_TRANSACTION_DERIVED_SNAPSHOTS; a test requires each scope to be in
+   * SNAPSHOTS_NOT_DROPPED_BY_TRANSACTION_WRITES; a test requires each scope to be in
    * exactly one of the two lists, so a new scope must be classified (a cache
    * that piggybacks on an existing scope is not caught).
    */
@@ -807,7 +807,7 @@ export class LiveCopilotDatabase {
   ] as const;
 
   /** refresh_cache scopes a transaction write leaves alone, and why. */
-  static readonly NOT_TRANSACTION_DERIVED_SNAPSHOTS: Readonly<Record<string, string>> = {
+  static readonly SNAPSHOTS_NOT_DROPPED_BY_TRANSACTION_WRITES: Readonly<Record<string, string>> = {
     transactions: 'the window cache, kept coherent by each write itself',
     categories:
       'reference data; budget rollovers derive from spending, but a day-old list is accepted',

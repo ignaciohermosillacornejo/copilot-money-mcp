@@ -928,10 +928,12 @@ describe('a transaction write drops the transaction-derived snapshots (#825)', (
     };
     const scopes = scopeSchema.scope.enum.filter((sc) => sc !== 'all').sort();
     const dropped: readonly string[] = LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS;
-    const exempt = Object.keys(LiveCopilotDatabase.NOT_TRANSACTION_DERIVED_SNAPSHOTS);
+    const exempt = Object.keys(LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_TRANSACTION_WRITES);
     expect(dropped.filter((k) => exempt.includes(k))).toEqual([]);
     expect([...dropped, ...exempt].sort()).toEqual(scopes);
-    for (const reason of Object.values(LiveCopilotDatabase.NOT_TRANSACTION_DERIVED_SNAPSHOTS)) {
+    for (const reason of Object.values(
+      LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_TRANSACTION_WRITES
+    )) {
       expect(reason.length).toBeGreaterThan(0);
     }
   });
