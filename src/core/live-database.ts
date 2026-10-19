@@ -772,6 +772,7 @@ export class LiveCopilotDatabase {
    * in no cached month has nothing stale to serve.
    */
   invalidateLiveTransactionMonths(ids: readonly string[]): void {
+    if (ids.length === 0) return;
     const wanted = new Set(ids);
     const stale = this.transactionsWindowCache
       .cachedMonths()
@@ -792,11 +793,11 @@ export class LiveCopilotDatabase {
    *    transaction to a recurring can mark a payment as made, which is a
    *    `payments[].isPaid` flip and a `nextPaymentDate` move on the recurring
    *    (unverified: Mutation.addTransactionToRecurring:marksPaymentPaid).
-   * Each would keep serving the pre-write figures until its TTL. Every other
-   * refresh_cache scope is listed, with its reason, in
-   * SNAPSHOTS_NOT_DROPPED_BY_TRANSACTION_WRITES; a test requires each scope to be in
-   * exactly one of the two lists, so a new scope must be classified (a cache
-   * that piggybacks on an existing scope is not caught).
+   * Each would keep serving the pre-write figures until its TTL. Every
+   * other refresh_cache scope is listed, with its reason, in
+   * SNAPSHOTS_NOT_DROPPED_BY_TRANSACTION_WRITES; a test requires each scope
+   * to be in exactly one of the two lists, so a new scope must be
+   * classified (a cache that piggybacks on an existing scope is not caught).
    */
   static readonly TRANSACTION_DERIVED_SNAPSHOTS = [
     'accounts',

@@ -921,8 +921,10 @@ function expectSnapshotsDropped(liveDb: LiveCopilotDatabase): void {
 
 describe('a transaction write drops the transaction-derived snapshots (#825)', () => {
   test('every refresh_cache scope is classified: dropped by a transaction write, or exempt with a reason', () => {
-    // The scope enum lists every live cache; a new one fails here until it is
-    // put in one of the two lists.
+    // The scope enum lists every refresh_cache scope; a new scope fails here
+    // until it is put in one of the two lists. Scope-level, not cache-level: a
+    // cache sharing an existing scope (investment_balance flushes two) is not
+    // seen by this test.
     const scopeSchema = TOOL_REGISTRY.get('refresh_cache')!.schema.inputSchema.properties as {
       scope: { enum: string[] };
     };
