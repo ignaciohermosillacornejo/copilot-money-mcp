@@ -10,7 +10,7 @@
  */
 
 import { describe, test, expect, afterAll, afterEach, spyOn } from 'bun:test';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
@@ -227,5 +227,34 @@ describe('a burst of deletes shares one window load (#838)', () => {
     const afterFailure = windowRequests();
     await del(IDS[1]!);
     expect(windowRequests()).toBeGreaterThan(afterFailure);
+  });
+});
+
+describe('the memo chokepoint cannot be bypassed (#838)', () => {
+  test('patchLiveTransactionDelete is called in src/tools only inside evictLiveTransaction', () => {
+    // A removal that skipped the chokepoint would leave the memo serving the
+    // row. Scan the tool sources for direct calls.
+    const root = join(__dirname, '../../src/tools');
+    const files: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (p.endsWith('.ts')) files.push(p);
+      }
+    };
+    walk(root);
+    const calls: string[] = [];
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8');
+      for (const m of src.matchAll(/\.patchLiveTransactionDelete\(/g)) {
+        const before = src.slice(0, m.index);
+        const owner = before.lastIndexOf('private evictLiveTransaction(');
+        const nextMethodStart = before.lastIndexOf('\n  private ');
+        const inChokepoint = owner !== -1 && nextMethodStart <= owner;
+        calls.push(`${f.slice(root.length)}:${inChokepoint ? 'chokepoint' : 'BYPASS'}`);
+      }
+    }
+    expect(calls).toEqual(['/tools.ts:chokepoint']);
   });
 });

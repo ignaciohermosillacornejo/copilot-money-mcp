@@ -1009,8 +1009,12 @@ export class CopilotMoneyTools {
    * NOT a parent), and splitParentEvidence checks the live window cache and
    * the split record afresh on every call, so a split this server makes, or
    * any row a write or a read puts in the cache, is seen whatever the memo
-   * holds. A row this server deletes is filtered out of the memo too (see
-   * deleteTransaction), so a later lookup cannot resolve it. What
+   * holds. A row this server removes from the live cache is filtered out of
+   * the memo too, at every removal site (evictLiveTransaction), so a later
+   * lookup cannot resolve it from the memo (routing resolution can still,
+   * from the append-only meta index). A sharedWindowLoad group keeps the
+   * promise it first got, so a removal inside one group is not seen by later
+   * calls in it; no group today removes a row before its last read. What
    * a memoized window CAN miss: a child row another client (the app, another
    * device) created in the last few seconds, in a month not otherwise cached
    * here. That is the same gap the window always had for a split made just
