@@ -750,10 +750,20 @@ export class CopilotMoneyTools {
   /**
    * Cache-mode side of the shared `category` filter (#845): the same
    * resolveCategoryFilter live mode uses, over the user's categories. A value
-   * missing from them is still accepted when it is a Plaid-taxonomy id or an
-   * id some cached transaction carries, so an old row stays reachable.
+   * missing from them is still accepted when a transaction IN THE QUERIED DATE
+   * RANGE carries it (an orphaned id stays reachable). That corpus is the one
+   * live mode can see — its fetched window — so the two modes accept and
+   * reject the same values; checking the whole cache here, as the first
+   * version did, made an out-of-window orphan id return zero rows silently in
+   * cache mode and throw in live mode (#858 review). A Plaid-taxonomy id with
+   * no row in range is rejected for the same reason: accepting it returned a
+   * silent zero.
    */
-  private async resolveCacheCategoryFilter(category: string): Promise<Set<string>> {
+  private async resolveCacheCategoryFilter(
+    category: string,
+    startDate: string | undefined,
+    endDate: string | undefined
+  ): Promise<Set<string>> {
     const userCategories = await this.db.getUserCategories();
     const nodes = userCategories.map((c) => ({
       id: c.category_id,
@@ -762,8 +772,9 @@ export class CopilotMoneyTools {
     }));
     const knownElsewhere =
       !nodes.some((n) => n.id === category) &&
-      (isKnownPlaidCategory(category) ||
-        (await this.db.getAllTransactions()).some((t) => t.category_id === category));
+      (await this.db.getTransactions({ startDate, endDate, limit: 50000 })).some(
+        (t) => t.category_id === category
+      );
     return resolveCategoryFilter(category, nodes, { listTool: 'get_categories', knownElsewhere });
   }
 
@@ -1051,11 +1062,14 @@ export class CopilotMoneyTools {
     }
 
     // Query transactions with higher limit for post-filtering
+    const categoryIds =
+      category !== undefined
+        ? await this.resolveCacheCategoryFilter(category, start_date, end_date)
+        : undefined;
     let transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
-      categoryIds:
-        category !== undefined ? await this.resolveCacheCategoryFilter(category) : undefined,
+      categoryIds,
       merchant,
       accountId: account_id,
       minAmount: min_amount,

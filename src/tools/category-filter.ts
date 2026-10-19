@@ -30,9 +30,10 @@ export interface ResolveCategoryFilterOptions {
    */
   listTool: string;
   /**
-   * True when `value` is a real id that is missing from `categories` — a
-   * Plaid-taxonomy id in cache mode, or an id some transaction still carries.
-   * Such a value is accepted as a single id with no descendants.
+   * True when `value` is missing from `categories` but a transaction in the
+   * queried date range carries it (an orphaned id). Both modes compute it over
+   * that same corpus, the rows the call fetched for its window. Such a value is
+   * accepted; if it is also some category's parent, its children still expand.
    */
   knownElsewhere?: boolean;
 }
@@ -56,8 +57,9 @@ export function resolveCategoryFilter(
         ? ` '${value}' is a category NAME; its id is ${byName.map((c) => `'${c.id}'`).join(' or ')}.`
         : '';
     throw new Error(
-      `category '${value}' matches no category id. The filter takes a category id, not a ` +
-        `name: pass an id from ${opts.listTool}.${suggestion}`
+      `Category '${value}' matches no category id, and no transaction in the date range ` +
+        `carries it. The filter takes a category id, not a name: pass an id from ` +
+        `${opts.listTool}.${suggestion}`
     );
   }
 
@@ -70,9 +72,8 @@ export function resolveCategoryFilter(
   }
 
   const selected = new Set<string>();
-  const queue = [value];
-  while (queue.length > 0) {
-    const id = queue.pop() as string;
+  const queue: string[] = [value];
+  for (let id = queue.pop(); id !== undefined; id = queue.pop()) {
     if (selected.has(id)) continue; // a cycle in bad data must not loop forever
     selected.add(id);
     queue.push(...(childrenOf.get(id) ?? []));
@@ -84,7 +85,7 @@ export function resolveCategoryFilter(
 export function categoryFilterDescription(listTool: string): string {
   return (
     `Filter by category ID from ${listTool} (exact match, not a name). A parent ` +
-    "category's id also returns its subcategories' rows. An id that matches no category " +
-    'is an error.'
+    "category's id also returns its subcategories' rows. An id that belongs to no " +
+    'category and to no transaction in the date range is an error.'
   );
 }

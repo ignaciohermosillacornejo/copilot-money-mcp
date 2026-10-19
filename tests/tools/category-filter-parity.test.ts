@@ -103,8 +103,14 @@ async function liveTools(): Promise<LiveTransactionsTools> {
         goal: null,
       }) as TransactionNode
   );
-  (live as unknown as { getTransactions: () => Promise<unknown> }).getTransactions = async () => ({
-    rows: nodes,
+  // Honour the requested window, as the real fetch does: an orphan id is
+  // accepted only when a row in the window carries it (#858 review).
+  (
+    live as unknown as {
+      getTransactions: (r: { from: string; to: string }) => Promise<unknown>;
+    }
+  ).getTransactions = async ({ from, to }) => ({
+    rows: nodes.filter((n) => n.date >= from && n.date <= to),
     oldest_fetched_at: 0,
     newest_fetched_at: 0,
     hit: true,
@@ -149,22 +155,44 @@ describe('category filter parity across modes (#845)', () => {
     expect(cache).toEqual(expected.map((r) => r.id).sort());
   });
 
+  const APRIL = { start_date: '2026-04-01', end_date: '2026-04-30', limit: 500 } as const;
+
+  async function errorOf(run: () => Promise<unknown>): Promise<string> {
+    try {
+      await run();
+    } catch (e) {
+      return (e as Error).message;
+    }
+    throw new Error('expected the call to be rejected');
+  }
+
   test.each([
-    ['a category name', 'Food', /'Food' is a category NAME; its id is 'Pq3mW8nR2tV6xL9sK4dB'/],
-    ['a substring of an id', PARENT.slice(0, 6), /matches no category id/],
-    ['a different-case id', PARENT.toLowerCase(), /matches no category id/],
-    ['a typo', 'not-a-category', /matches no category id/],
-  ])('%s is rejected in both modes, with a hint', async (_label, category, message) => {
-    await expect(cacheTools().getTransactions({ ...RANGE, category })).rejects.toThrow(message);
-    await expect(cacheTools().getTransactions({ ...RANGE, category })).rejects.toThrow(
-      /from get_categories\./
-    );
-    const live = await liveTools();
-    await expect(live.getTransactions({ ...RANGE, category })).rejects.toThrow(message);
-    await expect(live.getTransactions({ ...RANGE, category })).rejects.toThrow(
-      /from get_categories_live\./
-    );
-  });
+    [
+      'a category name',
+      'Food',
+      RANGE,
+      /'Food' is a category NAME; its id is 'Pq3mW8nR2tV6xL9sK4dB'/,
+    ],
+    ['a substring of an id', PARENT.slice(0, 6), RANGE, /matches no category id/],
+    ['a different-case id', PARENT.toLowerCase(), RANGE, /matches no category id/],
+    ['a typo', 'not-a-category', RANGE, /matches no category id/],
+    // #858 review: both modes judge an orphan id by the same corpus, the rows in
+    // the queried window. Outside its rows' window it is rejected in both.
+    ["an orphan id outside its rows' window", ORPHAN, APRIL, /matches no category id/],
+  ] as const)(
+    '%s is rejected in both modes, with a hint',
+    async (_label, category, range, message) => {
+      const cacheMessage = await errorOf(() =>
+        cacheTools().getTransactions({ ...range, category })
+      );
+      const live = await liveTools();
+      const liveMessage = await errorOf(() => live.getTransactions({ ...range, category }));
+      expect(cacheMessage).toMatch(message);
+      expect(cacheMessage).toMatch(/from get_categories\./);
+      expect(liveMessage).toMatch(message);
+      expect(liveMessage).toMatch(/from get_categories_live\./);
+    }
+  );
 });
 
 describe('resolveCategoryFilter', () => {
@@ -176,6 +204,20 @@ describe('resolveCategoryFilter', () => {
     ];
     expect(resolveCategoryFilter('Ga1', nodes, { listTool: 'x' })).toEqual(
       new Set(['Ga1', 'Gb2', 'Gc3'])
+    );
+  });
+
+  test('a row that is its own parent terminates and selects itself', () => {
+    expect(
+      resolveCategoryFilter('Gs1', [{ id: 'Gs1', parentId: 'Gs1' }], { listTool: 'x' })
+    ).toEqual(new Set(['Gs1']));
+  });
+
+  test('an orphan id accepted via knownElsewhere still expands children that name it', () => {
+    // A parent deleted upstream whose children survive in the list.
+    const nodes = [{ id: 'Gk2', parentId: 'Gp1' }];
+    expect(resolveCategoryFilter('Gp1', nodes, { listTool: 'x', knownElsewhere: true })).toEqual(
+      new Set(['Gp1', 'Gk2'])
     );
   });
 });

@@ -4,7 +4,7 @@ title: The transactions category filter silently returned zero rows for a parent
 class: identity-resolution
 status: fixed
 detected: live-probe  # release parity rows CAT-04/05/06 passed a parent id and a name in both modes
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/858
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/845
 date: 2026-10-18
 ---
@@ -49,8 +49,10 @@ One resolver for both modes, `resolveCategoryFilter` in `src/tools/category-filt
 - A value that is no known id is an error. The error says the filter takes an id, names the
   tool that lists them, and suggests the id when the value is a category name.
 
-An id carried only by a transaction (or a Plaid-taxonomy id in cache mode) is still accepted.
-`database.ts` now takes a resolved id set and does no matching of its own.
+An id carried only by a transaction in the queried date range is still accepted. Both modes
+judge that against the same corpus, the window's rows; the first version checked the whole
+cache in cache mode, so an out-of-window orphan id was a silent zero there and an error live
+(caught in review). `database.ts` now takes a resolved id set and does no matching of its own.
 
 ## Detector
 
