@@ -974,10 +974,15 @@ export class CopilotMoneyTools {
   private writeStamp(): string | null {
     const client = this.graphqlClient as Partial<Pick<GraphQLClient, 'getMutationCount'>> | null;
     if (typeof client?.getMutationCount !== 'function') return null;
-    // Test doubles without a window cache get no memo either.
+    // Test doubles without a window cache (or one without a generation) get
+    // no memo either.
     if (typeof this.liveDb?.getTransactionsWindowCache !== 'function') return null;
+    const windowCache = this.liveDb.getTransactionsWindowCache() as Partial<
+      Pick<ReturnType<LiveCopilotDatabase['getTransactionsWindowCache']>, 'generationId'>
+    >;
+    if (typeof windowCache?.generationId !== 'function') return null;
     const writes = client.getMutationCount({ exclude: ['DeleteTransaction'] });
-    return `${writes}:${this.liveDb.getTransactionsWindowCache().generationId()}`;
+    return `${writes}:${windowCache.generationId()}`;
   }
 
   /**
@@ -989,7 +994,9 @@ export class CopilotMoneyTools {
    * source is positive (#842 — nothing retires a record or proves an id is
    * NOT a parent), and splitParentEvidence checks the live window cache and
    * the split record afresh on every call, so a split this server makes, or
-   * any row a write puts in the cache, is seen whatever the memo holds. What
+   * any row a write or a read puts in the cache, is seen whatever the memo
+   * holds. A row this server deletes is filtered out of the memo too (see
+   * deleteTransaction), so a later lookup cannot resolve it. What
    * a memoized window CAN miss: a child row another client (the app, another
    * device) created in the last few seconds, in a month not otherwise cached
    * here. That is the same gap the window always had for a split made just
@@ -997,6 +1004,13 @@ export class CopilotMoneyTools {
    * routing resolution and split's parent lookup, where the same gap means a
    * row another client created in the last few seconds can resolve as "not
    * found": an error, never a write to the wrong row.
+   *
+   * A memo hit counts as a checked window for refuseUncheckedSplitTarget:
+   * the evidence held is at most WINDOW_MEMO_MS old, and the refusal exists
+   * for a window that could not be read at all. If the network has dropped
+   * since, the write itself fails loudly. The memo is replaced on the next
+   * call after it expires, not on a timer, so a burst's rows stay held until
+   * then (one window, bounded).
    */
   private loadWriteResolveWindow(): Promise<readonly TransactionNode[]> {
     const liveDb = this.liveDb;
@@ -4498,6 +4512,13 @@ export class CopilotMoneyTools {
       if (deleted) {
         this.db.patchCachedTransactionDelete(transaction_id);
         this.liveDb?.patchLiveTransactionDelete(transaction_id);
+        // The memoized window (#838) must not serve the deleted row either:
+        // split's parent lookup reads it on a cache miss.
+        if (this.windowMemo) {
+          const memo = this.windowMemo;
+          memo.rows = memo.rows.then((rows) => rows.filter((r) => r.id !== transaction_id));
+          memo.rows.catch(() => {});
+        }
         this.afterTransactionWrite();
       }
 

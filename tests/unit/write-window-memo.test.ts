@@ -42,17 +42,67 @@ afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
  */
 const WINDOW_LOAD = monthsCovered(CopilotMoneyTools.writeResolveWindow()).length;
 
-function setup(opts: { failFirstLoad?: boolean } = {}) {
+/** A row as the Transactions query returns it. */
+function windowNode(id: string, date: string) {
+  return {
+    id,
+    accountId: ACCOUNT_ID,
+    itemId: ITEM_ID,
+    categoryId: '',
+    recurringId: null,
+    parentId: null,
+    isReviewed: false,
+    isPending: false,
+    amount: 3,
+    date,
+    name: 'Row',
+    type: 'REGULAR' as const,
+    userNotes: null,
+    tipAmount: null,
+    suggestedCategoryIds: [],
+    isoCurrencyCode: null,
+    createdAt: 1,
+    tags: [],
+    goal: null,
+  };
+}
+
+function setup(
+  opts: { failFirstLoad?: boolean; windowRows?: { id: string; date: string }[] } = {}
+) {
   let transactionsCalls = 0;
+  const nodes = (opts.windowRows ?? []).map((r) => windowNode(r.id, r.date));
   const client = createMockGraphQLClient({
     Transactions: () => {
       transactionsCalls += 1;
       if (opts.failFirstLoad && transactionsCalls === 1) {
         return new Error('synthetic network failure');
       }
-      return { transactions: { edges: [], pageInfo: { endCursor: null, hasNextPage: false } } };
+      return {
+        transactions: {
+          edges: nodes.map((node) => ({ cursor: `c-${node.id}`, node })),
+          pageInfo: { endCursor: null, hasNextPage: false },
+        },
+      };
     },
     DeleteTransaction: { deleteTransaction: true },
+    // split_transaction validates its children's categories first (#846).
+    Categories: {
+      categories: [
+        {
+          id: 'Cq1wE4rT7yU0iO3pA6sD',
+          name: 'Synthetic',
+          templateId: null,
+          colorName: 'ORANGE2',
+          isExcluded: false,
+          isRolloverDisabled: false,
+          canBeDeleted: true,
+          icon: { __typename: 'EmojiUnicode' as const, unicode: '🛒' },
+          budget: null,
+        },
+      ],
+    },
+    User: { user: { id: 'Cv6bN9mQ2wE5rT8yU1iO', budgetingConfig: null } },
     EditTransaction: (vars) => {
       const v = vars as { id: string; input: EditTransactionInput };
       return {
@@ -149,6 +199,26 @@ describe('a burst of deletes shares one window load (#838)', () => {
     tools.forgetSessionSplitParents();
     await del(IDS[1]!);
     expect(windowRequests()).toBeGreaterThan(WINDOW_LOAD);
+  });
+
+  test('a deleted row is dropped from the memo, so split no longer resolves it', async () => {
+    // The delete burst's own window load memoizes IDS[0]'s row; once it is
+    // deleted, a split of it within the memo window must not find a snapshot.
+    const { tools, del } = setup({
+      windowRows: [{ id: IDS[0]!, date: new Date().toISOString().slice(0, 10) }],
+    });
+    await del(IDS[1]!); // loads and memoizes the window, IDS[0] included
+    await del(IDS[0]!);
+    await expect(
+      tools.splitTransaction({
+        transaction_id: IDS[0]!,
+        ...routing,
+        splits: [
+          { amount: 1, category_id: 'Cq1wE4rT7yU0iO3pA6sD' },
+          { amount: 2, category_id: 'Cq1wE4rT7yU0iO3pA6sD' },
+        ],
+      })
+    ).rejects.toThrow(/not found/);
   });
 
   test('a failed load is not reused', async () => {
