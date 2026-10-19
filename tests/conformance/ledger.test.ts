@@ -209,6 +209,16 @@ describe('conformance ledger', () => {
     expect(dupes).toEqual([]);
   });
 
+  test('every Mutation.* aspect after the colon is kebab-case', () => {
+    // One spelling, so a grep for an aspect finds every mention of it.
+    // Several #836/#848/#825 aspects landed camelCase and were renamed.
+    const offenders = CONFORMANCE_LEDGER.map((entry) => entry.surface).filter((surface) => {
+      const m = /^Mutation\.[^:]+:(.+)$/.exec(surface);
+      return m !== null && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(m[1]!);
+    });
+    expect(offenders).toEqual([]);
+  });
+
   test('no stale toolParams: every listed path still exists in the write-tool schemas', () => {
     const reachable = new Set(reachableParams);
     const stale = [...ledgerParams].filter((path) => !reachable.has(path));

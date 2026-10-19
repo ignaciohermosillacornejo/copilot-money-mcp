@@ -20,6 +20,11 @@ bun run fix          # Run lint:fix + format
 > hand with `bun run check:ghost-lines`. With no range it prints `SKIPPED` and
 > exits 0 locally, and exits 1 in CI.
 
+> `check:bug-corpus` (docs/bugs/README.md's counts and index against the entry
+> files) is not in the `check` chain by name, but `bun run check` runs it: its
+> test, `tests/scripts/check-bug-corpus.test.ts`, runs the gate on the real tree
+> under `bun test`. CI also runs it as its own step.
+
 > `bun run check` does NOT run `check:skills` (the `skills/` linter). Run
 > `bun run check:skills` separately when touching anything under `skills/`.
 > It shells out to `scripts/dump-tool-names.ts` and `scripts/dump-tool-args.ts`

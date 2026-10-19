@@ -44,6 +44,9 @@ jobs:
       - name: Tool count drift check
         run: bun run check:tool-counts
 
+      - name: Bug corpus drift check
+        run: bun run check:bug-corpus
+
       - name: Privacy endpoints drift check
         run: bun run check:privacy-endpoints
 

@@ -84,6 +84,7 @@ scripts/*
 !scripts/check-server-json.ts
 !scripts/check-deps-pinned.ts
 !scripts/check-tool-counts.ts
+!scripts/check-bug-corpus.ts
 !scripts/check-privacy-endpoints.ts
 !scripts/check-concealment.ts
 !scripts/check-workflows.ts

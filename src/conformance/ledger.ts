@@ -479,7 +479,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'a category id runs validateCategoryId first (tests/tools/write-reference-validation.test.ts).',
   },
   {
-    surface: 'Mutation.createTransaction:emptyCategoryForIncome',
+    surface: 'Mutation.createTransaction:empty-category-for-income',
     kind: 'operation',
     oracle: null,
     class: 'verified-once',
@@ -713,7 +713,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   responseShape('addTransactionToRecurring'),
   appliesSurface('addTransactionToRecurring'),
   {
-    surface: 'Mutation.addTransactionToRecurring:marksPaymentPaid',
+    surface: 'Mutation.addTransactionToRecurring:marks-payment-paid',
     kind: 'operation',
     oracle: null,
     class: 'unverified',
@@ -725,7 +725,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'which costs one request each if the assumption is wrong.',
   },
   {
-    surface: 'Mutation.addTransactionToRecurring:setsCategory',
+    surface: 'Mutation.addTransactionToRecurring:sets-category',
     kind: 'operation',
     oracle: null,
     class: 'verified-once',
@@ -1254,7 +1254,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   // child) rather than probed. Settling one means a round-trip on a throwaway
   // manual transaction, reading the account balance before and after.
   {
-    surface: 'Mutation.editTransaction:splitParentBalanceFields',
+    surface: 'Mutation.editTransaction:split-parent-balance-fields',
     kind: 'operation',
     oracle: null,
     class: 'unverified',
@@ -1267,7 +1267,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'balance effect). Never probed.',
   },
   {
-    surface: 'Mutation.editTransaction:splitChildAmount',
+    surface: 'Mutation.editTransaction:split-child-amount',
     kind: 'operation',
     oracle: null,
     class: 'unverified',
@@ -1280,7 +1280,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'account, balance read before and after).',
   },
   {
-    surface: 'Mutation.createRecurring:splitParent',
+    surface: 'Mutation.createRecurring:split-parent',
     kind: 'operation',
     oracle: null,
     class: 'unverified',
@@ -1290,7 +1290,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'a known split parent. Never probed.',
   },
   {
-    surface: 'Mutation.addTransactionToRecurring:splitParent',
+    surface: 'Mutation.addTransactionToRecurring:split-parent',
     kind: 'operation',
     oracle: null,
     class: 'unverified',
@@ -1309,7 +1309,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'the account balance. split_transaction refuses a known split parent. Never probed.',
   },
   {
-    surface: 'Mutation.splitTransaction:splitChild',
+    surface: 'Mutation.splitTransaction:split-child',
     kind: 'operation',
     oracle: null,
     class: 'unverified',

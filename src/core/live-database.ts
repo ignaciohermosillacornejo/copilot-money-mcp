@@ -898,7 +898,7 @@ export class LiveCopilotDatabase {
    *  - `upcoming_recurrings` (1 h) and `recurring` (6 h): linking a
    *    transaction to a recurring can mark a payment as made, which is a
    *    `payments[].isPaid` flip and a `nextPaymentDate` move on the recurring
-   *    (unverified: Mutation.addTransactionToRecurring:marksPaymentPaid).
+   *    (unverified: Mutation.addTransactionToRecurring:marks-payment-paid).
    * Each would keep serving the pre-write figures until its TTL. Every
    * other refresh_cache scope is listed, with its reason, in
    * SNAPSHOTS_NOT_DROPPED_BY_TRANSACTION_WRITES; a test requires each scope

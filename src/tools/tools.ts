@@ -1142,13 +1142,17 @@ export class CopilotMoneyTools {
    * mode: live's corpus is the raw server window too. An orphaned id stays
    * reachable, and both modes accept and reject the same values.
    *
-   * The corpus is read the same way the rows it vouches for are read, so it
-   * can be neither narrower nor wider than them (`scope`):
+   * The corpus is read the way the rows it vouches for are read, so it is
+   * never wider than them (`scope`):
    *   - 'query' (the filtered path): the main query's read — its date bounds,
    *     or none, and its 50k cap — but not its merchant/account/amount
-   *     filters. With no date bounds (cache allows that; live does not) that is
-   *     the whole cache up to the cap, and the error says "in the cache".
-   *     Above 50k rows the corpus and the query truncate the same way.
+   *     filters, which the database applies before the cap. With no date
+   *     bounds (cache allows that; live does not) that is the whole cache up
+   *     to the cap, and the error says "in the cache". So above 50k rows in
+   *     range the corpus can be the narrower of the two (the query's 50k are
+   *     taken from a pruned set that reaches further back), and an id carried
+   *     only past the corpus's cap errors rather than returning rows: the loud
+   *     direction, not the silent zero, and unreachable in practice.
    *   - 'whole-cache' (the transaction_id lookup): the lookup searches the
    *     whole cache uncapped, so the corpus does too, and an orphan id is
    *     judged against every row the lookup could find (#858 review round 7).
@@ -1172,7 +1176,7 @@ export class CopilotMoneyTools {
     startDate: string | undefined,
     endDate: string | undefined,
     keep: { excludeDeleted: boolean; excludeSplitParents: boolean },
-    scope: 'query' | 'whole-cache' = 'query'
+    scope: 'query' | 'whole-cache'
   ): Promise<Set<string>> {
     const userCategories = await this.db.getUserCategories();
     const nodes = userCategories.map((c) => ({
@@ -1510,10 +1514,16 @@ export class CopilotMoneyTools {
     // Query transactions with higher limit for post-filtering
     const categoryIds =
       category !== undefined
-        ? await this.resolveCacheCategoryFilter(category, start_date, end_date, {
-            excludeDeleted: exclude_deleted,
-            excludeSplitParents: exclude_split_parents,
-          })
+        ? await this.resolveCacheCategoryFilter(
+            category,
+            start_date,
+            end_date,
+            {
+              excludeDeleted: exclude_deleted,
+              excludeSplitParents: exclude_split_parents,
+            },
+            'query'
+          )
         : undefined;
     let transactions = await this.db.getTransactions({
       startDate: start_date,
@@ -4366,7 +4376,7 @@ export class CopilotMoneyTools {
       amount,
       // CreateTransactionInput.categoryId is non-null (ID!), so a type without a
       // category sends an empty id, which ends in the state the app shows for
-      // these types anyway (ledger: Mutation.createTransaction:emptyCategoryForIncome,
+      // these types anyway (ledger: Mutation.createTransaction:empty-category-for-income,
       // verified once by a live probe).
       categoryId: category_id ?? '',
       type,
@@ -4760,7 +4770,7 @@ export class CopilotMoneyTools {
    * transaction. Same defensive choice as delete_transaction.
    *
    * Side effect: the server also sets the row's category to the recurring's
-   * category (ledger: Mutation.addTransactionToRecurring:setsCategory).
+   * category (ledger: Mutation.addTransactionToRecurring:sets-category).
    *
    * Split parents (#836): a known split parent is refused before sending, as
    * is any target when the split check cannot load the write-resolve window

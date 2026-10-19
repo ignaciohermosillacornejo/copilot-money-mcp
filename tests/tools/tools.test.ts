@@ -3853,7 +3853,7 @@ describe('getHoldings', () => {
     ['is_cash_equivalent only', { type: undefined, is_cash_equivalent: true }, true],
     ['neither', { type: 'equity', is_cash_equivalent: false }, false],
   ] as const)(
-    'a CUR:USD security with %s %s matched by a bare USD filter',
+    'a CUR:USD security with %s (%p) is matched by a bare USD filter: %p',
     async (_label, fields, matches) => {
       (db as any)._securities = mockSecurities.map((sec) =>
         sec.security_id === 'sec_usd' ? { ...sec, ...fields } : sec

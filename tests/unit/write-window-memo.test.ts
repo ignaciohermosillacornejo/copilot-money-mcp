@@ -234,8 +234,15 @@ describe('the memo chokepoint cannot be bypassed (#838)', () => {
   test('patchLiveTransactionDelete is called in src only inside evictLiveTransaction', () => {
     // A removal that skipped the chokepoint would leave the memo serving the
     // row. Scan every source file for direct calls. The definition has no
-    // leading dot, and neither does a prose mention, so neither matches; a
-    // comment that did spell the call would fail loudly here, which is safe.
+    // leading dot, and neither does a prose mention, so neither matches. A
+    // comment that did spell the call (say, evictLiveTransaction's own doc
+    // showing `this.liveDb?.patchLiveTransactionDelete(id)`) fails here as a
+    // BYPASS: loud and safe, but the next author to document the chokepoint
+    // that way pays for it. This is a source-text invariant kept beside the
+    // memo it protects, not a check: script.
+    // One anchor for both assertions, so an indentation shift or a second
+    // declaration fails as a declaration problem, not as a false BYPASS.
+    const DECL = '\n  private evictLiveTransaction(';
     const root = join(__dirname, '../../src');
     const files: string[] = [];
     const walk = (dir: string): void => {
@@ -250,14 +257,16 @@ describe('the memo chokepoint cannot be bypassed (#838)', () => {
     let declarationsFound = 0;
     for (const f of files) {
       const src = readFileSync(f, 'utf8');
-      if (src.includes('private evictLiveTransaction(')) declarationsFound += 1;
+      declarationsFound += src.split(DECL).length - 1;
       for (const m of src.matchAll(/\.patchLiveTransactionDelete\(/g)) {
         const before = src.slice(0, m.index);
         // Form-independent: a call inside evictLiveTransaction's body has no
         // two-space-indented block close between the declaration and itself;
         // a call in any later member has evict's own closing brace there, and
         // a call before it, or in another file, has no declaration at all.
-        const owner = before.lastIndexOf('\n  private evictLiveTransaction(');
+        // This relies on evict's body spanning lines, which format:check holds
+        // (a one-line body would exceed printWidth).
+        const owner = before.lastIndexOf(DECL);
         const inChokepoint = owner !== -1 && !before.slice(owner).includes('\n  }');
         calls.push(`${f.slice(root.length)}:${inChokepoint ? 'chokepoint' : 'BYPASS'}`);
       }

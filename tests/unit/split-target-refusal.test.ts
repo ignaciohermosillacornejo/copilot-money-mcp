@@ -15,9 +15,9 @@
  *
  * What stays allowed on a parent: name, category, note, tags and reviewed —
  * none of them moves a balance. The ledger records each server behaviour as
- * unverified (Mutation.editTransaction:splitParentBalanceFields,
- * Mutation.addTransactionToRecurring:splitParent,
- * Mutation.splitTransaction:resplit, Mutation.splitTransaction:splitChild).
+ * unverified (Mutation.editTransaction:split-parent-balance-fields,
+ * Mutation.addTransactionToRecurring:split-parent,
+ * Mutation.splitTransaction:resplit, Mutation.splitTransaction:split-child).
  */
 
 import { describe, test, expect, afterAll, spyOn } from 'bun:test';
