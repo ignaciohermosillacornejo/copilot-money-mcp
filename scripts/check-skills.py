@@ -742,15 +742,16 @@ def check_frontmatter(skill_dir: Path) -> list[str]:
 
 #: A parenthetical that scopes a line to one mode. Two shapes:
 #:   - it opens with the mode: `(live)`, `(cache only)`, `(in live mode)`,
-#:     `(only in cache mode)`, `(live mode: ...)`;
+#:     `(only in cache mode)`, `(live mode: ...)`, `(cache-mode)`;
 #:   - later in the parenthetical, SCOPE phrasing only: "<mode> mode only",
 #:     "only in <mode> mode" or "in <mode> mode", e.g.
 #:     `(this check is cache mode only)`, `(skip it in live mode)`.
 #: A bare mention of a mode mid-parenthetical (`(the way cache mode always
-#: did)`) is prose, not a scope, and does not excuse the tool. `(?!-)` keeps
+#: did)`) is prose, not a scope, and does not excuse the tool. In the first
+#: shape `(?:[ -]mode)?\b(?!-)` admits `(live-mode)` but keeps
 #: `(live-reads must be on)` from reading as a `live` tag.
 MODE_TAG_RE = re.compile(
-    r"\((?:(?:only\s+)?in\s+)?(cache|live)\b(?!-)[^)]*\)"
+    r"\((?:(?:only\s+)?in\s+)?(cache|live)(?:[ -]mode)?\b(?!-)[^)]*\)"
     r"|\([^)]*?(?:\bin\s+(cache|live)[ -]mode\b|\b(cache|live)[ -]mode\s+only\b)[^)]*\)",
     re.IGNORECASE,
 )
@@ -803,10 +804,12 @@ def check_mode_surface(
             ]
             if not tools:
                 continue
+            # Each alternative captures exactly one group; the "" default makes
+            # that invariant explicit rather than load-bearing.
             tags = {
-                next(g for g in groups if g).lower()
+                next((g for g in groups if g), "").lower()
                 for groups in MODE_TAG_RE.findall(line)
-            }
+            } - {""}
             where = _loc(skill_dir, doc, line_no)
             for tool in dict.fromkeys(tools):
                 avail = tool_modes[tool]

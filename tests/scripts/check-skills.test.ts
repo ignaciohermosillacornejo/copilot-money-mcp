@@ -818,7 +818,7 @@ describe('mode surface (#847)', () => {
     );
   });
 
-  test('a tag may put the mode after "only in", or name "<mode> mode" anywhere', async () => {
+  test('scope tags: "only in <mode> mode" first, or "<mode> mode only" mid-parenthetical', async () => {
     await withRepo(
       {
         dumpBody: WORKING_DUMP,
@@ -833,6 +833,41 @@ describe('mode surface (#847)', () => {
       }
     );
   });
+
+  test('scope tags: "in <mode> mode" mid-parenthetical', async () => {
+    // The second alternative's first branch: the mode is not at the start of
+    // the parenthetical, so only the "in <mode> mode" phrasing makes it a tag.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith('Call `get_accounts` (use it in cache mode).', 'live, cache'),
+      },
+      ({ code, stderr }) => {
+        expect(stderr).not.toContain('FAIL');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  for (const [tool, tag] of [
+    ['get_accounts', '(cache-mode)'],
+    ['get_accounts_live', '(live-mode)'],
+  ] as const) {
+    test(`scope tags: hyphenated ${tag} is a tag`, async () => {
+      // `(?!-)` exists to reject "(live-reads ...)"; it must not also reject
+      // the hyphenated mode name (review on #856).
+      await withRepo(
+        {
+          dumpBody: WORKING_DUMP,
+          skill: skillWith(`Call \`${tool}\` ${tag}.`, 'live, cache'),
+        },
+        ({ code, stderr }) => {
+          expect(stderr).not.toContain('FAIL');
+          expect(code).toBe(0);
+        }
+      );
+    });
+  }
 
   test('a parenthetical that merely mentions a mode is not a scope tag', async () => {
     // Review on #856: "<mode> mode" anywhere in a parenthetical used to count,
