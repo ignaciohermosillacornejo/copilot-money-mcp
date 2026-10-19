@@ -45,6 +45,7 @@ import {
   type EditTransactionInput,
   type TransactionType,
   TRANSACTION_TYPES,
+  returnedTagIds,
 } from '../core/graphql/transactions.js';
 import {
   createCategory as gqlCreateCategory,
@@ -661,8 +662,10 @@ function serverCategory(
  * in-memory cache so a subsequent read returns the new value without needing
  * refresh_database + re-decode.
  *
- * `server` is the row the server returned. When the edit set a type or a
- * category, both follow that row (#864 review):
+ * `server` is the row the server returned, and is required so a call site
+ * cannot silently fall back to the request (#864 review). When the edit set
+ * tags, the list follows that row; when it set a type or a category, both
+ * follow it:
  *  - the type's two local counterparts, `internal_transfer` and `income`
  *    (the decoder derives them from Copilot's type; the model's
  *    `transaction_type` is Plaid's), via typeFlagsPatch, from the returned
@@ -673,13 +676,17 @@ function serverCategory(
  */
 function buildEditCachePatch(
   edit: TransactionEdit,
-  server?: { type?: unknown; categoryId?: unknown }
+  server: { type?: unknown; categoryId?: unknown; tags?: unknown }
 ): Partial<Transaction> {
   const patch: Partial<Transaction> = {};
   if ('name' in edit && edit.name !== undefined) patch.name = edit.name.trim();
   if ('category_id' in edit && edit.category_id !== undefined) patch.category_id = edit.category_id;
   if ('note' in edit && edit.note !== undefined) patch.user_note = edit.note;
-  if ('tag_ids' in edit && edit.tag_ids !== undefined) patch.tag_ids = edit.tag_ids;
+  if ('tag_ids' in edit && edit.tag_ids !== undefined) {
+    // The server's list, like bulk edit's (#864 review); the request's only
+    // when the response carries no tags array.
+    patch.tag_ids = returnedTagIds(server.tags) ?? edit.tag_ids;
+  }
   if ('reviewed' in edit && edit.reviewed !== undefined) patch.user_reviewed = edit.reviewed;
   if ('date' in edit && edit.date !== undefined) patch.date = edit.date;
   if ('amount' in edit && edit.amount !== undefined) patch.amount = edit.amount;
@@ -700,7 +707,7 @@ function buildEditCachePatch(
   // income): the decoder derives them from it and get_transactions' type
   // filters read them (#864 review).
   if (edit.type !== undefined) {
-    Object.assign(patch, typeFlagsPatch(knownTransactionType(server?.type) ?? edit.type));
+    Object.assign(patch, typeFlagsPatch(knownTransactionType(server.type) ?? edit.type));
   }
   return patch;
 }
@@ -4044,7 +4051,7 @@ export class CopilotMoneyTools {
         user_reviewed: tx.isReviewed,
         user_note: tx.userNotes ?? undefined,
         recurring_id: tx.recurringId ?? undefined,
-        tag_ids: tx.tags.map((t) => t.id),
+        tag_ids: returnedTagIds(tx.tags) ?? args.tag_ids,
         internal_transfer: tx.type === 'INTERNAL_TRANSFER',
         is_manual: true,
       };
@@ -4402,7 +4409,7 @@ export class CopilotMoneyTools {
         user_reviewed: tx.isReviewed,
         user_note: tx.userNotes ?? undefined,
         recurring_id: tx.recurringId ?? undefined,
-        tag_ids: tx.tags.map((t) => t.id),
+        tag_ids: returnedTagIds(tx.tags),
         internal_transfer: tx.type === 'INTERNAL_TRANSFER',
       };
 
@@ -4415,7 +4422,9 @@ export class CopilotMoneyTools {
       // typeof check rather than a truthiness one. No-op (returns false) if
       // the cache is unloaded or the id is absent — both acceptable, same as
       // delete_transaction's eviction-is-a-no-op contract. The returned
-      // `transaction` stays a verbatim transcription of the response.
+      // `transaction` is mapped from the response alone, never the request:
+      // field for field, except `internal_transfer`, which it derives from
+      // the returned type, as the live mapper does.
       const linkedType = knownTransactionType(tx.type);
       this.db.patchCachedTransaction(transaction_id, {
         recurring_id: tx.recurringId ?? recurring_id,
@@ -4710,7 +4719,7 @@ export class CopilotMoneyTools {
       user_reviewed: tx.isReviewed,
       user_note: tx.userNotes ?? undefined,
       recurring_id: tx.recurringId ?? undefined,
-      tag_ids: tx.tags.map((t) => t.id),
+      tag_ids: returnedTagIds(tx.tags),
       internal_transfer: tx.type === 'INTERNAL_TRANSFER',
     });
 
@@ -5121,7 +5130,9 @@ export class CopilotMoneyTools {
             Object.assign(patch, typeFlagsPatch(knownTransactionType(tx.type) ?? type));
           }
           if (add_tag_ids !== undefined || remove_tag_ids !== undefined) {
-            patch.tag_ids = tx.tags.map((t) => t.id);
+            // No tags array (drift): leave the cached list alone.
+            const tags = returnedTagIds(tx.tags);
+            if (tags !== undefined) patch.tag_ids = tags;
           }
           if (Object.keys(patch).length > 0) {
             this.db.patchCachedTransaction(tx.id, patch);

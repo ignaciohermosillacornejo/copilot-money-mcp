@@ -379,8 +379,17 @@ describe('update_transaction local patch follows the server row (#864 review)', 
       { category_id: 'cat_req', name: 'Requested' },
       { category_id: 'cat_srv', name: 'Server' },
     ];
-    (db as any)._tags = [];
+    (db as any)._tags = [
+      { tag_id: 'tag_req', name: 'Requested' },
+      { tag_id: 'tag_srv', name: 'Server' },
+    ];
   });
+
+  /** A returned row with no `tags` key: warn-mode drift the write must survive. */
+  const withoutTags = (fields: Parameters<typeof serverTransaction>[0]) => {
+    const { tags: _dropped, ...rest } = serverTransaction(fields);
+    return rest as unknown as ReturnType<typeof serverTransaction>;
+  };
 
   const editReturning = (fields: Parameters<typeof serverTransaction>[0]) =>
     createMockGraphQLClient({
@@ -441,5 +450,46 @@ describe('update_transaction local patch follows the server row (#864 review)', 
     );
     await tools.updateTransaction({ transaction_id: 'txn1', type: 'INCOME' });
     expect(local()).toMatchObject({ income: true, internal_transfer: false });
+  });
+
+  test("the server's tag list wins over the requested one", async () => {
+    const tools = new CopilotMoneyTools(
+      db,
+      editReturning({ id: 'txn1', tags: [{ id: 'tag_srv' }] })
+    );
+    await tools.updateTransaction({ transaction_id: 'txn1', tag_ids: ['tag_req'] });
+    expect(local().tag_ids).toEqual(['tag_srv']);
+  });
+
+  test('a response without tags does not fail a write that landed; the request is cached', async () => {
+    const client = createMockGraphQLClient({
+      EditTransaction: { editTransaction: { transaction: withoutTags({ id: 'txn1' }) } },
+    });
+    const tools = new CopilotMoneyTools(db, client);
+    await tools.updateTransaction({ transaction_id: 'txn1', tag_ids: ['tag_req'] });
+    expect(local().tag_ids).toEqual(['tag_req']);
+  });
+
+  test('bulk_edit_transactions: a response without tags leaves the cached list alone', async () => {
+    local().tag_ids = ['tag_srv'];
+    const client = createMockGraphQLClient({
+      BulkEditTransactions: {
+        bulkEditTransactions: {
+          updated: [
+            {
+              ...withoutTags({ id: 'txn1', accountId: 'acc1', itemId: 'item1' }),
+              parentId: null,
+            },
+          ],
+          failed: [],
+        },
+      },
+    });
+    const tools = new CopilotMoneyTools(db, client);
+    await tools.bulkEditTransactions({
+      rows: [{ transaction_id: 'txn1', account_id: 'acc1', item_id: 'item1' }],
+      add_tag_ids: ['tag_req'],
+    });
+    expect(local().tag_ids).toEqual(['tag_srv']);
   });
 });

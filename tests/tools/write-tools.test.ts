@@ -1061,7 +1061,7 @@ describe('addTransactionToRecurring', () => {
     expect(cached?.recurring_id).toBe('rec-server');
   });
 
-  test('the type-derived flags follow the returned row', async () => {
+  test('an INCOME row: the type-derived flags and the empty category follow the returned row', async () => {
     const client = createMockGraphQLClient({
       AddTransactionToRecurring: {
         addTransactionToRecurring: {
@@ -1074,16 +1074,41 @@ describe('addTransactionToRecurring', () => {
     await tools.addTransactionToRecurring(validArgs);
 
     const cached = (
-      (mockDb as any)._transactions as Array<{ transaction_id: string; income?: boolean }>
+      (mockDb as any)._transactions as Array<{
+        transaction_id: string;
+        income?: boolean;
+        category_id?: string;
+      }>
     ).find((t) => t.transaction_id === 'tx1');
     expect(cached?.income).toBe(true);
+    // '' is Copilot's "no category": patched in, not skipped as falsy.
+    expect(cached?.category_id).toBe('');
   });
 
-  test("an empty returned category (Copilot's 'no category') is patched in", async () => {
+  test('a response without tags does not fail a link that landed', async () => {
+    const { tags: _dropped, ...drifted } = linkedTx;
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: {
+        addTransactionToRecurring: { transaction: drifted as unknown as CreatedTransaction },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.addTransactionToRecurring(validArgs);
+    expect(result.transaction.tag_ids).toBeUndefined();
+  });
+
+  test('an unknown returned type leaves the type-derived flags alone', async () => {
+    // Response validation is warn-only, so a drifted type spelling must not
+    // clear the flags the cached row already has (#864 review).
+    const row = (
+      (mockDb as any)._transactions as Array<{ transaction_id: string; income?: boolean }>
+    ).find((t) => t.transaction_id === 'tx1')!;
+    row.income = true;
     const client = createMockGraphQLClient({
       AddTransactionToRecurring: {
         addTransactionToRecurring: {
-          transaction: { ...linkedTx, type: 'INCOME', categoryId: '' },
+          transaction: { ...linkedTx, type: 'INCOME_V2' as never },
         },
       },
     });
@@ -1091,10 +1116,7 @@ describe('addTransactionToRecurring', () => {
 
     await tools.addTransactionToRecurring(validArgs);
 
-    const cached = (
-      (mockDb as any)._transactions as Array<{ transaction_id: string; category_id?: string }>
-    ).find((t) => t.transaction_id === 'tx1');
-    expect(cached?.category_id).toBe('');
+    expect(row.income).toBe(true);
   });
 
   test('does NOT look up account_id/item_id from the cache via transaction_id', async () => {

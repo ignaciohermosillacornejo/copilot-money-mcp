@@ -375,6 +375,20 @@ export async function splitTransaction(
   return data.splitTransaction;
 }
 
+/**
+ * The tag ids on a row the server returned, or undefined when it carries no
+ * `tags` array. Response validation is warn-only, so a drifted response must
+ * not throw a TypeError out of a write the server has already applied (#864
+ * review); callers fall back to what they asked for, or leave the cache alone.
+ */
+export function returnedTagIds(tags: unknown): string[] | undefined {
+  if (!Array.isArray(tags)) return undefined;
+  return tags.flatMap((t: unknown) => {
+    const id = (t as { id?: unknown } | null)?.id;
+    return typeof id === 'string' ? [id] : [];
+  });
+}
+
 export async function editTransaction(
   client: GraphQLClient,
   args: EditTransactionArgs
@@ -394,7 +408,7 @@ export async function editTransaction(
   if ('categoryId' in args.input) changed.categoryId = tx.categoryId;
   if ('userNotes' in args.input) changed.userNotes = tx.userNotes;
   if ('isReviewed' in args.input) changed.isReviewed = tx.isReviewed;
-  if ('tagIds' in args.input) changed.tagIds = tx.tags.map((t) => t.id);
+  if ('tagIds' in args.input) changed.tagIds = returnedTagIds(tx.tags) ?? args.input.tagIds;
   if ('type' in args.input) changed.type = tx.type;
   if ('date' in args.input) changed.date = tx.date;
   if ('amount' in args.input) changed.amount = tx.amount;

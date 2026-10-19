@@ -643,7 +643,6 @@ const MIRRORED_FIELDS: Record<string, string> = {
   name: 'name',
   date: 'date',
   amount: 'amount',
-  category_id: 'category_id',
   user_reviewed: 'user_reviewed',
   tag_ids: 'tag_ids',
   user_notes: 'user_note',
@@ -667,9 +666,11 @@ const LOCAL_MIRROR: Record<string, { mirrored: string[]; removed: string[] }> = 
   bulk_edit_transactions: { mirrored: [TX_BULK_1, TX_BULK_2], removed: [] },
 };
 
-// Absent and empty both mean "none": the local model leaves a field unset or
-// stores '' for no category, and live reads normalize an empty category to null.
-const norm = (v: unknown) => (v === undefined || v === '' ? null : v);
+// Absent means "none" for the fields a local row may simply omit (a note, a
+// recurring id). category_id is compared on its own, below: there '' is the
+// local model's "no category" (#824), and a patch that deleted the key instead
+// must not pass as the same thing.
+const norm = (v: unknown) => (v === undefined ? null : v);
 
 describe('the local cache agrees with the server after a write (#848)', () => {
   test('every transaction write tool has a local-mirror case', () => {
@@ -698,9 +699,23 @@ describe('the local cache agrees with the server after a write (#848)', () => {
             value: norm(server[liveKey]),
           });
         }
-        // Derived: internal_transfer and income are the local counterparts of
-        // the live type. A seeded row may omit them (false); a retype must set
-        // the new one and clear the old.
+        // category_id: the local value must be a string ('' for none); live
+        // reads normalize an empty category to null.
+        expect({
+          id,
+          field: 'category_id',
+          isString: typeof mine.category_id === 'string',
+          value: mine.category_id === '' ? null : mine.category_id,
+        }).toEqual({
+          id,
+          field: 'category_id',
+          isString: true,
+          value: server.category_id === '' ? null : server.category_id,
+        });
+        // Type-derived flags: the local counterparts of the live type. A seeded
+        // row may omit them (false); a retype must set the new one and clear
+        // the old. Both are derived from `type` because READ_FIELDS does not
+        // select the live row's synthesized internal_transfer.
         for (const [flag, type] of [
           ['internal_transfer', 'INTERNAL_TRANSFER'],
           ['income', 'INCOME'],

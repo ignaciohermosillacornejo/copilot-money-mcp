@@ -471,13 +471,13 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
 
   test('(g) split recorded even when mapping a drifted response throws', async () => {
     // Response validation is warn-only, so a drifted response reaches the
-    // local mapping; `tags: null` makes it throw after the server has split.
-    const drifted = { ...serverTx(PARENT_ID, 100, ''), tags: null };
+    // local mapping; a non-array `splitTransactions` makes it throw after the
+    // server has split. (A missing `tags` array no longer throws: #864.)
     const client = createMockGraphQLClient({
       SplitTransaction: {
         splitTransaction: {
-          parentTransaction: drifted as unknown as CreatedTransaction,
-          splitTransactions: [serverTx(CHILD_1, 60, CAT_A), serverTx(CHILD_2, 40, CAT_B)],
+          parentTransaction: serverTx(PARENT_ID, 100, ''),
+          splitTransactions: null as unknown as CreatedTransaction[],
         },
       },
       DeleteTransaction: { deleteTransaction: true },
@@ -510,14 +510,13 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
     // refetches. 2025-03 is outside the write-resolve window, so the window
     // fetch never refreshes it: what is exercised is the eviction and the
     // record, not a cold-tier refetch.
-    const drifted = { ...serverTx(PARENT_ID, 100, ''), tags: null };
     const client = createMockGraphQLClient({
       ...WINDOW(),
       ...liveCategoryMocks([CAT_A, CAT_B]),
       SplitTransaction: {
         splitTransaction: {
-          parentTransaction: drifted as unknown as CreatedTransaction,
-          splitTransactions: [serverTx(CHILD_1, 60, CAT_A), serverTx(CHILD_2, 40, CAT_B)],
+          parentTransaction: serverTx(PARENT_ID, 100, ''),
+          splitTransactions: null as unknown as CreatedTransaction[],
         },
       },
       DeleteTransaction: { deleteTransaction: true },
