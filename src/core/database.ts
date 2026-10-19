@@ -318,9 +318,10 @@ export class CopilotDatabase {
   private readonly _splitParentIds = new Set<string>();
   /**
    * When getSplitParentIds' last decode attempt resolved, successful or not;
-   * null = never. Latches failures too, so a cache that keeps timing out costs one
-   * attempt per splitEvidenceRereadMs(), not one per delete. Scoped to the
-   * split-evidence path: reads that share loadAllCollections are unaffected.
+   * null = never. Latches failures too, so a cache that keeps timing out
+   * costs one attempt per splitEvidenceRereadMs(), not one per delete.
+   * Scoped to the split-evidence path: reads that share loadAllCollections
+   * are unaffected.
    */
   private _splitEvidenceAttemptAt: number | null = null;
 
