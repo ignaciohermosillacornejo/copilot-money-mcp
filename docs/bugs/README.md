@@ -112,12 +112,12 @@ a class yet.
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 60 entries:
+this corpus actually says, across all 61 entries:
 
 | Found by | Count | |
 |---|---|---|
 | `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 15 | ██████████████ |
-| `live-probe` — a probe or smoke against the real backend | 14 | █████████████ |
+| `live-probe` — a probe or smoke against the real backend | 15 | ██████████████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
 | `incidental` — found while working on something else | 8 | ███████ |
 | `user-report` | 8 | ███████ |
@@ -293,6 +293,12 @@ record near-misses.
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #398 | [MCP registry publish failed with HTTP 422 but the release workflow ran green](398-registry-publish-masked-failure.md) | `audit-sweep` | 2026-05-13 |
+
+**`alarm-by-fallthrough`** — 1
+
+| | Bug | Found by | Date |
+|---|---|---|---|
+| #661 | [The weekly drift check reported "conformance failure" for runs that were killed, and for a logged-out machine](661-non-completion-classified-as-drift.md) | `dogfooding` | 2026-08-20 |
 
 **`doc-reality-drift`** — 1
 

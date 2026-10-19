@@ -540,7 +540,9 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // amount halves went to docs/tools-by-mode.md rather than into a schema.
 //
 // UNMOVED by #857 (+55: create_transaction's category_id rule for REGULAR vs
-// INCOME/INTERNAL_TRANSFER). Measured 83_502 with #857 on top of #860.
+// INCOME/INTERNAL_TRANSFER). Re-measured after rebasing onto main with #864
+// merged: main 83_705, 83_760 with #857 on top (~0.6% headroom), within the
+// 84_280 in force.
 const SCHEMA_TOTAL_BUDGET = 84_280;
 
 // ---------------------------------------------------------------------------
