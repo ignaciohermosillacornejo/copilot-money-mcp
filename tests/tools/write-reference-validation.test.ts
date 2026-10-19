@@ -10,10 +10,13 @@
  * shows none. A well-formed impossible date (2026-02-30) reached the server,
  * whose 400 was reported as possible API drift.
  *
- * Both tables are keyed by the write tools whose input schema carries the
- * field, derived from WRITE_TOOL_DEFS, so a new write tool that takes a
- * category_id or a date fails the first test until it joins the table (or is
- * exempted with a reason). Each case runs through the tool's registry handler
+ * Unknown tag ids are rejected the same way (Copilot drops them silently).
+ *
+ * Four tables, each derived from WRITE_TOOL_DEFS through one schema walk
+ * (writeFieldsMatching): category_id and date/month are keyed by tool, tag ids
+ * by `<tool>.<field>`. A new write tool that takes any of these fields fails
+ * the table's first test until it joins it (or, for category_id, is exempted
+ * with a reason). Each case runs through the tool's registry handler
  * against a real LiveCopilotDatabase, the way the shipped server runs writes
  * (--write implies --live-reads), and pairs the rejection with a control: the
  * same call with a known id / real date must reach the mutation, so a case
@@ -101,22 +104,28 @@ function setup() {
   return { call, mutationsSent };
 }
 
-/**
- * Write tools whose input schema has, at any depth, a property named `key` —
- * or, for a RegExp, any property whose name matches it, so `start_date` or
- * `budget_month` on a future write tool joins the date tables too.
- */
-function writeToolsTaking(key: string | RegExp): string[] {
-  const matches = (name: string) => (typeof key === 'string' ? name === key : key.test(name));
-  const has = (schema: unknown): boolean => {
-    if (!schema || typeof schema !== 'object') return false;
-    const s = schema as { properties?: Record<string, unknown>; items?: unknown };
-    if (s.properties && Object.keys(s.properties).some(matches)) return true;
-    return Object.values(s.properties ?? {}).some(has) || has(s.items);
+/** `<tool>.<field>` for every write-tool schema property matching `pattern`, at any depth. */
+function writeFieldsMatching(pattern: RegExp): string[] {
+  const out = new Set<string>();
+  const walk = (tool: string, schema: unknown): void => {
+    if (!schema || typeof schema !== 'object') return;
+    const sc = schema as { properties?: Record<string, unknown>; items?: unknown };
+    for (const [name, sub] of Object.entries(sc.properties ?? {})) {
+      if (pattern.test(name)) out.add(`${tool}.${name}`);
+      walk(tool, sub);
+    }
+    walk(tool, sc.items);
   };
-  return WRITE_TOOL_DEFS.filter((def) => has(def.schema.inputSchema))
-    .map((def) => def.name)
-    .sort();
+  for (const def of WRITE_TOOL_DEFS) walk(def.name, def.schema.inputSchema);
+  return [...out].sort();
+}
+
+/**
+ * Write tools with at least one property matching `pattern`, at any depth: the
+ * same walk as writeFieldsMatching, so every table derives from one definition.
+ */
+function writeToolsTaking(pattern: RegExp): string[] {
+  return [...new Set(writeFieldsMatching(pattern).map((key) => key.split('.')[0]!))].sort();
 }
 
 // ── category_id ─────────────────────────────────────────────────────────────
@@ -216,7 +225,9 @@ describe('category_id is validated on every write that stores one (#846)', () =>
 /**
  * Args for one write, with `tagId` in one tag-id field. Keyed by
  * `<tool>.<field>`, so a tool taking two tag lists (bulk edit's add and
- * remove) needs a case for each.
+ * remove) needs a case for each. The key is the field's name, not its path:
+ * one tool carrying the same name at two depths would need only one case.
+ * No write tool does that today.
  */
 const TAG_CASES: Record<string, (tagId: string) => Record<string, unknown>> = {
   'create_transaction.tag_ids': (tagId) => ({
@@ -244,24 +255,8 @@ const TAG_CASES: Record<string, (tagId: string) => Record<string, unknown>> = {
   }),
 };
 
-/** `<tool>.<field>` for every write-tool schema property matching `pattern`, at any depth. */
-function writeFieldsMatching(pattern: RegExp): string[] {
-  const out = new Set<string>();
-  const walk = (tool: string, schema: unknown): void => {
-    if (!schema || typeof schema !== 'object') return;
-    const sc = schema as { properties?: Record<string, unknown>; items?: unknown };
-    for (const [name, sub] of Object.entries(sc.properties ?? {})) {
-      if (pattern.test(name)) out.add(`${tool}.${name}`);
-      walk(tool, sub);
-    }
-    walk(tool, sc.items);
-  };
-  for (const def of WRITE_TOOL_DEFS) walk(def.name, def.schema.inputSchema);
-  return [...out].sort();
-}
-
 const callTag = (key: string, tagId: string) =>
-  [key.slice(0, key.indexOf('.')), TAG_CASES[key]!(tagId)] as const;
+  [key.split('.')[0]!, TAG_CASES[key]!(tagId)] as const;
 
 describe('tag ids are validated on every write that takes them (#846)', () => {
   test('every tag-id field of every write tool has a case', () => {

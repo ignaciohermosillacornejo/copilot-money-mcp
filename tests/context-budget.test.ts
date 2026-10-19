@@ -538,6 +538,9 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // #859 merged: main 83_447 (#859 moved no schema), 83_705 with #864 on top
 // (~0.7% headroom), within the 84_280 in force: the rule's delete_transaction and
 // amount halves went to docs/tools-by-mode.md rather than into a schema.
+//
+// UNMOVED by #857 (+55: create_transaction's category_id rule for REGULAR vs
+// INCOME/INTERNAL_TRANSFER). Measured 83_502 with #857 on top of #860.
 const SCHEMA_TOTAL_BUDGET = 84_280;
 
 // ---------------------------------------------------------------------------
