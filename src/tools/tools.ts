@@ -4294,11 +4294,15 @@ export class CopilotMoneyTools {
    * "Transaction not found" rather than silently attaching the wrong
    * transaction. Same defensive choice as delete_transaction.
    *
+   * Side effect: the server also sets the row's category to the recurring's
+   * category (ledger: Mutation.addTransactionToRecurring:setsCategory).
+   *
    * Cache: unlike create_transaction (where there is nothing to patch) and
    * unlike delete_transaction (which evicts the row), here the transaction
-   * already exists in the cache — we patch `recurring_id` on the cached
-   * row via `patchCachedTransaction` so subsequent get_transactions reads
-   * reflect the link without waiting for a refresh_database cycle.
+   * already exists in the cache — we patch `recurring_id`, and the category
+   * the server returned, on the cached row via `patchCachedTransaction` so
+   * subsequent get_transactions reads reflect the link without waiting for a
+   * refresh_database cycle (#848). The live cache takes the server's row.
    */
   async addTransactionToRecurring(args: {
     transaction_id: string;
@@ -4348,11 +4352,17 @@ export class CopilotMoneyTools {
       };
 
       // Optimistic cache patch: the transaction already exists in the
-      // cache, so just update its recurring_id to match what the server
-      // now says. No-op (returns false) if the cache is unloaded or the
-      // id is absent — both acceptable, same as delete_transaction's
-      // eviction-is-a-no-op contract.
-      this.db.patchCachedTransaction(transaction_id, { recurring_id });
+      // cache, so update its recurring_id and its category to match what the
+      // server now says — linking sets the row's category to the recurring's
+      // (#848). The category comes from the returned row, not a guess; a
+      // drifted response without one leaves the cached category alone. No-op
+      // (returns false) if the cache is unloaded or the id is absent — both
+      // acceptable, same as delete_transaction's eviction-is-a-no-op contract.
+      this.db.patchCachedTransaction(transaction_id, {
+        recurring_id,
+        ...(typeof tx.categoryId === 'string' ? { category_id: tx.categoryId } : {}),
+      });
+      // Live cache: the server's row, which already carries the new category.
       this.liveDb?.upsertLiveTransaction(tx);
       this.afterTransactionWrite();
 

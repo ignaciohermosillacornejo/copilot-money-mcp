@@ -711,6 +711,18 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'upcoming-recurrings snapshots (LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS), ' +
       'which costs one request each if the assumption is wrong.',
   },
+  {
+    surface: 'Mutation.addTransactionToRecurring:setsCategory',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Release parity re-run 2026-10-18 (#848 item 2): linking a transaction to a recurring ' +
+      "changed the row's category to the recurring's category, confirmed in the web app " +
+      'after a refresh. The tool description says so, and the local cache takes the category ' +
+      'from the returned row (the live cache takes the whole returned row). Nothing ' +
+      're-checks it.',
+  },
 
   operation('splitTransaction', [
     'split_transaction.transaction_id',
@@ -928,6 +940,20 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'discriminating, 1 fallback-discriminating. GATED: `smoke:account-names` is now in the ' +
       '`bun run smoke` composite, where any mismatch fails the run. It SKIPs where there is ' +
       'no local cache, so the gate holds only on a machine that has one.',
+  },
+  {
+    surface: 'AccountNode.balance:manualResetCutoff',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Release parity re-run 2026-10-18 (#848 item 3), on create, update and delete: a ' +
+      "manual account's balance ignores transactions dated before its last manual balance " +
+      'reset. Such a row never moves the balance and deleting it credits nothing back; a row ' +
+      'created after the reset and then moved before it keeps its original effect for good. ' +
+      'Copilot behaviour, not ours. create_transaction and update_transaction(date) state it ' +
+      'in their descriptions so a caller checking a balance is not surprised. Nothing ' +
+      're-checks it.',
   },
   {
     surface: 'AccountNode.hiddenAccounts:returnedUnfiltered',

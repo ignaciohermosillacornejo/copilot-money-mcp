@@ -464,13 +464,20 @@ const CASES: Record<string, Case> = {
     mocks: {
       AddTransactionToRecurring: {
         addTransactionToRecurring: {
-          transaction: mutationNode(seedById(TX_RECURRING), { recurringId: RECURRING_ID }),
+          // Linking also sets the row's category to the recurring's (#848).
+          transaction: mutationNode(seedById(TX_RECURRING), {
+            recurringId: RECURRING_ID,
+            categoryId: CAT_NEW,
+          }),
         },
       },
     },
     args: { ...routing, transaction_id: TX_RECURRING, recurring_id: RECURRING_ID },
     verify: (rows) => {
-      expect(rows.get(TX_RECURRING)).toMatchObject({ recurring_id: RECURRING_ID });
+      expect(rows.get(TX_RECURRING)).toMatchObject({
+        recurring_id: RECURRING_ID,
+        category_id: CAT_NEW,
+      });
     },
   },
 

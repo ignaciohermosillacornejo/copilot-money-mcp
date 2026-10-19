@@ -208,7 +208,8 @@ export const createTransactionTool = defineTool({
       'Create a brand-new manual transaction on an existing account. Requires ' +
       'account_id, item_id, name, date, amount, category_id, and type; optional ' +
       'tag_ids, note, and recurring_id. Formats, sign convention, and ID sources ' +
-      'are documented per parameter. Returns the newly-created transaction.',
+      'are documented per parameter. Returns the newly-created transaction. On a manual ' +
+      "account, a row dated before the account's last balance reset does not move its balance.",
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -322,8 +323,8 @@ export const addTransactionToRecurringTool = defineTool({
       "Copilot's auto-detection missed a rent/subscription/etc. charge that should be grouped " +
       'with a recurring. All four IDs are required (transaction_id, account_id, item_id, ' +
       'recurring_id). The transaction must already exist — create_transaction followed by ' +
-      'add_transaction_to_recurring is the manual flow. Returns the updated transaction with ' +
-      'its recurring_id now populated.',
+      "add_transaction_to_recurring is the manual flow. Copilot also sets the row's category " +
+      "to the recurring's. Returns the updated transaction with its recurring_id and category.",
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -504,7 +505,9 @@ export const updateTransactionTool = defineTool({
           type: 'string',
           description:
             'New settled/posted date, YYYY-MM-DD. On a synced (non-manual) bank transaction ' +
-            'the next institution sync may revert it; manual-account transactions persist.',
+            'the next institution sync may revert it; manual-account transactions persist. ' +
+            "Moving a manual-account row before the account's last balance reset keeps its " +
+            'earlier balance effect.',
         },
         amount: {
           type: 'number',

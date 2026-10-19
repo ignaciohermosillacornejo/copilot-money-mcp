@@ -1007,6 +1007,42 @@ describe('addTransactionToRecurring', () => {
     expect(cached?.recurring_id).toBe('rec1');
   });
 
+  test("patches the category the server set (the recurring's) on the cached row (#848)", async () => {
+    // Linking makes Copilot set the row's category to the recurring's. The
+    // cached row held another category; it must take the returned one.
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: {
+        addTransactionToRecurring: { transaction: { ...linkedTx, categoryId: 'cat-housing' } },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    const result = await tools.addTransactionToRecurring(validArgs);
+
+    const cached = (
+      (mockDb as any)._transactions as Array<{ transaction_id: string; category_id?: string }>
+    ).find((t) => t.transaction_id === 'tx1');
+    expect(cached?.category_id).toBe('cat-housing');
+    expect(result.transaction.category_id).toBe('cat-housing');
+  });
+
+  test('a response without a category leaves the cached category alone', async () => {
+    const { categoryId: _dropped, ...drifted } = linkedTx;
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: {
+        addTransactionToRecurring: { transaction: drifted as unknown as CreatedTransaction },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.addTransactionToRecurring(validArgs);
+
+    const cached = (
+      (mockDb as any)._transactions as Array<{ transaction_id: string; category_id?: string }>
+    ).find((t) => t.transaction_id === 'tx1');
+    expect(cached?.category_id).toBe('cat-rent');
+  });
+
   test('does NOT look up account_id/item_id from the cache via transaction_id', async () => {
     // Same defensive contract as delete_transaction — a typo in account_id
     // or item_id must not be silently "fixed" from the cache; forward
