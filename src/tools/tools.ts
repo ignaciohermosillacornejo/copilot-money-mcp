@@ -4354,12 +4354,15 @@ export class CopilotMoneyTools {
       // Optimistic cache patch: the transaction already exists in the
       // cache, so update its recurring_id and its category to match what the
       // server now says — linking sets the row's category to the recurring's
-      // (#848). The category comes from the returned row, not a guess; a
-      // drifted response without one leaves the cached category alone. No-op
-      // (returns false) if the cache is unloaded or the id is absent — both
-      // acceptable, same as delete_transaction's eviction-is-a-no-op contract.
+      // (#848). Both come from the returned row, not the request. A response
+      // with NO category key (drift) leaves the cached category alone; an
+      // EMPTY one is Copilot's "no category" and is patched in, hence the
+      // typeof check rather than a truthiness one. No-op (returns false) if
+      // the cache is unloaded or the id is absent — both acceptable, same as
+      // delete_transaction's eviction-is-a-no-op contract. The returned
+      // `transaction` stays a verbatim transcription of the response.
       this.db.patchCachedTransaction(transaction_id, {
-        recurring_id,
+        recurring_id: tx.recurringId ?? recurring_id,
         ...(typeof tx.categoryId === 'string' ? { category_id: tx.categoryId } : {}),
       });
       // Live cache: the server's row, which already carries the new category.

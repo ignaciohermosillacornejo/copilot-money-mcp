@@ -1035,12 +1035,31 @@ describe('addTransactionToRecurring', () => {
     });
     tools = new CopilotMoneyTools(mockDb, client);
 
+    const result = await tools.addTransactionToRecurring(validArgs);
+    const cached = (
+      (mockDb as any)._transactions as Array<{ transaction_id: string; category_id?: string }>
+    ).find((t) => t.transaction_id === 'tx1');
+    expect(cached?.category_id).toBe('cat-rent');
+    // The response is a verbatim transcription: it carries no category either.
+    expect(result.transaction.category_id).toBeUndefined();
+  });
+
+  test("an empty returned category (Copilot's 'no category') is patched in", async () => {
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: {
+        addTransactionToRecurring: {
+          transaction: { ...linkedTx, type: 'INCOME', categoryId: '' },
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
     await tools.addTransactionToRecurring(validArgs);
 
     const cached = (
       (mockDb as any)._transactions as Array<{ transaction_id: string; category_id?: string }>
     ).find((t) => t.transaction_id === 'tx1');
-    expect(cached?.category_id).toBe('cat-rent');
+    expect(cached?.category_id).toBe('');
   });
 
   test('does NOT look up account_id/item_id from the cache via transaction_id', async () => {

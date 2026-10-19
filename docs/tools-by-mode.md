@@ -56,7 +56,7 @@ Enabling `--write` automatically turns on `--live-reads`, so the tools below are
 | `update_transactions` | ✅ | **Bulk edit** — array of the same edits in one call (max 200, 5 writes in flight). All validation runs before the first write, so a bad entry fails the call without a partial apply |
 | `delete_transaction` | ✅ | |
 | `split_transaction` | ✅ | |
-| `add_transaction_to_recurring` | ✅ | Link an existing transaction to a recurring series |
+| `add_transaction_to_recurring` | ✅ | Link an existing transaction to a recurring series; Copilot also sets the row's category to the recurring's |
 | `review_transactions` | ✅ | Bulk-mark as reviewed/unreviewed |
 | `bulk_edit_transactions` | ✅ | **Same edit, many rows, ONE request** — Copilot's native bulk endpoint. Supports only `category_id`, `type`, `reviewed`, `add_tag_ids`, `remove_tag_ids`; `name`/`date`/`amount`/`note` are not bulk-editable. Tags are add/remove, not replace. Max 500 targets. See [bulk-edit guide](./bulk-edit-transactions.md) |
 | `create_category` / `update_category` / `delete_category` | ✅ | |
@@ -73,6 +73,7 @@ Enabling `--write` automatically turns on `--live-reads`, so the tools below are
 | Goal write tools (`create_goal` / `update_goal` / `delete_goal`) | ❌ Not implemented. Copilot doesn't expose goal mutations via GraphQL. |
 | Stock-split data | ⚠️ Available via `get_investment_splits` for currently-held securities that have split (one row per `(security_id, effective_date)` with adjustment multiplier). Empty for securities that never split. Securities a user no longer holds eventually fall out of the cache. There is no GraphQL endpoint for splits — this is the only way to get them, and only for held securities. |
 | Long time-series responses | ⚠️ The MCP single-tool-result token cap means very long histories (e.g., multi-year daily prices or balances) are capped at 500 rows by default. Use `max_rows` / `offset` parameters, or narrow `time_frame` to fetch more. **`get_investment_balance_live` is the exception**: its series is capped by `history_limit` (default 30, `0` = unlimited) rather than `max_rows`. |
+| Manual-account balance resets | ⚠️ Copilot rule, observed on create, update and delete: a manual account's balance ignores rows dated before its last manual balance reset. Creating such a row, changing its amount, or deleting it does not move the balance (a delete credits nothing back); a row moved there from after the reset keeps the effect it already had. `create_transaction` and `update_transaction`'s `date` say so in their descriptions; `delete_transaction` and `update_transaction`'s `amount` are documented here only, to keep within the tool-schema budget. |
 | 🔒 Browser authentication | Both `--live-reads` and `--write` require a logged-in browser session against `app.copilot.money` (the server uses the same Firebase refresh-token flow as the web app). Reads in default mode require nothing. |
 
 ## ↔️ Cache vs live: same concept, different value

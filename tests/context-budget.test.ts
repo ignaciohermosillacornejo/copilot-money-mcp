@@ -531,6 +531,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // shared fields fragment; and the transaction_id category clause. Re-measured
 // on the rebased tip; earlier figures in this file's history predate the
 // rebase onto #854 and #858 and are not current.
+//
+// UNMOVED by #864 (+258: create_transaction +100 and update_transaction +102
+// for the manual-account balance-reset rule, add_transaction_to_recurring +56
+// for its category side effect). Measured 83_705 with #864 on top of #860
+// (~0.7%), within the 84_280 in force: the rule's delete_transaction and
+// amount halves went to docs/tools-by-mode.md rather than into a schema.
 const SCHEMA_TOTAL_BUDGET = 84_280;
 
 // ---------------------------------------------------------------------------

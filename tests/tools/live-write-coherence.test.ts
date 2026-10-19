@@ -598,6 +598,80 @@ describe('write → live-read coherence (#820, #821)', () => {
   );
 });
 
+// ── The local cache agrees with the server's row too (#848) ─────────────────
+//
+// Cache mode patches its own (LevelDB-model) copy of an edited row. #848 was a
+// patch built from the request alone: add_transaction_to_recurring set only
+// recurring_id while the server also changed the category, so cache mode kept
+// the old one. Every transaction write tool must leave the local row agreeing
+// with the server's returned row (as the live read shows it) on every field
+// the local model mirrors — or, for a tool that removes the row from view, no
+// local row at all. Same derived key set as the tables above.
+
+/** live read field → local (cache-model) field. */
+const MIRRORED_FIELDS: Record<string, string> = {
+  name: 'name',
+  date: 'date',
+  amount: 'amount',
+  category_id: 'category_id',
+  user_reviewed: 'user_reviewed',
+  tag_ids: 'tag_ids',
+  user_notes: 'user_note',
+  recurring_id: 'recurring_id',
+};
+
+/**
+ * Per tool: the rows whose local copy must mirror the server, or the rows the
+ * write must remove from the local cache. create_transaction inserts nothing
+ * locally by design (the next refresh picks the row up), so it has neither.
+ */
+const LOCAL_MIRROR: Record<string, { mirrored: string[]; removed: string[] }> = {
+  create_transaction: { mirrored: [], removed: [] },
+  split_transaction: { mirrored: [], removed: [TX_SPLIT_PARENT] },
+  delete_transaction: { mirrored: [], removed: [TX_DELETE] },
+  update_transaction: { mirrored: [TX_UPDATE], removed: [] },
+  update_transactions: { mirrored: [TX_BATCH_1, TX_BATCH_2], removed: [] },
+  add_transaction_to_recurring: { mirrored: [TX_RECURRING], removed: [] },
+  review_transactions: { mirrored: [TX_REVIEW], removed: [] },
+  bulk_edit_transactions: { mirrored: [TX_BULK_1, TX_BULK_2], removed: [] },
+};
+
+// Absent and empty both mean "none": the local model leaves a field unset or
+// stores '' for no category, and live reads normalize an empty category to null.
+const norm = (v: unknown) => (v === undefined || v === '' ? null : v);
+
+describe('the local cache agrees with the server after a write (#848)', () => {
+  test('every transaction write tool has a local-mirror case', () => {
+    expect(Object.keys(LOCAL_MIRROR).sort()).toEqual(transactionWriteToolNames());
+  });
+
+  test.each(Object.keys(LOCAL_MIRROR))(
+    '%s: the local row mirrors the server row on every mirrored field',
+    async (toolName) => {
+      const c = CASES[toolName]!;
+      const m = LOCAL_MIRROR[toolName]!;
+      const { call, read, local } = setup(c.mocks);
+      await read();
+      await call(toolName, c.args);
+      const after = await read();
+      const live = new Map(after.transactions.map((r) => [r.transaction_id as string, r]));
+
+      for (const id of m.removed) expect({ id, row: local(id) }).toEqual({ id, row: undefined });
+      for (const id of m.mirrored) {
+        const server = live.get(id)!;
+        const mine = local(id)!;
+        for (const [liveKey, localKey] of Object.entries(MIRRORED_FIELDS)) {
+          expect({ id, field: localKey, value: norm(mine[localKey]) }).toEqual({
+            id,
+            field: localKey,
+            value: norm(server[liveKey]),
+          });
+        }
+      }
+    }
+  );
+});
+
 // ── Edits must never insert a row the cached month did not have ─────────────
 //
 // An edit's target can be missing from a cached month for a legitimate reason:
