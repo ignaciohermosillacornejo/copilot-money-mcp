@@ -762,6 +762,19 @@ export class LiveCopilotDatabase {
     // Response validation is warn-only: a drifted row with no id cannot be
     // placed, and must not be inserted as a phantom.
     if (!node.id) return;
+    const hasRouting =
+      typeof node.accountId === 'string' &&
+      typeof node.itemId === 'string' &&
+      Boolean(node.accountId && node.itemId);
+    // Keep the meta index consistent with the invariant "any row this class
+    // has seen is indexed", even for a row too malformed to cache below: its
+    // routing ids are independent of the fields the read mappers need. Same
+    // empty-routing-id guard as every other feed (#518) — feedMeta re-checks,
+    // this skips the flush too.
+    if (hasRouting) {
+      this.feedMeta(node.id, { accountId: node.accountId, itemId: node.itemId });
+      this.metaStore.flush();
+    }
     // A row missing a field the read mappers dereference (date, name, a tags
     // array of ids) would make every later read of its month throw. It is
     // never stored: the month it would land in, and the month its cached copy
@@ -777,14 +790,6 @@ export class LiveCopilotDatabase {
       const stale = [...months].filter((m) => this.transactionsWindowCache.hasMonth(m));
       if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
       return;
-    }
-    const hasRouting = Boolean(node.accountId && node.itemId);
-    // Keep the meta index consistent with the invariant "any row this class
-    // has seen is indexed". Same empty-routing-id guard as every other feed
-    // (#518) — feedMeta re-checks, this skips the flush too.
-    if (hasRouting) {
-      this.feedMeta(node.id, { accountId: node.accountId, itemId: node.itemId });
-      this.metaStore.flush();
     }
     const existing = this.lookupTransactionNodes([node.id]).get(node.id);
     // mutation-guard: a drifted routing id is never inserted

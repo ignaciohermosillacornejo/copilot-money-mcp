@@ -1240,6 +1240,41 @@ describe('a malformed returned row is never cached (#864 review)', () => {
     }
   );
 
+  test('create_transaction: a row too malformed to cache still has its routing ids indexed', async () => {
+    // The routing ids are independent of the fields the read mappers need, so
+    // a follow-up write naming the new id resolves without a network fetch.
+    const c = CASES.create_transaction!;
+    const { call, liveDb } = setup(stripTags(c.mocks));
+
+    await call('create_transaction', c.args);
+
+    expect(liveDb.lookupTransactionMeta([TX_CREATED]).get(TX_CREATED)).toEqual({
+      accountId: routing.account_id,
+      itemId: routing.item_id,
+    });
+  });
+
+  test.each(['review_transactions', 'bulk_edit_transactions'])(
+    '%s: null elements in updated/failed are reported as not applied, and the month is refetched',
+    async (tool) => {
+      const { call, read, fetches } = setup({
+        BulkEditTransactions: {
+          bulkEditTransactions: { updated: [null], failed: [null] } as never,
+        },
+      });
+      await read();
+
+      const rows = [TX_BULK_1, TX_BULK_2].map((id) => ({ ...routing, transaction_id: id }));
+      await expect(
+        call(tool, tool === 'review_transactions' ? { rows } : { rows, category_id: CAT_NEW })
+      ).rejects.toThrow(/did not apply/);
+
+      const after = await read();
+      expect(after._cache_hit).toBe(false);
+      expect(fetches()).toBe(2);
+    }
+  );
+
   test.each(['review_transactions', 'bulk_edit_transactions'])(
     '%s: a response whose updated/failed are not arrays is reported, not thrown on, and the month is refetched',
     async (tool) => {

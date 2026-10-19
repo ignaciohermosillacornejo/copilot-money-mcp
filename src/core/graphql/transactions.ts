@@ -247,11 +247,19 @@ export async function bulkEditTransactions(
   const response = data.bulkEditTransactions as Partial<
     BulkEditTransactionsResponse['bulkEditTransactions']
   > | null;
-  const updated = Array.isArray(response?.updated) ? response.updated : [];
-  const failed = Array.isArray(response?.failed) ? response.failed : [];
+  // Elements too: an `updated` row without a string id, or a `failed` entry
+  // that is not an object, is dropped here, so the ids it stood for land in
+  // `skipped` instead of throwing in a caller's loop.
+  const updated = (Array.isArray(response?.updated) ? response.updated : []).filter(
+    (t: unknown) =>
+      t !== null && typeof t === 'object' && typeof (t as { id?: unknown }).id === 'string'
+  );
+  const failed = (Array.isArray(response?.failed) ? response.failed : []).filter(
+    (f: unknown) => f !== null && typeof f === 'object'
+  );
   const accountedFor = new Set<string>([
-    ...updated.map((t) => t?.id).filter((id): id is string => typeof id === 'string'),
-    ...failed.map((f) => f?.transaction?.id).filter((id): id is string => typeof id === 'string'),
+    ...updated.map((t) => t.id),
+    ...failed.map((f) => f.transaction?.id).filter((id): id is string => typeof id === 'string'),
   ]);
   return {
     updated,
