@@ -29,11 +29,7 @@ import { ALL_TOOL_DEFS } from '../src/tools/registry/index.js';
 type Mode = 'cache' | 'live';
 
 /** Mirrors handleListTools(): write = --write, live = --live-reads. */
-function listed(
-  def: (typeof ALL_TOOL_DEFS)[number],
-  write: boolean,
-  liveReads: boolean
-): boolean {
+function listed(def: (typeof ALL_TOOL_DEFS)[number], write: boolean, liveReads: boolean): boolean {
   if (!def.readOnly && !write) return false;
   if (def.requiresLiveReads && !liveReads) return false;
   if (def.swappedOutInLiveMode && liveReads) return false;

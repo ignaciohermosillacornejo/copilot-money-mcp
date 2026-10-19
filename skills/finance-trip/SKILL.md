@@ -34,13 +34,13 @@ Track trip expenses by finding transactions in a date range, using location and 
    - **Date range:** start and end date. If the user says "my Tahiti trip" and you know dates from prior conversation or tagged transactions, use those.
    - **Location hint:** country, city, or region (optional — helps filter)
 
-3. **Check for existing trip tag.** Use `get_transactions` with the `tag` filter to see if a tag already exists for this trip. If it does, this is a **re-run** to find stragglers — note which transactions are already tagged.
+3. **Check for existing trip tag.** This skill writes, and `--write` implies `--live-reads`, so the server is in live mode. Use `get_tags_live` to see whether a tag for this trip exists, then `get_transactions_live` with the `tag` filter to see if a tag already exists for this trip. If it does, this is a **re-run** to find stragglers — note which transactions are already tagged.
 
 ## Phase 2 — Find Trip Transactions
 
-1. **Pull transactions for the date range.** Use `get_transactions` with `start_date`/`end_date`, `exclude_transfers: true`, and `fields: ["default", "original_name", "tag_ids"]`. Paginate if needed. The `fields` argument is required on both pulls: rows went terse by default in v3.0.0, and the scoring pass below reads `original_name` (the full merchant string, which the presentation rules also demand) while the re-run path needs `tag_ids` to see which transactions this trip's tag is already on. This skill writes, and `--write` implies `--live-reads`, so the tool you actually reach is `get_transactions_live`: `user_reviewed`, `normalized_merchant` and `tag_ids` are selectable there too, but `original_name` is a cache-document field with no live equivalent — drop it from the list in live mode and use `name` (requesting it just returns a `_field_warning`).
+1. **Pull transactions for the date range.** Use `get_transactions_live` with `start_date`/`end_date`, `exclude_transfers: true`, and `fields: ["default", "tag_ids"]`. Paginate if needed (`limit` and `offset`). The `fields` argument is required on both pulls: rows are terse by default, and the re-run path needs `tag_ids` to see which transactions this trip's tag is already on. The full merchant string the scoring pass and the presentation rules use is `name`, which is in the default row.
 
-2. **Also pull a 2-week buffer after the trip end date.** Late-posting charges (hotels, rental cars, foreign transactions) often settle days or weeks after the trip. Use a separate `get_transactions` call for `end_date + 1` through `end_date + 14`, with the same `fields` list.
+2. **Also pull a 2-week buffer after the trip end date.** Late-posting charges (hotels, rental cars, foreign transactions) often settle days or weeks after the trip. Use a separate `get_transactions_live` call for `end_date + 1` through `end_date + 14`, with the same `fields` list.
 
 3. **Score each transaction.** Use Python via Bash. For each transaction, compute a trip-likelihood score based on:
 
@@ -89,7 +89,7 @@ Track trip expenses by finding transactions in a date range, using location and 
    - "Probably trip" items: present individually or in small groups with context
    - "Maybe trip" items: mention briefly ("Also found 3 Amazon orders during your trip — include any?")
 
-3. **Show full merchant names.** Always use `name` or `original_name`, not `normalized_merchant`.
+3. **Show full merchant names.** Always use `name`, not `normalized_merchant`.
 
 4. **For re-runs (stragglers):** Only show NEW transactions not already tagged. Frame as: "Found 3 late-posting charges from your [Trip Name] trip:"
 
@@ -131,12 +131,12 @@ If the user agrees, note it in the conversation for future reference. The user c
 
 1. **User confirms before tagging.** Never tag a transaction without the user approving it first. "Definitely trip" items can be batch-approved, but the batch must be presented first.
 2. **Use Python for aggregations.** Category totals, per-day averages, scoring — all via Bash with Python.
-3. **Show full merchant names.** Always `name` or `original_name`, never truncated `normalized_merchant`.
+3. **Show full merchant names.** Always `name`, never truncated `normalized_merchant`.
 4. **Respect existing tags.** If transactions already have tags, add the trip tag alongside them — don't replace.
 5. **Recurring charges are not trip expenses.** Subscriptions, rent, utilities, and other recurring charges that happen regardless of travel should be excluded even if they fall within the trip dates.
 6. **Buffer for late charges.** Always check 2 weeks after the trip end date for late-posting charges (hotels, car rentals, foreign transactions).
 7. **Re-runs are safe.** The skill can be re-run on the same trip without double-tagging — it skips already-tagged transactions.
-8. **Tag filter bug (known issue).** `update_transaction` tag writes succeed but `get_transactions` with `tag` filter may return nothing even after `refresh_database`. This is a known MCP bug under investigation. Workaround: after tagging, verify by re-querying the specific transaction IDs rather than using the tag filter.
+8. **Verify tags on the rows themselves.** After tagging, confirm by re-reading the specific transactions with `get_transactions_live` and `fields: ["default", "tag_ids"]` over their dates, rather than trusting a `tag` filter result alone. If a fresh write does not show up, call `refresh_cache` with `scope: "transactions"` and read again.
 9. **Transaction IDs change on settlement.** Plaid replaces pending transaction IDs with new IDs when transactions settle. If you're tagging transactions from recent trips, some IDs from prior sessions may no longer exist. Always re-query by date range, not by cached IDs.
 10. **Category IDs: user-created only.** When creating trip-related categories, only user-created category IDs work for `update_transaction`. Plaid taxonomy IDs (e.g., `travel_lodging`) will fail.
 11. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files. Use Python via Bash to process them.

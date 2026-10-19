@@ -38,12 +38,14 @@ Answer open-ended financial questions using transaction data, account balances, 
    - **Large ($500-5K):** Full dual-check (budget + cash flow) + tradeoff analysis.
    - **Major (>$5K):** Multi-month projection, impact on savings goals, seasonal context.
 
-3. **Pull relevant data.** Based on the question:
-   - `get_accounts` — current balances
-   - `get_transactions` with `period: "this_month"` — month-to-date spending. The default terse row carries what this skill reasons about (`amount`, `date`, `name`, `category_name`); add `fields: ["default", "original_name"]` when you are going to SHOW transactions, since gotcha 6 below asks for the full merchant name and `original_name` is excluded from the default row as of v3.0.0.
-   - `get_recurring_transactions` — upcoming obligations
-   - `get_categories` — spending patterns for the relevant category
-   - `get_goals` — savings targets that might be affected
+3. **Check the mode, then pull relevant data.** The tool names differ by server mode. If the tool list has `get_transactions_live` (live), you are in live mode — always the case when write tools are on. If it has `get_transactions` (cache) instead, you are in cache mode. Call only the tool for your mode. Based on the question:
+   - Current balances: `get_accounts_live` (live) / `get_accounts` (cache).
+   - Month-to-date spending: `get_transactions_live` (live) / `get_transactions` (cache) with `period: "this_month"`. The default terse row carries what this skill reasons about (`amount`, `date`, `name`, `category_name`).
+     - In live mode add `fields: ["default", "type"]` to `get_transactions_live` (live), so the spend recipe in 2.1 can keep REGULAR rows only.
+     - In cache mode add `fields: ["default", "original_name"]` to `get_transactions` (cache) when you are going to SHOW transactions: Rule 6 asks for the full merchant name, and `original_name` is not in the default row. Live rows have no such field; show `name`.
+   - Upcoming obligations: `get_upcoming_recurrings_live` (live) for bills due soon and `get_recurring_live` (live) for the full list, or `get_recurring_transactions` (cache).
+   - The category list, for the category the question is about: `get_categories_live` (live) / `get_categories` (cache). Compute the category's spending from the transaction rows (2.1), not from this tool.
+   - Savings targets that might be affected: `get_goals` (both modes).
 
 ## Phase 2 — Analyze
 
@@ -60,6 +62,15 @@ Free Money = Net Monthly Income
 ```
 
 Use the same computation as `/finance-pulse`. If the profile has these numbers, use them. If not, compute from transaction data using Python via Bash.
+
+**"Spent this month" must match the app.** When you quote what the user has spent this month, in total or for a category, use `/finance-pulse` section 2.2, which is how the Copilot app computes it. Summing every `amount` is wrong, because income rows are negative. In short:
+1. Take this month's rows. Transfers and excluded-category rows are already dropped by default.
+2. Keep spending rows only: `type` is `REGULAR` in live mode. In cache mode rows have no type, and skipping uncategorized rows drops income.
+3. Skip uncategorized rows.
+4. Net the amounts within each category, so refunds offset purchases.
+5. Add this month's still-unpaid recurring bills. In live mode, take them from `get_upcoming_recurrings_live` (live). It appears to cover only about the next 14 days, so also add the `get_recurring_live` (live) rows whose `nextPaymentDate` falls later in this month, and drop duplicates by `id`. For a month that has ended, this term is zero.
+
+Skipping step 5 under-reports by exactly the unpaid bills, which is the gap the app's figure shows. For Free Money's "Already Spent" term, use steps 1–4 only: unpaid fixed bills are already in Fixed Obligations.
 
 ### 2.2 Cash Flow Check (for Large and Major only)
 
@@ -125,7 +136,7 @@ Proactively flag relevant context:
 > That's fine. You have $2,449 left this month — $144/day for 17 days. A $30 book barely moves the needle.
 
 **Medium ($200 dinner):**
-> Tight but possible. You have $2,449 left this month ($144/day). A $200 dinner drops that to $2,249 ($132/day) — still workable, but restaurants are already at $630 this month vs your $300 budget.
+> Tight but possible. You have $2,449 left this month ($144/day). A $200 dinner drops that to $2,249 ($132/day) — still workable, but you've already spent $630 on restaurants this month, about twice your usual.
 
 **Large ($1,500 weekend trip):**
 > Would create strain. You have $2,449 in Free Money this month. A $1,500 trip would leave $949 for the remaining 17 days ($56/day vs your usual $187/day pace).
@@ -153,6 +164,6 @@ If the question reveals new financial context (e.g., "I'm getting a raise next m
 9. **Invoke sub-skills when appropriate.** If the user's question would be better served by `/finance-pulse`, `/finance-cleanup`, or `/finance-trip`, suggest it. Don't try to replicate their functionality.
 10. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category. This is by design — don't flag it.
 11. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files. Use Python via Bash to process them — do not try to read them into context.
-12. **Reference existing budgets.** The user has budgets in Copilot Money (`get_budgets`). Use budget amounts as context for affordability checks — "your $300 restaurant budget is already at $280 this month" is more useful than raw averages.
+12. **Reference existing budgets, carefully.** The user may have budgets in Copilot Money: `get_budgets_live` (live) / `get_budgets` (cache). The amount Copilot returns for this month has rollover applied (in live mode it is `budget_amount` on `get_categories_live` (live)), so it is not the figure the user set: it can be far above it, or negative after an overspent month. Don't phrase it as "your $X budget is at $Y". If a budget is useful context, say what is left: "you have about $20 left in your restaurant budget this month". Skip a budget whose amount is zero or negative.
 13. **No savings goals = no savings deduction.** If `get_goals` returns 0, Free Money doesn't reserve for savings. Flag this in affordability analysis: "Note: you have no savings target set, so this calculation doesn't protect any savings."
-14. **MCP reads are local, writes are remote.** Data comes from the local LevelDB cache, which syncs from Firestore via the Copilot Money app. There may be a lag between what the app shows and what the MCP returns. Call `refresh_database` if data seems stale.
+14. **Where reads come from depends on the mode.** In live mode, reads come from Copilot's API and are cached in memory for a while. If data looks stale, call `refresh_cache` (live). In cache mode, reads come from the local LevelDB cache that the Copilot Money app syncs, which can lag behind the app. If data looks stale, call `refresh_database` (cache), and if that does not help, ask the user to open the Copilot app so it syncs.

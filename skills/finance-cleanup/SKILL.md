@@ -31,9 +31,9 @@ Walk the user through a structured cleanup of their Copilot Money transaction da
 
 Do this BEFORE any transaction-level work. Transaction cleanup lands in the right buckets only if the taxonomy itself makes sense. Skipping this turns miscategorization fixes into busywork.
 
-0. **Refresh the cache.** Call `refresh_database` at the very start of Phase 0, not Phase 1. Phase 0 already reads categories + 6 months of transactions, so a stale cache would surface structural problems that don't exist (or hide new ones). One refresh covers both phases.
+0. **Start from fresh data.** This skill writes, and `--write` implies `--live-reads`, so the server is in live mode and every read below goes to Copilot's API. If the session has already read transactions or categories (or the user says the data looks stale), call `refresh_cache` once at the very start of Phase 0, not Phase 1: Phase 0 already reads categories + 6 months of transactions, so stale reads would surface structural problems that don't exist (or hide new ones). One refresh covers both phases.
 
-1. **Pull categories + spend totals.** Use `get_categories` for the full tree, then `get_transactions` over the last 6 months to compute per-category spend and per-category transaction count. The default terse row is enough for this pass — `amount`, `category_name` and `date` are all in it. For this aggregation pass, **paginate through multiple `get_transactions` calls** rather than applying the default `limit=50` — you need the full 6-month set for accurate category totals, not a 50-row sample. Aggregate per-category counts and sums incrementally with Python via Bash as each page comes back.
+1. **Pull categories + spend totals.** Use `get_categories_live` for the full tree (each row's `parentId` gives the hierarchy), then `get_transactions_live` over the last 6 months to compute per-category spend and per-category transaction count. The default terse row is enough for this pass — `amount`, `category_name` and `date` are all in it. For this aggregation pass, **paginate through multiple `get_transactions_live` calls** (100 rows per page, `limit` and `offset`) — you need the full 6-month set for accurate category totals, not a one-page sample. Aggregate per-category counts and sums incrementally with Python via Bash as each page comes back.
 
 2. **Flag structural problems.** Use Python via Bash for the aggregation. Flag any category where:
    - **Single-merchant dominance:** one merchant is >70% of the category's spend → candidate for a split (e.g. a broad "Shopping" category dominated by one store).
@@ -50,7 +50,7 @@ Do this BEFORE any transaction-level work. Transaction cleanup lands in the righ
 
 ## Phase 1 — Gather Data
 
-Cache was refreshed in Phase 0 Step 0 — do not refresh again. Mid-session refreshes cause earlier queries to return incomplete data and force re-pulls later. One refresh up front covers the whole session.
+Any refresh happened in Phase 0 Step 0 — do not refresh again. Mid-session refreshes make earlier results disagree with later ones and force re-pulls. One refresh up front covers the whole session.
 
 1. **Read the user profile** at `~/.claude/copilot-money/user-profile.md`. If the file doesn't exist: run `mkdir -p ~/.claude/copilot-money`, then copy `skills/user-profile.template.md` (relative to the copilot-money-mcp repo root) to the profile path. First-time bootstrap may require CWD = repo root for the template read. Note any existing preferences, especially under "Cleanup Preferences," "Preferences," and "Recurring Matcher State." These override your judgment — if the profile says "Uber Eats = Dining," never flag Uber Eats as miscategorized.
 
@@ -60,10 +60,10 @@ Cache was refreshed in Phase 0 Step 0 — do not refresh again. Mid-session refr
    - Any accounts to skip?
 
 3. **Pull data.** Use these MCP tools:
-   - `get_transactions` with `fields: ["default", "user_reviewed", "normalized_merchant", "original_name"]` — last 6 months of all transactions (for historical patterns), and the same call is how you find the unreviewed ones: there is no `reviewed` filter argument, so pull the window and filter on `user_reviewed === false` in Python. The `fields` argument is required for all three of Phase 2's passes: as of v3.0.0 rows are terse by default, and `user_reviewed` (the reviewed/unreviewed split), `normalized_merchant` (the merchant grouping in Phase 2.1) and `original_name` (the full name every presentation rule below demands) are all excluded from the default row. This skill writes, and `--write` implies `--live-reads`, so the tool you actually reach is `get_transactions_live`: `user_reviewed`, `normalized_merchant` and `tag_ids` are selectable there too, but `original_name` is a cache-document field with no live equivalent — drop it from the list in live mode and use `name` (requesting it just returns a `_field_warning`).
-   - `get_recurring_transactions` — current recurring charges
-   - `get_categories` — full category list
-   - `get_accounts` — to map account IDs to names
+   - `get_transactions_live` with `fields: ["default", "user_reviewed", "normalized_merchant"]` — last 6 months of all transactions (for historical patterns), and the same call is how you find the unreviewed ones: there is no `reviewed` filter argument, so pull the window and filter on `user_reviewed === false` in Python. The `fields` argument is required for Phase 2's passes: rows are terse by default, and `user_reviewed` (the reviewed/unreviewed split) and `normalized_merchant` (the merchant grouping in Phase 2.1) are not in the default row. Live rows have no `original_name`; the full merchant string every presentation rule below demands is `name`.
+   - `get_recurring_live` — current recurring charges
+   - `get_categories_live` — full category list
+   - `get_accounts_live` — to map account IDs to names (the account's key is `id`)
 
    - For any payment app accounts found (Venmo, PayPal, Zelle, CashApp), also pull their transactions separately — these contain the descriptive names and categories that bank-side stubs lack.
 
@@ -100,7 +100,7 @@ For each merchant that appears 3+ times in the 6-month history AND wasn't alread
 
 ### 2.2 Misclassified Transfers
 
-**Payment app accounts (Venmo, PayPal, etc.):** These create two-sided transactions — a generic stub on the bank/checking side (e.g., "VENMO" with no detail, marked as internal transfer) and a richly-described transaction on the payment app account side (e.g., "Bar Whistler to Sam Rivera" with proper category). Before flagging bank-side payment app stubs as false transfers, check if the payment app account exists (`get_accounts`) and whether the real transaction lives there. If both sides exist, the bank-side stub is correctly marked as a transfer — leave it alone.
+**Payment app accounts (Venmo, PayPal, etc.):** These create two-sided transactions — a generic stub on the bank/checking side (e.g., "VENMO" with no detail, marked as internal transfer) and a richly-described transaction on the payment app account side (e.g., "Bar Whistler to Sam Rivera" with proper category). Before flagging bank-side payment app stubs as false transfers, check if the payment app account exists (`get_accounts_live`) and whether the real transaction lives there. If both sides exist, the bank-side stub is correctly marked as a transfer — leave it alone.
 
 Two directions to check:
 
@@ -118,19 +118,19 @@ Two directions to check:
 
 Scan the 6-month transaction history for merchants appearing 3+ times at regular intervals:
 - Intervals should be 28-31 days apart, with a tolerance of +/-3 days.
-- Compare against existing recurrings from `get_recurring_transactions`. Skip merchants already tracked.
+- Compare against existing recurrings from `get_recurring_live`. Skip merchants already tracked.
 - **Price drift:** Flag if amount varies >5% for charges under $50, or >3% for charges between $50-$200, or >2% for charges over $200.
 - **Missed cycles:** If the most recent occurrence is 7+ days past the expected next date, flag as potentially cancelled or missed.
 
 ### 2.4 Overdue Recurrings — investigate matcher before archiving
 
-When `get_recurring_transactions` surfaces a sub as "overdue" (expected charge hasn't arrived), **do not recommend archiving it until you've ruled out a stale matcher rule.** In real sessions, ~⅔ of "overdue" subs were actually still charging — the matcher's name-match or amount-bound rule had just drifted.
+When `get_recurring_live` surfaces a sub as "overdue" (its `nextPaymentDate` has passed and the charge hasn't arrived), **do not recommend archiving it until you've ruled out a stale matcher rule.** In real sessions, ~⅔ of "overdue" subs were actually still charging — the matcher's name-match or amount-bound rule had just drifted.
 
 Before flagging archive, for each overdue sub:
 
-1. **Pull the matcher rule.** Use `get_recurring_transactions` (filter by name or id) to read the current `match_string`, `min_amount`, `max_amount`. This skill writes, and `--write` implies `--live-reads`, so in practice the tool is `get_recurring_live` — call it with `fields: ["default", "rule"]`. As of v3.0.0 the matcher config lives in `rule` (`nameContains` / `minAmount` / `maxAmount`) and is excluded from the default row; without the `fields` argument there is no rule to read and every overdue sub looks like a dead one. If you are somehow running read-only against cache-mode `get_recurring_transactions`, drop the `fields` argument — `rule` is not a cache-row name there (asking for it just returns a `_field_warning`) and the matcher config arrives under `copilot_subscriptions` instead.
+1. **Pull the matcher rule.** Call `get_recurring_live` with `fields: ["default", "rule"]` and find the sub by name or id. The matcher config lives in `rule` (`nameContains` / `minAmount` / `maxAmount`) and is not in the default row; without the `fields` argument there is no rule to read and every overdue sub looks like a dead one.
 2. **Check the profile.** Read the "Recurring Matcher State" section of `~/.claude/copilot-money/user-profile.md` — if the sub is listed there with known oddities (e.g. "semi-annual, Copilot next_date is buggy for this one"), honor it and skip.
-3. **Look for a near-miss charge.** Run `get_transactions(merchant=<approximate_name>, last_90_days)`. Watch for the two common drift modes:
+3. **Look for a near-miss charge.** Run `get_transactions_live` with `merchant: "<approximate name>"` and `period: "last_90_days"`. Watch for the two common drift modes:
    - **Name truncation:** matcher says `name_contains: "Servicename"` but the merchant posts as `SERVICENAM` (payment processor truncated it) — never matches.
    - **Amount cap drift:** plan price increased (or rent has proration / annual increases) and blew past the old `max_amount`.
 4. **If a near-miss is found**, propose `update_recurring` to fix the rule — widen the amount range, correct the name substring, or both. Only propose `set_recurring_state` to archive if the sub is genuinely silent for **30+ days past the expected `next_date`** with zero near-miss matches in the last 90 days. (Phase 2.3 flags missed cycles at 7+ days, which is right for "might be cancelled" — but archiving is a heavier call and should wait for a full extra cycle to rule out delayed posting.)
@@ -161,7 +161,7 @@ Examples of good phrasing:
 - If you are uncertain about a finding, say so explicitly. "I'm not sure about this one — $12.99 from 'SP * SOMETHING' could be Spotify or a Shopify purchase."
 
 **Transaction presentation format:** When showing a transaction to the user, always include:
-- Full `name` or `original_name` (NOT the truncated `normalized_merchant` — users need the full text to recall context, e.g., "ENC *DOCTOR NAME C.SANTIAGO" not "ENC")
+- Full `name` (NOT the truncated `normalized_merchant` — users need the full text to recall context, e.g., "ENC *DOCTOR NAME C.SANTIAGO" not "ENC")
 - Date, amount, account name, and full category name (not category ID)
 
 **Do NOT use AskUserQuestion for large batches.** The interactive question tool is too slow when there are 10+ items needing decisions. Instead:
@@ -264,11 +264,11 @@ This pre-empts the common confusion when a user re-opens /finance-cleanup right 
 5. **Use Bash with Python for math.** For aggregations, frequency calculations, or any arithmetic involving more than ~10 values, use Python via the Bash tool. Do not do mental math on large sets.
 6. **Batch size.** Present 3-5 findings at a time. Never dump everything at once.
 7. **No invented data.** Only reference transactions, merchants, and amounts that actually appear in the MCP tool results. Never fabricate examples.
-8. **Show full merchant names.** When presenting transactions to the user, always show the full `original_name` or `name` field — not the truncated `normalized_merchant`. Users need the full text to recall what a transaction was (e.g., "ENC *DOCTOR NAME C.SANTIAGO" is identifiable, "ENC" is not).
+8. **Show full merchant names.** When presenting transactions to the user, always show the full `name` field — not the truncated `normalized_merchant`. Users need the full text to recall what a transaction was (e.g., "ENC *DOCTOR NAME C.SANTIAGO" is identifiable, "ENC" is not).
 9. **Category IDs: user-created only.** When writing categories with `update_transaction`, only user-created category IDs work (e.g., `5Qqr8qs3GHNCj8H6fIKd`). Plaid taxonomy IDs (e.g., `general_services`, `food_and_drink_restaurant`) will fail. If the needed category doesn't exist, use `create_category` first, then use the returned ID.
 10. **Transaction IDs change on settlement.** Plaid replaces pending transaction IDs with new IDs when transactions settle. The old ID moves to `pending_transaction_id`. Do not cache or reference transaction IDs across sessions — always re-query.
-11. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files — do not try to read them into context. The `get_transactions` figure that used to sit here (100 txns ~160KB), like the `get_accounts` and `get_recurring_transactions` ones (~77KB and ~70KB), predates v3.0.0, which made all three terse by default — a 100-row transaction page now measures ~28KB. Opting fat fields back in via `fields` can still cross the threshold.
+11. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files — do not try to read them into context. Transaction, account and recurring reads return terse rows by default, so a 100-row transaction page measures ~28KB; opting fat fields back in via `fields` can still cross the threshold.
 12. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category on purpose. Never flag them as uncategorized or try to assign a category.
-13. **`exclude_transfers` defaults to true.** `get_transactions` hides internal transfers by default. To analyze transfers (misclassified transfer detection), pass `exclude_transfers: false`.
+13. **`exclude_transfers` defaults to true.** `get_transactions_live` hides internal transfers by default. To analyze transfers (misclassified transfer detection), pass `exclude_transfers: false`.
 14. **Findings list is the session source of truth.** Within a session, the in-memory findings list from Phase 2 is what Phase 3 presents and Phase 4 prunes. Do NOT re-pull from cache after writes — the local cache is stale until the Copilot Money app syncs (a few minutes after each write). Surface only what remains in the pruned list.
 15. **Profile updates are per-batch, not end-of-session.** The user may walk away mid-cleanup; preserve learned state immediately so the next session benefits. Phase 5 is a final-sweep catch-all, not the primary write point.

@@ -78,12 +78,12 @@ Save parsed shipments to `/tmp/amazon-sync/shipments.json` and refunds to `/tmp/
 
 ## Phase 3 — Pull Copilot Data
 
-Use these MCP tools:
+This skill writes, and `--write` implies `--live-reads`, so the server is in live mode and these are the tools to use:
 
-- `refresh_database` — ensure the local cache is current.
-- `get_transactions` with `query: "amazon"`, the same date window, and `fields: ["default", "user_reviewed", "original_name"]`. The `fields` argument is required: rows went terse by default in v3.0.0, and both names are excluded from that row — `user_reviewed` is what Phase 5's reviewed-state guard and Phase 6's scan branch on (without it every row reads as unreviewed and the guard silently stops guarding), and `original_name` is the full merchant string every presentation rule here demands. This skill writes, and `--write` implies `--live-reads`, so the tool you actually reach is `get_transactions_live`: `user_reviewed`, `normalized_merchant` and `tag_ids` are selectable there too, but `original_name` is a cache-document field with no live equivalent — drop it from the list in live mode and use `name` (requesting it just returns a `_field_warning`). `account_id` and `item_id`, the two IDs `split_transaction` needs from the parent row, ARE in the default row. Terse rows are also much smaller than this step used to warn about (~28KB per 100 rows), but a wide window can still exceed 100KB and spill to disk — read those via `jq` or Python, not into context.
-- `get_accounts` with `fields: ["default", "mask"]` — map `account_mask` back to the payment-method suffix in Amazon data (`Visa - XXXX` in a shipment's `payment_method` → Copilot account with `mask: XXXX`). The `fields` argument is required: `mask` is not in the default row as of v3.0.0, and without it the Phase 4 #3 and Phase 6 account checks below have nothing to compare against. This skill writes, and `--write` implies `--live-reads`, so the tool you actually reach is `get_accounts_live`: `mask` is selectable there too, but the identity key is `id` (not `account_id`) and there is no `institution_name`.
-- `get_categories` with `view: "list"` — capture the full list of user-created category IDs. Note these IDs; **Plaid taxonomy IDs will not stick on writes.**
+- `refresh_cache` with `scope: "transactions"` — only if the user says the data looks stale; live reads are already current apart from a short in-memory cache.
+- `get_transactions_live` with `query: "amazon"`, the same date window, and `fields: ["default", "user_reviewed"]`. The `fields` argument is required: `user_reviewed` is not in the terse default row, and it is what Phase 5's reviewed-state guard and Phase 6's scan branch on (without it every row reads as unreviewed and the guard silently stops guarding). Live rows have no `original_name`; the full merchant string is `name`. `account_id` and `item_id`, the two IDs `split_transaction` needs from the parent row, ARE in the default row. Terse rows are small (~28KB per 100 rows), but a wide window can still exceed 100KB and spill to disk — read those via `jq` or Python, not into context.
+- `get_accounts_live` with `fields: ["default", "mask"]` — map the account's `mask` back to the payment-method suffix in Amazon data (`Visa - XXXX` in a shipment's `payment_method` → Copilot account with `mask: XXXX`). The `fields` argument is required: `mask` is not in the default row, and without it the Phase 4 #3 and Phase 6 account checks below have nothing to compare against. The identity key is `id` (not `account_id`), and there is no `institution_name`.
+- `get_categories_live` — capture the full list of user-created category IDs (`id`). Note these IDs; **Plaid taxonomy IDs will not stick on writes.**
 
 Save to `/tmp/amazon-sync/copilot-amazon-txns.json`, `/tmp/amazon-sync/accounts.json`, and `/tmp/amazon-sync/categories.json`.
 
@@ -94,7 +94,7 @@ For each Copilot Amazon transaction, attempt to find a matching shipment (or com
 **Match criteria (all must hold for a "confident" match):**
 1. **Amount:** exact match within $0.02.
 2. **Date:** Copilot `date` is in `[ship_date - 2, ship_date + 5]`. Tighter than you might expect — looser windows produce false positives (a $9.99 shipment 9 days before a $10 tip got spuriously matched during development).
-3. **Account:** Copilot `account_mask` appears in the shipment's `payment_method` string, OR the shipment's payment is the literal string `Not Available` (common for Amazon Fresh).
+3. **Account:** Copilot account's `mask` appears in the shipment's `payment_method` string, OR the shipment's payment is the literal string `Not Available` (common for Amazon Fresh).
 
 **Match outcomes:**
 - `single` — exactly one shipment matches. Strongest signal.
@@ -139,7 +139,7 @@ Four streams feed Phase 6:
 - **Mixed-Fresh bundles** (Fresh + non-Fresh shipments in one Copilot charge) requiring a split with a dedicated Groceries child for the Fresh portion.
 - **Reviewed transactions with a clearly wrong category** — actively surfaced, not buried. Examples: a bulk toilet-paper order tagged General Shopping should be Household things; a medical silicone gel tagged General Shopping should be Healthcare; a book tagged General Shopping should be Books & Media.
 
-**Presentation format:** markdown table, batches of 3–5. Columns: date, amount, current category, proposed category (for a split: a list of child amounts + categories), rationale. Always show full `original_name` for the Copilot txn and full product names for the items. Never truncate to `normalized_merchant`.
+**Presentation format:** markdown table, batches of 3–5. Columns: date, amount, current category, proposed category (for a split: a list of child amounts + categories), rationale. Always show the full `name` for the Copilot txn and full product names for the items. Never truncate to `normalized_merchant`.
 
 Ask in free text, not `AskUserQuestion`. Large batches in `AskUserQuestion` are slow and fatigue the user.
 
@@ -168,8 +168,8 @@ After the user approves a batch, apply it in Phase 7.
 
 For each refund in `Refund Details` within the window:
 
-1. Find the original order's Copilot charge (Phase 4 result) so you know which `account_id` / `account_mask` the refund should post back to.
-2. Match `order_id` + `refund_amount` to a negative-signed Copilot transaction, `refund_date ± 3 days`. **Account check is required** (same criterion as Phase 4 #3): the Copilot negative-signed transaction's `account_mask` must appear in the original shipment's `payment_method` string. Do not match a refund across accounts — a user with Amazon charges on two cards could get a false match otherwise.
+1. Find the original order's Copilot charge (Phase 4 result) so you know which `account_id` / `mask` the refund should post back to.
+2. Match `order_id` + `refund_amount` to a negative-signed Copilot transaction, `refund_date ± 3 days`. **Account check is required** (same criterion as Phase 4 #3): the Copilot negative-signed transaction's account `mask` must appear in the original shipment's `payment_method` string. Do not match a refund across accounts — a user with Amazon charges on two cards could get a false match otherwise.
 3. If the original order was split across categories in Phase 7, categorize the refund to match the returned item's category (look up via `Returns Status` if present — that has which item was returned).
 4. If the refund's `disbursement_type` is not a card refund (e.g., Amazon balance), ignore — store credit is out of scope.
 5. If no matching Copilot credit is found, flag but do not guess; the refund may be pending or outside the window.
@@ -212,11 +212,11 @@ Phrase each rule as a simple substring, seller-name, or field match so a reader 
 2. **Respect user-reviewed state.** `user_reviewed: true` means the user made a deliberate decision and auto-apply must not overwrite it. Phase 5 checks reviewed state before writing — a reviewed Fresh charge categorized as Healthcare (e.g., a prescription delivery) is routed to Phase 6 for approval, not silently converted to Groceries. Phase 6 may surface reviewed transactions for correction, but only with explicit user approval — never auto-applied.
 3. **No invented data.** Only reference shipments, Order IDs, products, and Copilot transactions that actually exist. Never fabricate examples.
 4. **Tight match window.** Amount within $0.02; dates in `[ship - 2, ship + 5]`. Looser windows produce false positives. "No match" is a valid outcome.
-5. **Exact payment-method match.** A shipment's `payment_method` must contain the Copilot `account_mask`. Do not match across accounts.
+5. **Exact payment-method match.** A shipment's `payment_method` must contain the Copilot account's `mask`. Do not match across accounts.
 6. **User-created category IDs only.** `update_transaction` and `split_transaction` reject Plaid taxonomy IDs. If the needed category does not exist, `create_category` first.
-7. **Large MCP responses go to disk.** Responses over 100KB are saved to temp files instead of returned inline. This is no longer routine for `get_transactions`: v3.0.0 terse rows put a 100-row page at roughly 30KB. Read via Python or `jq`; do not try to pull them into context. (`get_accounts` shed the embedded `holdings` array in v3.0.0 — pass `fields: ["default", "holdings"]` if a check ever needs it back — so it is much smaller than it used to be.)
+7. **Large MCP responses go to disk.** Responses over 100KB are saved to temp files instead of returned inline. This is no longer routine for `get_transactions_live`: terse rows put a 100-row page at roughly 30KB. Read via Python or `jq`; do not try to pull them into context.
 8. **Use Python for any aggregation over ~10 rows.** Match scoring, amount comparisons, combo-sum search, allocation math — all via the `Bash` tool with Python.
-9. **Preserve full merchant names.** Show the Copilot `original_name` or `name`, not `normalized_merchant`. Users need the full suffix after `AMAZON MKTPL*` to recall which order a charge corresponds to.
+9. **Preserve full merchant names.** Show the Copilot `name`, not `normalized_merchant`. Users need the full suffix after `AMAZON MKTPL*` to recall which order a charge corresponds to.
 10. **Report staleness explicitly.** If the export's latest `ship_date` is more than 3 days before the Copilot data's latest Amazon transaction, tell the user the export is stale and suggest a fresh download before acting on recent unmatched transactions.
 11. **Digital subscriptions are out of scope; one-off digital purchases are.** Prime Video, Audible subscriptions, Kindle Unlimited renewals — skip. Copilot's recurring detection owns them. A row is a subscription when `subscription_order_type` is non-empty and not `Not Applicable`. One-off digital purchases (Kindle books bought individually, single-song MP3s, non-renewing digital rentals) flow through the normal Phase 4/6 pipeline: match on amount + date + account like retail, then categorize per profile rules (e.g., Kindle book → Books & Media; Prime Video rental → Entertainment & Experiences).
 12. **Store credit is out of scope.** If a shipment's Copilot charge is less than the CSV's `shipment_total` (gift-card applied), flag and leave alone. Do not try to reconstruct an Amazon balance ledger.

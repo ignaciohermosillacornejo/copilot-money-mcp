@@ -123,11 +123,7 @@ async function makeRepo(opts: {
   // that set only `argsBody` got no `scripts/` directory at all and silently
   // tested "the dump script is missing entirely" instead — invisible in this
   // file, because that case asserts the same four invariants.
-  if (
-    opts.dumpBody !== undefined ||
-    opts.argsBody !== undefined ||
-    opts.modesBody !== undefined
-  ) {
+  if (opts.dumpBody !== undefined || opts.argsBody !== undefined || opts.modesBody !== undefined) {
     await mkdir(join(root, 'scripts'), { recursive: true });
     await writeFile(join(root, 'scripts', 'dump-tool-names.ts'), opts.dumpBody ?? WORKING_DUMP);
     if (opts.omitArgs !== true) {
@@ -730,7 +726,10 @@ describe('terse-default field references (#704)', () => {
 describe('mode surface (#847)', () => {
   test('a skill that declares no modes fails, naming the fix', async () => {
     await withRepo(
-      { dumpBody: WORKING_DUMP, skill: `---\nname: demo\ndescription: A demo skill.\n---\n\nCall \`get_transactions\`.\n` },
+      {
+        dumpBody: WORKING_DUMP,
+        skill: `---\nname: demo\ndescription: A demo skill.\n---\n\nCall \`get_transactions\`.\n`,
+      },
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('demo/SKILL.md: frontmatter must declare the server mode(s)');
@@ -750,17 +749,23 @@ describe('mode surface (#847)', () => {
   });
 
   test('a live skill naming a cache-only tool fails', async () => {
-    await withRepo({ dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts` for balances.') }, ({ code, stderr }) => {
-      expect(code).toBe(1);
-      expect(stderr).toContain(
-        'demo/SKILL.md:8: `get_accounts` is listed only in cache mode, but this skill declares live'
-      );
-    });
+    await withRepo(
+      { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts` for balances.') },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain(
+          'demo/SKILL.md:8: `get_accounts` is listed only in cache mode, but this skill declares live'
+        );
+      }
+    );
   });
 
   test('...and the reverse: a cache skill naming a live-only tool fails', async () => {
     await withRepo(
-      { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts_live` for balances.', 'cache') },
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith('Call `get_accounts_live` for balances.', 'cache'),
+      },
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('`get_accounts_live` is listed only in live mode');
@@ -788,7 +793,10 @@ describe('mode surface (#847)', () => {
 
   test('...but an untagged variant still fails beside a tagged one', async () => {
     await withRepo(
-      { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts_live` / `get_accounts` (cache).', 'live, cache') },
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith('Call `get_accounts_live` / `get_accounts` (cache).', 'live, cache'),
+      },
       ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('`get_accounts_live` is listed only in live mode');
@@ -810,10 +818,13 @@ describe('mode surface (#847)', () => {
   test('a tag for a mode the skill does not declare does not excuse the tool', async () => {
     // A live-only skill cannot opt a cache tool back in by tagging it: its
     // own declaration says that mode never runs it.
-    await withRepo({ dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts` (cache).') }, ({ code, stderr }) => {
-      expect(code).toBe(1);
-      expect(stderr).toContain('`get_accounts` is listed only in cache mode');
-    });
+    await withRepo(
+      { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts` (cache).') },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('`get_accounts` is listed only in cache mode');
+      }
+    );
   });
 
   test("an argument the line's tool does not take fails", async () => {

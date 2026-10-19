@@ -30,18 +30,20 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
    - Communication Style: detail level, tone, framing
    - If Income & Obligations is empty, this is a first run — Phase 2 will handle bootstrapping.
 
-2. **Pull data.** Use these MCP tools in parallel:
-   - `get_accounts` — all accounts with balances (for net worth and available cash)
-   - `get_transactions` with `period: "this_month"`, `exclude_transfers: true` — current month spending. No `fields` argument needed on the `get_transactions` calls: everything this skill computes from them (sums, per-category totals, merchant names, dates) is in the v3.0.0 default row. `get_recurring_transactions` below is the exception and does need one
-   - `get_transactions` with `period: "last_month"`, `exclude_transfers: true` — last month for comparison
-   - `get_transactions` with `period: "last_90_days"`, `exclude_transfers: true` — for rolling averages
-   - `get_categories` with `view: "list"`, `period: "this_month"` — category spending this month
-   - `get_categories` with `view: "list"`, `period: "last_90_days"` — category spending for 90-day baseline
-   - `get_recurring_transactions` with `period: "last_90_days"` and `fields: ["default", "transactions"]` — subscriptions and recurrings. The `fields` argument is required for the price-drift check in Phase 2.4: as of v3.0.0 the matched per-charge `transactions` array is excluded from the default row, and `average_amount` / `total_amount` alone cannot show a change over time.
-   - `get_budgets` with `active_only: true` — any budgets the user set
-   - `get_goals` with `active_only: true` — savings goals
+2. **Check the mode, then pull data.** The server runs in one of two modes, and the tool names differ. If the tool list has `get_transactions_live` (live), you are in live mode — always the case when write tools are on. If it has `get_transactions` (cache) instead, you are in cache mode. Each step below names the tool for each mode; call only the one for your mode. Run these in parallel:
+   - Accounts with balances (net worth, available cash): `get_accounts_live` (live) / `get_accounts` (cache).
+   - Transactions for three windows: `get_transactions_live` (live) / `get_transactions` (cache), each with `exclude_transfers: true` and one of `period: "this_month"`, `period: "last_month"`, `period: "last_90_days"`. Both tools take these arguments.
+     - In live mode also pass `fields: ["default", "type", "recurring_id"]` to `get_transactions_live` (live): `type` is how 2.2 keeps REGULAR rows only, and `recurring_id` is what the 2.5 price-drift check groups by. Neither is in the default row.
+     - In cache mode no `fields` argument is needed on `get_transactions` (cache): the default row has what this skill computes from it (amounts, category names, merchant names, dates).
+   - The category list (names, which are excluded): `get_categories_live` (live) / `get_categories` (cache). Per-category spending is computed from the transaction rows (2.2, 2.4), not read from this tool, so the figure is the same in both modes.
+   - Recurring charges, live mode: `get_recurring_live` (live), default rows. These carry `state`, `nextPaymentDate` and `nextPaymentAmount` but no charge history: their `payments` holds only the next payment.
+   - Recurring charges, cache mode: `get_recurring_transactions` (cache) with `period: "last_90_days"` and `fields: ["default", "transactions"]`. The `fields` argument is what the cache-mode price-drift check in 2.5 reads: the matched per-charge `transactions` array is not in the default row.
+   - This month's unpaid bills, live mode: `get_upcoming_recurrings_live` (live). Needed for the "spent this month" figure in 2.2; see the caveat there about its horizon.
+   - Budgets, live mode: `get_budgets_live` (live), no arguments.
+   - Budgets, cache mode: `get_budgets` (cache) with `active_only: true`.
+   - Savings goals: `get_goals` with `active_only: true` (both modes).
 
-   Paginate `get_transactions` if needed (100 per page). Use `limit` and `offset`.
+   Transaction reads return 100 rows per page; page through with `limit` and `offset` until a page comes back short.
 
 3. **Handle large datasets and do all math via Python.** Transaction data will be large. Do NOT try to hold all transactions in your context, and do NOT do mental math on more than ~10 numbers. Instead:
    - Use Python via Bash for ALL aggregations, averages, projections, grouping, and arithmetic
@@ -96,7 +98,7 @@ If `~/.claude/copilot-money/user-profile.md` has empty Income & Obligations sect
    - Insurance, loan payments
    - Present: "I found these fixed monthly costs: [list]. Anything missing or wrong?"
 
-3. **Detect account roles.** From `get_accounts`:
+3. **Detect account roles.** From `get_accounts_live` (live) / `get_accounts` (cache):
    - Primary checking: highest-activity depository account
    - Savings: depository accounts with low transaction volume
    - Credit cards: list with recent activity level
@@ -110,7 +112,22 @@ If `~/.claude/copilot-money/user-profile.md` has empty Income & Obligations sect
 
 5. **Save to profile.** After user confirms, update the relevant sections of `~/.claude/copilot-money/user-profile.md`. For each section saved, also update its `<!-- last_verified: -->` HTML comment to today's date in YYYY-MM-DD form (this is what Phase 1.5 reads to decide if the section is stale). On subsequent runs, skip bootstrapping and read the profile directly.
 
-### 2.2 Compute Free Money
+### 2.2 Spent This Month (the app's figure)
+
+Whenever you report what the user has "spent this month" (Quick Stats, a category total, "how much have I spent"), compute it the way the Copilot app does, so the number matches the one on their screen. Summing every `amount` does not: income rows are negative and net against all spending.
+
+1. Take this month's transaction rows. Transfers and rows in excluded categories are already gone, since `exclude_transfers` and `exclude_excluded` default to true.
+2. Keep spending rows only. Live mode: keep rows whose `type` is `REGULAR`, which drops `INCOME`. Cache mode: rows carry no type, so rely on step 3, which drops income because Copilot leaves income uncategorized (Rule 7).
+3. Skip uncategorized rows (no `category_name`). The app does not count them.
+4. Net per category: sum `amount` within each category, so a refund (negative) offsets a purchase in the same category. The sum over categories is the posted spend.
+5. Add this month's still-unpaid recurring charges, overdue or upcoming, with a due date on or before the last day of the month. The app already counts them in each category's "spent" for the month.
+   - Live mode: take them from `get_upcoming_recurrings_live` (live). It appears to return only bills due within about the next 14 days, so later in the month, add every `get_recurring_live` (live) row whose state is active and whose `nextPaymentDate` falls in this month, and drop duplicates by `id`. Use `nextPaymentAmount` for each.
+   - Cache mode: use each recurring's `next_expected_date` and `average_amount` from `get_recurring_transactions` (cache) when the date falls in the rest of this month. This is an approximation: the cache has no "paid" flag. Say so if the figure matters.
+   - For a month that has ended, this term is zero.
+
+Spent this month = posted spend (step 4) + unpaid recurrings (step 5). Do the arithmetic in Python.
+
+### 2.3 Compute Free Money
 
 Use Python via Bash for all arithmetic. The formula:
 
@@ -126,7 +143,7 @@ Steps:
 1. Sum fixed obligations from profile (or detected in bootstrap)
 2. Sum savings targets from `get_goals` or profile. If `get_goals` returns 0 AND the profile has no savings target, set this term to 0 and note it for Phase 3 output: "No savings target set — Free Money doesn't reserve anything for savings."
 3. Sum amortized irregular expenses from profile
-4. Sum this month's discretionary spending: total spending minus transactions that match fixed obligation merchants (by name/category). Do NOT subtract the profile's fixed amount — subtract the actual charges from those merchants. This ensures over-charges (e.g., rent higher than usual) are correctly captured rather than silently inflating Free Money.
+4. Sum this month's discretionary spending: the posted spend from 2.2 step 4, minus the transactions that match fixed obligation merchants (by name/category). Leave out 2.2's unpaid-recurrings term here: unpaid fixed bills are already covered by the Fixed Obligations term. Do NOT subtract the profile's fixed amount — subtract the actual charges from those merchants. This ensures over-charges (e.g., rent higher than usual) are correctly captured rather than silently inflating Free Money.
 5. Free Money = Net Income − Fixed − Savings − Irregular − Already Spent
 
 Also compute:
@@ -134,9 +151,9 @@ Also compute:
 - **Daily discretionary budget** = Free Money ÷ days remaining
 - **Runway** = Free Money ÷ (average daily discretionary spend from last 90 days)
 
-### 2.3 Category Trends
+### 2.4 Category Trends
 
-Use Python to compare this month's spending by category against 90-day rolling monthly averages:
+Use Python to compare this month's spending by category against 90-day rolling monthly averages. Compute each window's per-category totals from its transaction rows with 2.2 steps 1–4 (net per category, REGULAR rows, uncategorized skipped):
 
 - For each category with spending this month:
   - Calculate 90-day monthly average (total ÷ 3)
@@ -150,15 +167,18 @@ Use Python to compare this month's spending by category against 90-day rolling m
     - CV 0.2-0.5 → medium
     - CV > 0.5 → high variance
 
-### 2.4 Subscription & Recurring Check
+### 2.5 Subscription & Recurring Check
 
-From `get_recurring_transactions`:
-- Sort by cost (highest first)
-- Flag any that missed their expected date by 7+ days (possible cancellation or billing issue)
-- Flag price drift: amount changed >5% for charges <$50, >3% for $50-200, >2% for >$200. Compare the per-charge amounts in each row's `transactions` array (requested via the `fields` argument in Phase 1) — if that array is absent the check cannot run, so say so rather than inferring drift from a single average.
-- Flag any new recurring detected that isn't in the Copilot subscriptions list
+From the recurring rows pulled in Phase 1:
+- Sort by cost (highest first): `nextPaymentAmount` in live mode, `average_amount` in cache mode.
+- Flag any that missed their expected date by 7+ days (possible cancellation or billing issue): a `nextPaymentDate` (live) or `next_expected_date` (cache) 7 or more days in the past.
+- Flag price drift: amount changed >5% for charges <$50, >3% for $50-200, >2% for >$200. This needs each recurring's charge history over the 90-day window.
+  - Live mode: the recurring rows hold only the next payment, so take the history from the 90-day `get_transactions_live` (live) rows, which Phase 1 pulled with `fields: ["default", "type", "recurring_id"]`. Group them by `recurring_id`, match each group to its recurring by `id`, and compare the amounts in date order.
+  - Cache mode: compare the per-charge amounts in each row's `transactions` array from `get_recurring_transactions` (cache), which Phase 1 requested with `fields: ["default", "transactions"]`.
+  - If the history is missing, the check cannot run. Say so rather than inferring drift from a single amount.
+- Cache mode only: `get_recurring_transactions` (cache) also detects recurring patterns Copilot is not tracking. Flag any that aren't in the Copilot subscriptions list. Live mode returns only the recurrings Copilot tracks, so skip this flag there.
 
-### 2.5 Anomaly Scan
+### 2.6 Anomaly Scan
 
 Scan this month's transactions for:
 - **Unknown merchants:** Merchants that don't appear in the 90-day history at all (first-time charges)
@@ -210,7 +230,7 @@ Present Tier 1 flags first, then Tier 2 if room. Each flag is one sentence:
 - Price drift: "Netflix went from $15.49 to $22.99 this month."
 - Duplicate: "Two identical $47.23 charges at Target on April 5 — intentional?"
 - Unknown merchant: "First-time charge: $89.00 from 'ACME CORP' on April 8."
-- Budget overspend: "Groceries budget ($400): $380 spent with 18 days left."
+- Budget overspend: "Groceries has $20 of budget left with 18 days to go." (Say what is left, not "your $X budget": see Rule 9.)
 
 **Framing rules:**
 - Prospective, not retrospective: "You have $X left for dining" not "You spent $X on dining"
@@ -246,5 +266,5 @@ After presenting, silently check if any profile sections should be updated:
 5. **First run is special.** If profile is mostly empty, spend time bootstrapping — ask the user to confirm detected income, obligations, and account roles before computing Free Money. This is a one-time cost for accuracy.
 6. **Scheduled runs are silent.** When triggered by a schedule (not interactive), output the pulse as a report without asking questions. Use whatever profile data is available. Note any profile gaps as "could not compute X — profile missing Y."
 7. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category on purpose. Never flag them as uncategorized or missing a category.
-8. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files. `get_transactions`, `get_accounts` and `get_recurring_transactions` all went terse by default in v3.0.0 and are much smaller now (a 100-row transaction page measures ~28KB), so this is no longer routine — but a wide window, or a request that opts fat fields back in via `fields`, can still cross the threshold.
-9. **Reference existing budgets.** The user has budgets set up in Copilot Money (`get_budgets`). Use these to inform spending flags — if a category has a budget, flag when spending exceeds or approaches the budget amount, not just when it exceeds the 90-day average.
+8. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files. The transaction, account and recurring reads in both modes return terse rows by default since v3.0.0 and are much smaller now (a 100-row transaction page measures ~28KB), so this is no longer routine — but a wide window, or a request that opts fat fields back in via `fields`, can still cross the threshold.
+9. **Reference existing budgets, carefully.** The user may have budgets in Copilot Money: `get_budgets_live` (live) / `get_budgets` (cache). Use them to inform spending flags — if a category has a budget, flag when spending (2.2) exceeds or approaches it, not just when it exceeds the 90-day average. The amount Copilot returns for this month has rollover applied (in live mode it is `budget_amount` on `get_categories_live` (live)), so it is not the figure the user set: it can be far above it, or negative after an overspent month. Never phrase it as "your $X budget". Say what is left ("$20 left in Groceries this month"), and skip a budget whose amount is zero or negative rather than reporting it.

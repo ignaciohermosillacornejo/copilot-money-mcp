@@ -52,6 +52,19 @@ skill tells its agent to read that the tool no longer returns by default
 (#704) — add the explicit `fields: ["default", "<name>"]` argument to that
 instruction, or drop the backticks when the line is prose about the field. It reads every `.md` file under a skill's folder, not just `SKILL.md`, and also fails a markdown table row whose cell count differs from its header (Markdown would render it shifted or blank without a warning).
 
+Every skill declares the server mode(s) it runs in, in its frontmatter:
+
+```yaml
+metadata:
+  modes: "live, cache"   # or "live" for a skill that writes (--write implies live)
+```
+
+`check:skills` then fails a tool the declared modes do not list (per-mode
+surfaces come from `scripts/dump-tool-modes.ts`, which applies the server's own
+list filter), and a `` `name: value` `` argument no tool on that line takes
+(#847). A skill that runs in both modes names both variants on the line, each
+tagged with its mode: `` `get_accounts_live` (live) / `get_accounts` (cache) ``.
+
 #### Writes-enabled bundle (local-only)
 
 `bun run pack:mcpb:write` produces `copilot-money-mcp-write.mcpb`, a variant

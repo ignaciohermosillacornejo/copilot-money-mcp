@@ -791,12 +791,18 @@ def check_mode_surface(
                     continue  # explicitly scoped to a declared mode that lists it
                 missing = "/".join(m for m in MODES if m in modes - avail)
                 listed_in = "/".join(m for m in MODES if m in avail)
+                remedy = (
+                    "name both variants with mode tags, e.g. `x_live` (live) / "
+                    "`x` (cache)"
+                    if len(modes) > 1
+                    else "drop the backticks if the line is prose about the "
+                    "other mode"
+                )
                 errors.append(
                     f"{where}: `{tool}` is listed only in {listed_in} mode, but "
                     f"this skill declares {claimed} and the line does not scope "
                     f"it, so the call does not exist in {missing} mode. Use the "
-                    f"{missing}-mode tool, or name both variants with mode tags, "
-                    f"e.g. `x_live` (live) / `x` (cache)."
+                    f"{missing}-mode tool, or {remedy}."
                 )
             accepted = set().union(*(tool_args.get(t, set()) for t in tools))
             for arg in dict.fromkeys(ARG_SPAN_RE.findall(line)):
