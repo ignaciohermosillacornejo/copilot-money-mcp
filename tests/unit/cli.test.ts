@@ -254,18 +254,22 @@ describe('CLI entry point', () => {
         '-v',
       ]);
 
-      expect(stderr).toContain('Browser selection Microsoft Edge (profile "Work") ignored');
+      // Logged after logging is configured, so it carries the verbose prefix
+      // like every other startup line.
+      expect(stderr).toMatch(
+        /\[ERROR\] \S+ Browser selection Microsoft Edge \(profile "Work"\) ignored/
+      );
     });
   });
 
   describe('selection validated only where it applies', () => {
-    const IGNORED = 'it only applies with --live-reads or --write.';
+    const IGNORED = 'it only applies with --live-reads or --write';
 
     test('cache-only: a valid selection is ignored with a warning, even without -v', async () => {
       const { exitCode, stderr } = await runCli(['--browser', 'brave']);
 
       expect(exitCode).not.toBe(1);
-      expect(stderr).toContain(`Browser selection Brave ignored: ${IGNORED}`);
+      expect(stderr).toContain(`Browser selection Brave ignored: ${IGNORED}.`);
       expect(stderr).not.toContain('Browser session:');
     });
 
@@ -273,7 +277,7 @@ describe('CLI entry point', () => {
       const { exitCode, stderr } = await runCli([], { COPILOT_BROWSER_DATA_DIR: tmpdir() });
 
       expect(exitCode).not.toBe(1);
-      expect(stderr).toContain(`Browser selection ignored: ${IGNORED}`);
+      expect(stderr).toContain(`Browser selection ignored (${IGNORED}): `);
       expect(stderr).toContain('requires --browser');
     });
 
@@ -281,7 +285,7 @@ describe('CLI entry point', () => {
       const { exitCode, stderr } = await runCli([], { COPILOT_BROWSER: 'netscape' });
 
       expect(exitCode).not.toBe(1);
-      expect(stderr).toContain(`Browser selection ignored: ${IGNORED}`);
+      expect(stderr).toContain(`Browser selection ignored (${IGNORED}): `);
       expect(stderr).toContain('Unknown browser "netscape"');
     });
 
@@ -295,7 +299,7 @@ describe('CLI entry point', () => {
       ]);
 
       expect(exitCode).not.toBe(1);
-      expect(stderr).toContain(`Browser selection ignored: ${IGNORED}`);
+      expect(stderr).toContain(`Browser selection ignored (${IGNORED}): `);
       expect(stderr).toContain(`"${missing}" does not exist.`);
     });
 

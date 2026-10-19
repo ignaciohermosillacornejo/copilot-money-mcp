@@ -53,8 +53,16 @@ safely*.
 
 Root-cause fix: both selectors collect every profile the name matches, across all
 namespaces, per user-data root, and refuse when more than one distinct profile matches —
-the report names each match and says to use the directory name, and nothing is searched.
-A directory whose own display name is the same string is one match. Downstream cleanup in
+the report names each match, and nothing is searched. A directory whose own display name
+is the same string is one match.
+
+Refusing alone was not enough. The first version of the fix told the user to "use the
+directory name", but on a stock Edge with three profiles every middle `Profile N` is both a
+directory and another profile's display name, so the plain directory name was refused too
+and those profiles could not be selected at all (caught by the automated PR review). The
+fix therefore adds a namespace qualifier: `dir:<name>` matches the exact directory name
+only, which always names one profile, and the refusal offers it (`--browser-profile
+"dir:Default" or "dir:Profile 1"`). `name:` restricts the match to display names. Downstream cleanup in
 the same PR: retried `Local State` / `profiles.ini` reads, clearer not-found errors, a
 profile-directory hint for `--browser-data-dir`, and validating the selection only when
 live reads or writes are on.
@@ -76,4 +84,5 @@ added to one selector needs a new kind in the sweep; nothing finds that omission
 
 When a user-supplied name is resolved against more than one namespace, uniqueness is the
 property to test, not each lookup on its own. Fixtures with conveniently distinct names
-hide exactly this.
+hide exactly this. And a refusal needs an input that is guaranteed to get through it: test
+that every profile can still be selected, not just that the ambiguous name is refused.

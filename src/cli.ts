@@ -28,6 +28,7 @@ function parseArgs(): {
   writeFlagSeen: boolean;
   liveReadsEnabled: boolean;
   browserSelection?: BrowserSelection;
+  selectionWarning?: string;
 } {
   const args = process.argv.slice(2);
   let dbPath: string | undefined;
@@ -89,7 +90,9 @@ Options:
   --browser-profile <name>
                       With --browser: read only this profile — a directory name
                       ("Default", "Profile 2") or the profile's display name
-                      (Firefox: directory, its suffix like "default-release", or profiles.ini Name)
+                      (Firefox: directory, its suffix like "default-release", or profiles.ini Name).
+                      A name matching two profiles is refused; prefix "dir:" for the exact
+                      directory name ("dir:Profile 1") or "name:" for display/ini names only
   --browser-data-dir <path>
                       With --browser: use this user-data root instead of the browser's default
                       locations (the folder holding "Local State" and Default/Profile N; Firefox:
@@ -119,15 +122,23 @@ Environment:
     liveReadsEnabled = true;
   }
 
-  const browserSelection = resolveSelection(
+  const { selection: browserSelection, warning: selectionWarning } = resolveSelection(
     { browserFlag, profileFlag, dataDirFlag },
     liveReadsEnabled
   );
 
-  return { dbPath, verbose, timeoutMs, writeFlagSeen, liveReadsEnabled, browserSelection };
+  return {
+    dbPath,
+    verbose,
+    timeoutMs,
+    writeFlagSeen,
+    liveReadsEnabled,
+    browserSelection,
+    selectionWarning,
+  };
 }
 
-const IGNORED_SUFFIX = 'it only applies with --live-reads or --write.';
+const IGNORED_BECAUSE = 'it only applies with --live-reads or --write';
 
 /**
  * Validate the browser selection only where it applies.
@@ -137,28 +148,28 @@ const IGNORED_SUFFIX = 'it only applies with --live-reads or --write.';
  * In cache-only mode nothing reads a browser at all, so a selection — valid or
  * not, flag or environment — is ignored with a one-line stderr warning instead
  * of failing startup: a `COPILOT_BROWSER_DATA_DIR` left in a shared MCP config
- * must not take down a server that never uses it.
+ * must not take down a server that never uses it. The warning is returned, not
+ * printed, so `main` logs it after logging is configured, like every other
+ * startup line.
  */
 function resolveSelection(
   flags: { browserFlag?: string; profileFlag?: string; dataDirFlag?: string },
   applies: boolean
-): BrowserSelection | undefined {
+): { selection?: BrowserSelection; warning?: string } {
   let selection: BrowserSelection | undefined;
   try {
     selection = parseBrowserSelection(flags);
   } catch (err) {
     if (!(err instanceof BrowserSelectionError)) throw err;
     if (applies) failArgs(err.message);
-    console.error(`Browser selection ignored: ${IGNORED_SUFFIX} (As given: ${err.message})`);
-    return undefined;
+    return { warning: `Browser selection ignored (${IGNORED_BECAUSE}): ${err.message}` };
   }
   if (selection && !applies) {
-    console.error(
-      `Browser selection ${describeBrowserSelection(selection)} ignored: ${IGNORED_SUFFIX}`
-    );
-    return undefined;
+    return {
+      warning: `Browser selection ${describeBrowserSelection(selection)} ignored: ${IGNORED_BECAUSE}.`,
+    };
   }
-  return selection;
+  return selection ? { selection } : {};
 }
 
 /**
@@ -187,10 +198,20 @@ function configureLogging(verbose: boolean): void {
  * Main entry point.
  */
 async function main(): Promise<void> {
-  const { dbPath, verbose, timeoutMs, writeFlagSeen, liveReadsEnabled, browserSelection } =
-    parseArgs();
+  const {
+    dbPath,
+    verbose,
+    timeoutMs,
+    writeFlagSeen,
+    liveReadsEnabled,
+    browserSelection,
+    selectionWarning,
+  } = parseArgs();
 
   configureLogging(verbose);
+
+  // Always shown (stderr), whatever the verbosity: the selection was ignored.
+  if (selectionWarning) console.error(selectionWarning);
 
   try {
     if (verbose) {

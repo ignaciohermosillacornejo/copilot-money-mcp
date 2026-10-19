@@ -18,6 +18,7 @@ import {
   describeBrowserSelection,
   isFirefoxProfileDir,
   matchesFirefoxProfileName,
+  parseProfileQuery,
   type BrowserId,
   type BrowserSelection,
 } from './browser-selection.js';
@@ -406,6 +407,17 @@ export interface SelectionReport {
    * profile name was ambiguous (then nothing was searched).
    */
   problem?: string;
+  /**
+   * Set when the problem is the selection itself, so logging in cannot help:
+   * `ambiguous` (nothing was searched) or `no-such-profile`.
+   */
+  selectionError?: 'ambiguous' | 'no-such-profile';
+  /**
+   * Facts about the lookup worth stating whatever happened next: a
+   * `profiles.ini` path that is missing or unreadable, display names that
+   * could not be read.
+   */
+  notes?: string[];
   /** A likely misconfiguration worth naming if no session turns up. */
   hint?: string;
 }
@@ -419,6 +431,20 @@ function listDir(dir: string): Dirent[] | null {
   }
 }
 
+/**
+ * What is at `path`, telling "absent" apart from "there but unusable": an
+ * unreadable or non-directory profile still names a profile, so it must still
+ * count when deciding whether a name is ambiguous.
+ */
+function directoryState(path: string): 'directory' | 'missing' | 'unusable' {
+  try {
+    return retryInterrupted(() => statSync(path)).isDirectory() ? 'directory' : 'unusable';
+  } catch (err) {
+    const code = (err as { code?: unknown } | null)?.code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'missing' : 'unusable';
+  }
+}
+
 function sameName(a: string, b: string): boolean {
   return a.toLowerCase() === b.toLowerCase();
 }
@@ -428,23 +454,37 @@ function sortProfileNames(names: Iterable<string>): string[] {
   return [...new Set(names)].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }));
 }
 
-/** `a`, `a and b`, `a, b and c`. */
-function joinAnd(items: string[]): string {
+/** `a`, `a and b`, `a, b and c` (or `or`). */
+function joinList(items: string[], conjunction: 'and' | 'or' = 'and'): string {
   return items.length <= 1
     ? items.join('')
-    : `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`;
+    : `${items.slice(0, -1).join(', ')} ${conjunction} ${items[items.length - 1]}`;
 }
 
-/** The refusal for a `--browser-profile` that names more than one profile. */
+/** One profile a `--browser-profile` value matched, and how. */
+interface ProfileMatch {
+  /** The profile's directory name, for the `dir:` suggestion. */
+  dir: string;
+  /** e.g. `directory "Default"`, `the display name of directory "Profile 1"`. */
+  how: string;
+}
+
+/**
+ * The refusal for a `--browser-profile` that names more than one profile. It
+ * names directories, never display names (often a person's real name), and
+ * offers the `dir:` form, which always picks exactly one.
+ */
 function ambiguousProfileMessage(
   profile: string,
   browser: string,
-  matches: string[],
+  matches: ProfileMatch[],
   root?: string
 ): string {
+  const choices = sortProfileNames(matches.map((m) => `"dir:${m.dir}"`));
   return (
     `--browser-profile "${profile}" is ambiguous in ${browser}${root ? ` (${root})` : ''}: ` +
-    `it matches ${joinAnd(matches)}. Use the directory name.`
+    `it matches ${joinList(matches.map((m) => m.how))}. Pick one by its directory name with ` +
+    `the dir: prefix: --browser-profile ${joinList(choices, 'or')}.`
   );
 }
 
@@ -527,8 +567,8 @@ function firefoxIniProfiles(
 /**
  * What a profile lookup found. `ambiguous` is set when the name matched more
  * than one profile, and then `paths` is empty: nothing is searched. `notes`
- * explain matches that could not be used (a `profiles.ini` path that does not
- * exist, display names that could not be read), for the "not found" error.
+ * explain matches that could not be used (a `profiles.ini` path that is
+ * missing or unreadable, display names that could not be read).
  */
 interface ProfilePick {
   paths: string[];
@@ -541,48 +581,64 @@ interface ProfilePick {
 /**
  * Search paths for the named profile of a Chromium/Opera location.
  *
- * The name is compared with every profile directory AND every `Local State`
- * display name, and must match exactly one directory per user-data root.
- * Display names are not unique, and Edge's built-in ones are off by one from
- * the directories (`Default` is shown as "Profile 1", `Profile 1` as
- * "Profile 2"), so a name that hits a directory and a different directory's
- * display name — or two display names — is refused rather than resolved by
- * precedence: either answer could be someone else's session. A directory
- * whose own display name is the same string is one match, not two.
+ * Without a prefix the name is compared with every profile directory AND every
+ * `Local State` display name, and must match exactly one directory per
+ * user-data root. Display names are not unique, and Edge's built-in ones are
+ * off by one from the directories (`Default` is shown as "Profile 1",
+ * `Profile 1` as "Profile 2"), so a name that hits a directory and a different
+ * directory's display name — or two display names — is refused rather than
+ * resolved by precedence: either answer could be someone else's session. A
+ * directory whose own display name is the same string is one match, not two.
+ * `dir:` / `name:` restrict the lookup to one namespace (see
+ * {@link parseProfileQuery}); `dir:` is exact, so it always names one profile.
  *
  * Each root is checked on its own: the same `Default` in Chrome's stable,
  * beta and unstable roots on Linux is one profile per channel, all searched.
+ * An ambiguity inside any one root refuses the whole selection.
  */
 function selectChromiumProfile(
   userDataDirs: string[],
   profile: string,
   browser: string
 ): ProfilePick {
+  const { namespace, value } = parseProfileQuery(profile);
   const paths: string[] = [];
   const available: string[] = [];
   const notes: string[] = [];
   let ambiguous: string | undefined;
-  let existingRoots = 0;
-  for (const userDataDir of userDataDirs) {
-    const entries = listDir(userDataDir);
-    if (!entries) continue;
-    existingRoots++;
+  const listed = userDataDirs.flatMap((root) => {
+    const entries = listDir(root);
+    return entries ? [{ root, entries }] : [];
+  });
+  for (const { root: userDataDir, entries } of listed) {
     const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
     const { names: displayNames, unavailable } = chromiumProfileDisplayNames(userDataDir);
-    if (unavailable) notes.push(`Display names were unavailable: ${unavailable}.`);
     available.push(
       ...dirs.filter((d) => d === 'Default' || /^Profile \d+$/.test(d) || displayNames.has(d))
     );
     // dir -> how it matched; a directory matched both ways counts once.
-    const matches = new Map<string, string>();
-    for (const dir of sortProfileNames(dirs.filter((d) => sameName(d, profile)))) {
-      matches.set(dir, `directory "${dir}"`);
+    const matches = new Map<string, ProfileMatch>();
+    const byDir =
+      namespace === 'dir'
+        ? dirs.filter((d) => d === value)
+        : namespace === 'any'
+          ? dirs.filter((d) => sameName(d, value))
+          : [];
+    for (const dir of sortProfileNames(byDir)) {
+      matches.set(dir, { dir, how: `directory "${dir}"` });
     }
-    const byDisplayName = [...displayNames]
-      .filter(([dir, name]) => sameName(name, profile) && dirs.includes(dir))
-      .map(([dir]) => dir);
+    const byDisplayName =
+      namespace === 'dir'
+        ? []
+        : [...displayNames]
+            .filter(([dir, name]) => sameName(name, value) && dirs.includes(dir))
+            .map(([dir]) => dir);
     for (const dir of sortProfileNames(byDisplayName)) {
-      if (!matches.has(dir)) matches.set(dir, `the display name of directory "${dir}"`);
+      if (!matches.has(dir))
+        matches.set(dir, { dir, how: `the display name of directory "${dir}"` });
+    }
+    if (unavailable && namespace !== 'dir' && matches.size === 0) {
+      notes.push(`Display names were unavailable: ${unavailable}.`);
     }
     // mutation-guard: an ambiguous Chromium profile name is refused
     if (matches.size > 1) {
@@ -590,7 +646,7 @@ function selectChromiumProfile(
         profile,
         browser,
         [...matches.values()],
-        userDataDirs.length > 1 ? userDataDir : undefined
+        listed.length > 1 ? userDataDir : undefined
       );
       continue;
     }
@@ -601,6 +657,7 @@ function selectChromiumProfile(
       );
     }
   }
+  const existingRoots = listed.length;
   return ambiguous
     ? { paths: [], existingRoots, available, ambiguous, notes }
     : { paths, existingRoots, available, notes };
@@ -609,49 +666,66 @@ function selectChromiumProfile(
 /**
  * Profile directories for the named profile of a Firefox location.
  *
- * Same rule as Chromium: the name is compared with every directory name, the
- * part of it after the first dot, and every `profiles.ini` `Name=`, and must
- * resolve to exactly one profile directory per `profiles.ini` root (a custom
- * data dir lists profiles both directly and under `Profiles/`, so one root can
- * have two listing dirs). A `Name=` whose `Path=` does not exist is not a
- * match; it is noted for the error instead of silently searching nothing.
+ * Same rule as Chromium: without a prefix the name is compared with every
+ * directory name, the part of it after the first dot, and every
+ * `profiles.ini` `Name=`, and must resolve to exactly one profile directory
+ * per `profiles.ini` root (a custom data dir lists profiles both directly and
+ * under `Profiles/`, so one root can have two listing dirs). `dir:` matches the
+ * exact directory name only, `name:` only `Name=`.
+ *
+ * `profiles.ini` is read even when the profiles dir is absent, since its
+ * `IsRelative=0` paths can point anywhere. A `Name=` whose `Path=` does not
+ * exist is not a match, and is noted; one that exists but cannot be used (a
+ * file, or unreadable) still counts as a match — it names a profile, so
+ * dropping it could turn an ambiguous name into a silent pick — and is noted.
  */
 function selectFirefoxProfile(
   installs: Array<{ root: string; profilesDir: string }>,
   profile: string
 ): ProfilePick {
+  const { namespace, value } = parseProfileQuery(profile);
   const available: string[] = [];
   const notes: string[] = [];
   // root -> absolute profile dir -> how it first matched
-  const byRoot = new Map<string, Map<string, string>>();
+  const byRoot = new Map<string, Map<string, ProfileMatch>>();
+  const existing = new Set<string>();
   const iniRead = new Set<string>();
-  let existingRoots = 0;
   for (const { root, profilesDir } of installs) {
-    const entries = listDir(profilesDir);
-    if (!entries) continue;
-    existingRoots++;
-    const matches = byRoot.get(root) ?? new Map<string, string>();
+    const matches = byRoot.get(root) ?? new Map<string, ProfileMatch>();
     byRoot.set(root, matches);
-    const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-    // Profile dirs are `<salt>.<name>`; `Crash Reports` and friends are not.
-    available.push(...dirs.filter((d) => d.includes('.')));
-    for (const dir of dirs) {
-      const path = resolve(profilesDir, dir);
-      if (matchesFirefoxProfileName(dir, profile) && !matches.has(path)) {
-        matches.set(path, `directory "${dir}"`);
+    const entries = listDir(profilesDir);
+    if (entries) {
+      existing.add(root);
+      const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+      // Profile dirs are `<salt>.<name>`; `Crash Reports` and friends are not.
+      available.push(...dirs.filter((d) => d.includes('.')));
+      for (const dir of dirs) {
+        const path = resolve(profilesDir, dir);
+        if (matchesFirefoxProfileName(dir, profile) && !matches.has(path)) {
+          matches.set(path, { dir, how: `directory "${dir}"` });
+        }
       }
     }
     if (iniRead.has(root)) continue;
     iniRead.add(root);
-    for (const entry of firefoxIniProfiles(join(root, 'profiles.ini'))) {
-      if (!sameName(entry.name, profile)) continue;
+    const ini = firefoxIniProfiles(join(root, 'profiles.ini'));
+    if (ini.length > 0) existing.add(root);
+    if (namespace === 'dir') continue;
+    for (const entry of ini) {
+      if (!sameName(entry.name, value)) continue;
       const path = resolve(entry.isRelative ? join(root, entry.path) : entry.path);
-      if (listDir(path) === null) {
-        notes.push(
-          `profiles.ini in "${root}" names "${entry.name}" at "${path}", which does not exist.`
-        );
-      } else if (!matches.has(path)) {
-        matches.set(path, `the profiles.ini Name= of "${entry.path}"`);
+      const state = directoryState(path);
+      const at = `profiles.ini in "${root}" names "${entry.name}" at "${path}"`;
+      if (state === 'missing') {
+        notes.push(`${at}, which does not exist.`);
+        continue;
+      }
+      if (state === 'unusable') notes.push(`${at}, which is not a readable directory.`);
+      if (!matches.has(path)) {
+        matches.set(path, {
+          dir: basename(path),
+          how: `the profiles.ini Name= of "${entry.path}"`,
+        });
       }
     }
   }
@@ -661,20 +735,20 @@ function selectFirefoxProfile(
     if (matches.size > 1) {
       return {
         paths: [],
-        existingRoots,
+        existingRoots: existing.size,
         available,
         notes,
         ambiguous: ambiguousProfileMessage(
           profile,
           'Firefox',
           [...matches.values()],
-          byRoot.size > 1 ? root : undefined
+          existing.size > 1 ? root : undefined
         ),
       };
     }
     paths.push(...matches.keys());
   }
-  return { paths, existingRoots, available, notes };
+  return { paths, existingRoots: existing.size, available, notes };
 }
 
 /**
@@ -736,7 +810,8 @@ function locationRoots(location: BrowserLocation): string[] {
  * part of it after the first dot (`default-release`), or `Name=` in
  * `profiles.ini`. All comparisons are case-insensitive. A name that matches
  * more than one profile is refused, never resolved by precedence: the report
- * names every match and nothing is searched.
+ * names every match and nothing is searched. A `dir:` prefix matches the exact
+ * directory name only, and `name:` only display names / `Name=`.
  */
 export function resolveBrowserSelection(
   selection: BrowserSelection,
@@ -781,6 +856,8 @@ export function resolveBrowserSelection(
   const location = selection.dataDir
     ? customLocation(platformLocation, selection.dataDir)
     : platformLocation;
+  // Not for `opera`: an older Opera keeps its single profile at the user-data
+  // root itself, so a valid Opera root holds `Preferences` and would trip this.
   if (
     selection.dataDir &&
     location.kind === 'chromium' &&
@@ -791,7 +868,7 @@ export function resolveBrowserSelection(
       `"${selection.dataDir}" looks like a single ${browser} profile directory, not the ` +
       `user-data root that holds "Local State": point --browser-data-dir at its parent ` +
       `("${dirname(selection.dataDir)}") and pick the profile with --browser-profile ` +
-      `"${profileDir}".`;
+      `"dir:${profileDir}".`;
   }
 
   const roots = locationRoots(location);
@@ -807,18 +884,21 @@ export function resolveBrowserSelection(
     location.kind === 'firefox'
       ? selectFirefoxProfile(location.installs, profile)
       : selectChromiumProfile(location.userDataDirs, profile, browser);
+  if (picked.notes.length > 0) report.notes = picked.notes;
   if (picked.existingRoots === 0) {
     report.problem = notFound;
   } else if (picked.ambiguous) {
     report.problem = picked.ambiguous;
+    report.selectionError = 'ambiguous';
   } else if (picked.paths.length === 0) {
+    // Directory names only: display names are often people's real names, and
+    // this message travels back to the MCP client.
     const available = sortProfileNames(picked.available);
-    report.problem = [
+    report.problem =
       `No ${browser} profile named "${profile}" was found ` +
-        `(available: ${available.length ? available.join(', ') : 'none'}; ` +
-        `checked: ${roots.join(', ')}).`,
-      ...picked.notes,
-    ].join(' ');
+      `(available: ${available.length ? available.join(', ') : 'none'}; ` +
+      `checked: ${roots.join(', ')}).`;
+    report.selectionError = 'no-such-profile';
   }
   return {
     configs: [
@@ -988,14 +1068,32 @@ function searchBrowser(browser: BrowserConfig): FoundToken[] {
  */
 export function noCopilotSessionError(checked: string[], selection?: SelectionReport): Error {
   if (selection) {
-    const problem = selection.problem ? ` ${selection.problem}` : '';
-    const hint = selection.hint ? ` ${selection.hint}` : '';
+    const details = [selection.problem, ...(selection.notes ?? []), selection.hint]
+      .filter((part): part is string => Boolean(part))
+      .map((part) => ` ${part}`)
+      .join('');
+    const flags =
+      '--browser / --browser-profile / --browser-data-dir ' +
+      '(COPILOT_BROWSER / COPILOT_BROWSER_PROFILE / COPILOT_BROWSER_DATA_DIR)';
+    // When the selection itself is the problem, logging in cannot help, so the
+    // last sentence is the one that can.
+    if (selection.selectionError === 'ambiguous') {
+      return new Error(
+        `Did not search ${selection.label} for a Copilot Money session.${details} ` +
+          `Other browsers were not searched.`
+      );
+    }
+    if (selection.selectionError === 'no-such-profile') {
+      return new Error(
+        `No Copilot Money session found in ${selection.label}.${details} ` +
+          `Name an existing profile, or another browser, with ${flags}. ` +
+          'Other browsers were not searched.'
+      );
+    }
     return new Error(
-      `No Copilot Money session found in ${selection.label}.${problem}${hint} ` +
+      `No Copilot Money session found in ${selection.label}.${details} ` +
         `Please log into https://app.copilot.money in ${selection.label}, then try again — ` +
-        'or select a different browser/profile with --browser / --browser-profile / ' +
-        '--browser-data-dir (COPILOT_BROWSER / COPILOT_BROWSER_PROFILE / ' +
-        'COPILOT_BROWSER_DATA_DIR). Other browsers were not searched.'
+        `or select a different browser/profile with ${flags}. Other browsers were not searched.`
     );
   }
   return new Error(

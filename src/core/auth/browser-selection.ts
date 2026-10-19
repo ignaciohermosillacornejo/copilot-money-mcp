@@ -172,9 +172,41 @@ export function isFirefoxProfileDir(dir: string): boolean {
   );
 }
 
-/** A Firefox profile dir name matches by itself or by its part after the first dot. */
+/**
+ * Which namespace a `--browser-profile` value is looked up in.
+ *
+ * `any` (no prefix): directory names and display names / `profiles.ini`
+ * `Name=`, case-insensitively, refused when two profiles answer. `dir:<name>`:
+ * the exact directory name only, case-sensitively — the escape hatch when the
+ * plain name is ambiguous (on stock Microsoft Edge with three profiles, every
+ * `Profile N` string is both a directory and another profile's display name).
+ * `name:<name>`: display names / `profiles.ini` `Name=` only.
+ */
+export interface ProfileQuery {
+  namespace: 'any' | 'dir' | 'name';
+  value: string;
+}
+
+/** Split an optional `dir:` / `name:` prefix (case-insensitive) off a profile value. */
+export function parseProfileQuery(profile: string): ProfileQuery {
+  const prefixed = /^(dir|name):([\s\S]*)$/i.exec(profile);
+  if (!prefixed) return { namespace: 'any', value: profile };
+  return {
+    namespace: (prefixed[1] as string).toLowerCase() as 'dir' | 'name',
+    value: (prefixed[2] as string).trim(),
+  };
+}
+
+/**
+ * A Firefox profile dir name matches by itself or by its part after the first
+ * dot, case-insensitively; with `dir:`, only by its exact name; with `name:`,
+ * never (that namespace lives in `profiles.ini`).
+ */
 export function matchesFirefoxProfileName(dirName: string, profile: string): boolean {
-  const lower = profile.toLowerCase();
+  const { namespace, value } = parseProfileQuery(profile);
+  if (namespace === 'dir') return dirName === value;
+  if (namespace === 'name') return false;
+  const lower = value.toLowerCase();
   const dot = dirName.indexOf('.');
   return (
     dirName.toLowerCase() === lower || (dot >= 0 && dirName.slice(dot + 1).toLowerCase() === lower)
@@ -228,6 +260,12 @@ export function parseBrowserSelection(input: BrowserSelectionInput): BrowserSele
   if (profile && NO_PROFILES.has(browser)) {
     throw new BrowserSelectionError(
       `${display} has no selectable profiles; drop --browser-profile (COPILOT_BROWSER_PROFILE).`
+    );
+  }
+  if (profile && !parseProfileQuery(profile).value) {
+    throw new BrowserSelectionError(
+      `--browser-profile (COPILOT_BROWSER_PROFILE) "${profile}" has a prefix but no name ` +
+        'after it, e.g. "dir:Profile 1".'
     );
   }
 
