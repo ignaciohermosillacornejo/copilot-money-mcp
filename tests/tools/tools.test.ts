@@ -562,7 +562,7 @@ describe('CopilotMoneyTools', () => {
     });
 
     test('filters by category', async () => {
-      const result = await tools.getTransactions({ category: 'food' });
+      const result = await tools.getTransactions({ category: 'food_dining' });
       expect(result.count).toBe(2);
     });
 
@@ -597,7 +597,7 @@ describe('CopilotMoneyTools', () => {
       const result = await tools.getTransactions({
         start_date: '2024-01-01',
         end_date: '2024-01-31',
-        category: 'food',
+        category: 'food_dining',
         limit: 10,
       });
       expect(result.count).toBe(1);

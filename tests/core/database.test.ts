@@ -113,10 +113,17 @@ describe('CopilotDatabase', () => {
       expect(result).toHaveLength(2);
     });
 
-    test('filters by category (case-insensitive)', async () => {
-      const result = await db.getTransactions({ category: 'FOOD' });
+    // #845: exact ids only. The old filter matched a case-insensitive SUBSTRING
+    // of the id, so 'FOOD' matched 'food_dining'; it must not any more.
+    test('filters by an exact category id set', async () => {
+      const result = await db.getTransactions({ categoryIds: new Set(['food_dining']) });
       expect(result).toHaveLength(2);
-      expect(result.every((txn) => txn.category_id?.includes('food'))).toBe(true);
+      expect(result.every((txn) => txn.category_id === 'food_dining')).toBe(true);
+    });
+
+    test('does not match a substring or a different case of an id', async () => {
+      expect(await db.getTransactions({ categoryIds: new Set(['FOOD']) })).toHaveLength(0);
+      expect(await db.getTransactions({ categoryIds: new Set(['food']) })).toHaveLength(0);
     });
 
     test('filters by merchant name', async () => {
@@ -149,7 +156,7 @@ describe('CopilotDatabase', () => {
       const result = await db.getTransactions({
         startDate: '2024-01-01',
         endDate: '2024-01-31',
-        category: 'food',
+        categoryIds: new Set(['food_dining']),
       });
       expect(result).toHaveLength(1);
       expect(result[0].transaction_id).toBe('txn1');

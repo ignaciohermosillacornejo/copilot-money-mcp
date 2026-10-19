@@ -386,16 +386,18 @@ describe('CopilotMoneyTools Integration', () => {
 
     test('filters by category', async () => {
       const result = await tools.getTransactions({
-        category: 'food',
+        category: 'food_dining',
         limit: 20,
         // #604: category_id is outside the default preset — the filter still
         // runs on it, but reading it back has to be asked for.
         fields: ['default', 'category_id'],
       });
 
-      for (const txn of result.transactions) {
-        expect(txn.category_id && txn.category_id.toLowerCase().includes('food')).toBe(true);
-      }
+      // #845: an exact id, never a substring of one — plus its subcategories,
+      // since this fixture makes groceries a child of food_dining.
+      expect(new Set(result.transactions.map((t) => t.category_id))).toEqual(
+        new Set(['food_dining', 'groceries'])
+      );
     });
 
     test('filters by amount range', async () => {

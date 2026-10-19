@@ -30,6 +30,11 @@ import {
   isSharedTransactionType,
   liveTypeRuleRow,
 } from '../transaction-type-rules.js';
+import {
+  categoryFilterDescription,
+  resolveCategoryFilter,
+  type CategoryFilterNode,
+} from '../category-filter.js';
 import { parsePeriod } from '../../utils/date.js';
 
 /**
@@ -129,6 +134,8 @@ export interface GetTransactionsLiveResult extends PageResult {
 export interface CategoryIndex {
   names: Map<string, string>;
   excludedIds: ReadonlySet<string>;
+  /** Every category with its parent, for the shared `category` filter (#845). */
+  nodes: CategoryFilterNode[];
 }
 
 /**
@@ -266,11 +273,13 @@ export class LiveTransactionsTools {
     });
     const names = new Map<string, string>();
     const excludedIds = new Set<string>();
+    const nodes: CategoryFilterNode[] = [];
     for (const c of rows) {
       if (c.name) names.set(c.id, c.name);
       if (c.isExcluded === true) excludedIds.add(c.id);
+      nodes.push({ id: c.id, parentId: c.parentId ?? null, name: c.name });
     }
-    return { names, excludedIds };
+    return { names, excludedIds, nodes };
   }
 
   async getTransactions(opts: GetTransactionsLiveOptions): Promise<GetTransactionsLiveResult> {
@@ -415,10 +424,16 @@ export class LiveTransactionsTools {
       result = result.filter((n) => n.accountId === id);
     }
 
-    // 3. categoryId
+    // 3. category — the filter shared with cache mode (#845): exact id, a
+    // parent includes its descendants, an unknown id is an error.
     if (opts.category !== undefined) {
       const cid = opts.category;
-      result = result.filter((n) => n.categoryId === cid);
+      const { nodes: categoryNodes } = await this.getCategoryIndex();
+      const ids = resolveCategoryFilter(cid, categoryNodes, {
+        listTool: 'get_categories_live',
+        knownElsewhere: nodes.some((n) => n.categoryId === cid),
+      });
+      result = result.filter((n) => n.categoryId !== null && ids.has(n.categoryId));
     }
 
     // 4. amount range
@@ -576,8 +591,16 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
     name: 'get_transactions_live',
     description:
       "Read and filter transactions live from Copilot's GraphQL API — the right tool for any " +
-      'spending lookup by category, merchant, date, or amount; sum the returned `amount` values ' +
-      'to total spending. Filters: `category` (a category ID from get_categories_live), ' +
+      'spending lookup by category, merchant, date, or amount. Do NOT sum `amount` to get ' +
+      'spending: income rows (paychecks, negative) net against everything. The app\'s "spent ' +
+      'in <month>" is: per category, the NET sum of `amount` over type REGULAR rows (refunds ' +
+      'net within their category; ask for fields: ["default", "type", "category_id"]), ' +
+      'skipping uncategorized and excluded rows; for the CURRENT month, add the still-unpaid ' +
+      'recurrings due in the month (get_upcoming_recurrings_live, which in one unverified ' +
+      'read returned only ~14 days ahead, so take later bills from get_recurring_live ' +
+      'nextPaymentDate). For a closed month that last term is zero. ' +
+      "get_monthly_spend_live gives this month's non-recurring spend day by day. " +
+      'Filters: `category` (a category ID from get_categories_live), ' +
       '`merchant`/`query`, date range (`period` or `start_date`/`end_date`), ' +
       '`min_amount`/`max_amount`, `account_id`, `tag`, `pending`. Requires --live-reads and ' +
       'network connectivity. NOT supported (each returns an error telling you to retry without ' +
@@ -620,7 +643,7 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
           description: 'End date (YYYY-MM-DD)',
           pattern: '^\\d{4}-\\d{2}-\\d{2}$',
         },
-        category: { type: 'string', description: 'Filter by category ID' },
+        category: { type: 'string', description: categoryFilterDescription('get_categories_live') },
         merchant: {
           type: 'string',
           description: 'Filter by merchant name (server-side matchString, substring match)',

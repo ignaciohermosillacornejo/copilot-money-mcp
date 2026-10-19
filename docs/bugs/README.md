@@ -79,7 +79,7 @@ a class yet.
 
 | Class | Definition | Detector |
 |---|---|---|
-| `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. Includes treating content as identity, e.g. a dedup key built from a display name. | `assertOpaqueIds` fixture invariant (#461); `tests/core/dedup-identity.test.ts` — the five primary decoder dedups must preserve two documents identical in content and differing only by id, and every other dedup site must be explicitly listed as omitted (#662); `tests/core/auth/browser-selection.test.ts` → `ambiguous --browser-profile` (mutation-verified) — a name resolved against several namespaces (directory, display name, Firefox suffix, `profiles.ini` `Name=`) must refuse when any pair of them names two different profiles (#837) |
+| `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. Includes treating content as identity, e.g. a dedup key built from a display name. | `assertOpaqueIds` fixture invariant (#461); `tests/core/dedup-identity.test.ts` — the five primary decoder dedups must preserve two documents identical in content and differing only by id, and every other dedup site must be explicitly listed as omitted (#662); `tests/core/auth/browser-selection.test.ts` → `ambiguous --browser-profile` (mutation-verified) — a name resolved against several namespaces (directory, display name, Firefox suffix, `profiles.ini` `Name=`) must refuse when any pair of them names two different profiles (#837); `tests/tools/category-filter-parity.test.ts` — the transactions `category` filter matches an exact id in both modes, expands a parent, and rejects a name or unknown id instead of returning zero rows (#845) |
 | `aggregation-double-count` | Summing across a parent/child hierarchy without excluding parents, so the same money is counted twice — in our own arithmetic, or by a write that makes Copilot's server count it twice. | partial (mutation-verified) — `tests/unit/delete-split-parent.test.ts` + the `delete_transaction refuses a split parent` mutation-guard row: `delete_transaction` must refuse a known split parent before sending anything (#822), including once its children are deleted and the server shows it as an ordinary row — eight more rows pin the evidence that still knows it then: the never-retired record, its persistence across restarts, and the soft-deleted children in the local cache, read in live mode too, re-read past the cache TTL and after a login change, joined by concurrent deletes, and accumulated so a re-read never retires an id (#842). Nothing covers the read-side sums |
 | `sign-convention` | Ignoring the domain's sign/direction convention, so the stored sign is not the semantic sign and naive sums are wrong. | none |
 | `ui-parity` | A reimplementation of an app-side computation uses different semantics — time window, enumeration set, exclusion rules — and disagrees with the Copilot app. | partial — `smoke:cache` check 9 (#824) covers income/transfer rows carrying a category, raw documents against decoded rows; nothing covers the class at large |
@@ -227,7 +227,7 @@ record near-misses.
 
 ### Computing the answer
 
-**`identity-resolution`** — 5
+**`identity-resolution`** — 6
 
 | | Bug | Found by | Date |
 |---|---|---|---|
@@ -236,6 +236,7 @@ record near-misses.
 | #394 | [Cache-mode tag filter compared tag names against opaque tag IDs — always zero results](394-tag-filter-name-vs-id.md) | `dogfooding` | 2026-05-12 |
 | #662 | [Content-based dedup key silently dropped real accounts — the same defect as #122, in the collection nobody swept](662-account-dedup-drops-documents.md) | `code-review` | 2026-08-21 |
 | #837 | [An ambiguous --browser-profile silently picked one profile — on Edge, often the other person's](837-ambiguous-browser-profile.md) | `code-review` | 2026-10-18 |
+| #845 | [The transactions category filter silently returned zero rows for a parent category id or a category name](845-category-filter-silent-zero.md) | `live-probe` | 2026-10-18 |
 
 **`aggregation-double-count`** — 4
 

@@ -1183,9 +1183,35 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'refunds, pending included, to the cent. Days with a recurring-linked charge, an ' +
       'INCOME row or an INTERNAL_TRANSFER all matched only with those left out. Not ' +
       'checked: transactions in a user-excluded category (none in the sample). ' +
-      '`comparisonAmount` was NOT identified; it grows far faster than any prior-month ' +
-      'spend, so the tool description no longer names a meaning for it. Nothing re-checks ' +
-      'this; the server could change the aggregation silently.',
+      '`comparisonAmount` was NOT identified then; see the sibling entry. Re-measured ' +
+      '2026-10-18 (#844): the latest row equalled the non-recurring net spend MINUS the ' +
+      'uncategorized rows, so uncategorized transactions are left out as well, and the tool ' +
+      'description now says so. Nothing re-checks this; the server could change the ' +
+      'aggregation silently.',
+  },
+  {
+    surface: 'CategoriesDailySpent.comparisonAmount:dashboardBudgetRemaining',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      "Measured 2026-10-18 (#844): the latest row's comparisonAmount equalled the web " +
+      'Dashboard\'s "$N under" budget figure on that day. One read of one row; earlier days ' +
+      'of the series were not compared. It is not a prior-month figure (it grows far faster ' +
+      'than any prior-month spend, #823). get_monthly_spend_live states this as an ' +
+      'observation, not a contract.',
+  },
+  {
+    surface: 'UnpaidUpcomingRecurring:horizonAbout14Days',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'One read on 2026-10-18 (#844 comment): unpaidUpcomingRecurrings returned only rows due ' +
+      'within about 14 days (the latest was exactly 14 days out) and most configured ' +
+      'recurrings were absent. get_upcoming_recurrings_live and get_transactions_live state ' +
+      'the horizon as unverified. Close by running parity row REC-07 early in a month, when ' +
+      'a 14-day window ends well before the month does.',
   },
   queryOperation('networthHistory'),
   gatedQueryResponseShape('networthHistory'),

@@ -155,7 +155,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // items, other} — because it is the one newly-decoded field a caller could
   // never guess at: nothing about a transaction suggests Copilot has the
   // Amazon line items for it, and an undiscoverable field is a field nobody
-  // requests. Headroom drops from ~10% to ~2.3%, which is inside the band the
+  // requests. (At #718) headroom dropped from ~10% to ~2.3%, inside the band the
   // rest of this file runs at; the next addition here needs its own argument.
   //
   // That argument, #843: raised 6_340 -> 6_830 so `transaction_type` can state
@@ -169,7 +169,16 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // behaviour changes the reorder made, and the reviewer asked for them to be
   // stated where callers read. Measured 6_859; 6_896 after the round-4
   // wording (the duplicates escape hatch names exclude_deleted), ~1.8%.
-  get_transactions: 7_020,
+  //
+  // That argument, #845 (re-measured in the #858 review): raised 6_340 -> 6_520.
+  // `category` went from "case-insensitive substring" (47 chars, and wrong) to
+  // the shared description of what the filter now does — exact id, a parent
+  // includes its children, an id unknown to both the category list and the
+  // window's rows is an error. Measured 6_367 (~2.4%) on its own.
+  //
+  // Combined after #858 was rebased onto merged #854: both texts on one schema,
+  // measured 7_065 (7_117 at the series tip, after #858 round 6), so 7_230.
+  get_transactions: 7_230,
   get_cache_info: 640,
   refresh_database: 485,
   // Raised from 1_315 by #597 Tier 2: adds the `fields` param (shared
@@ -269,7 +278,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // one live-only gap. The rules used to differ between modes with neither
   // written down; the text is what lets a caller know which rows it got.
   // Measured 6_048.
-  get_transactions_live: 6_200,
+  //
+  // Raised again by #844/#845: the description stopped telling callers to sum
+  // `amount` (which nets paychecks against all spending) and states the app's
+  // spend recipe instead, and `category` states its rules (exact id, parent
+  // includes children, unknown id errors). Measured 6_073 on its own; 6_865
+  // combined with #843's text after the rebase, so 7_020 (~2.3%).
+  get_transactions_live: 7_020,
   // Raised from 570 by #597 Tier 2: adds the `fields` param (shared verbatim
   // with get_accounts — see ACCOUNT_FIELDS_PARAM_SCHEMA) plus a description
   // sentence naming the excluded sync/plumbing fields (`hasHistoricalUpdates`,
@@ -313,7 +328,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // `icon` exclusions as get_recurring_live (see that entry) — the `fields`
   // schema fragment is shared verbatim between the two tools so their
   // descriptions cannot drift. Measured 1_718 (~10% headroom).
-  get_upcoming_recurrings_live: 1_890,
+  //
+  // Raised 1_890 -> 2_030 by #844: the description states the ~14-day horizon
+  // one read observed (unverified, parity row REC-07), because "what bills are
+  // left this month" otherwise gets a silently truncated set. Measured 1_978.
+  get_upcoming_recurrings_live: 2_030,
   // Lowered 1_235 -> 1_135 by #823, whose rewritten description is shorter.
   // Measured 1_041 after the PR's last description edit (~9% headroom).
   get_monthly_spend_live: 1_135,
@@ -452,7 +471,16 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // Raised 79_600 -> 80_400 by #843/#854: the shared transaction_type rule text
 // on both transaction tools, plus the totals and duplicates wording above.
 // Measured 79_767; 79_804 after round 4 (~0.7%), deliberately tight.
-const SCHEMA_TOTAL_BUDGET = 80_400;
+//
+// Raised 79_600 -> 80_300 by #844/#845 (re-measured in the #858 review): the
+// spend recipe replacing "sum `amount`" on get_transactions_live, the shared
+// `category` rules on both transaction tools, and the upcoming-horizon caveat.
+// Measured 79_620 (~0.85%), deliberately tight.
+//
+// Combined after #858 was rebased onto merged #854: measured 81_067 (81_120 at
+// the series tip, after #858 round 6), so 81_700
+// (~0.8%), still deliberately tight.
+const SCHEMA_TOTAL_BUDGET = 81_700;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

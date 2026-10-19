@@ -15,6 +15,7 @@ import {
 // pure projections of its ordered definition lists.
 import { READ_TOOL_DEFS, WRITE_TOOL_DEFS } from './registry/index.js';
 import { normalizeMerchantName } from '../utils/merchant.js';
+import { resolveCategoryFilter } from './category-filter.js';
 import {
   DEFAULT_TRANSACTION_FIELDS,
   DEFAULT_INVESTMENT_PRICE_FIELDS,
@@ -747,6 +748,26 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Cache-mode side of the shared `category` filter (#845): the same
+   * resolveCategoryFilter live mode uses, over the user's categories. A value
+   * missing from them is still accepted when it is a Plaid-taxonomy id or an
+   * id some cached transaction carries, so an old row stays reachable.
+   */
+  private async resolveCacheCategoryFilter(category: string): Promise<Set<string>> {
+    const userCategories = await this.db.getUserCategories();
+    const nodes = userCategories.map((c) => ({
+      id: c.category_id,
+      parentId: c.parent_category_id ?? null,
+      name: c.name ?? null,
+    }));
+    const knownElsewhere =
+      !nodes.some((n) => n.id === category) &&
+      (isKnownPlaidCategory(category) ||
+        (await this.db.getAllTransactions()).some((t) => t.category_id === category));
+    return resolveCategoryFilter(category, nodes, { listTool: 'get_categories', knownElsewhere });
+  }
+
+  /**
    * Apply the derived fields every cache-mode transaction row carries.
    *
    * Both paths through getTransactions() run through here, and that is the
@@ -1033,7 +1054,8 @@ export class CopilotMoneyTools {
     let transactions = await this.db.getTransactions({
       startDate: start_date,
       endDate: end_date,
-      category,
+      categoryIds:
+        category !== undefined ? await this.resolveCacheCategoryFilter(category) : undefined,
       merchant,
       accountId: account_id,
       minAmount: min_amount,

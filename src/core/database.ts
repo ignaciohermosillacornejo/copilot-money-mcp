@@ -1282,7 +1282,10 @@ export class CopilotDatabase {
    * @param options - Filter options
    * @param options.startDate - Filter by date >= this (YYYY-MM-DD)
    * @param options.endDate - Filter by date <= this (YYYY-MM-DD)
-   * @param options.category - Filter by category_id (case-insensitive substring match)
+   * @param options.categoryIds - Keep only rows whose category_id is in this set (exact
+   *   match). Callers resolve a user-facing `category` value into this set with
+   *   resolveCategoryFilter (src/tools/category-filter.ts), which adds a parent's
+   *   descendants; this layer does no matching of its own (#845).
    * @param options.merchant - Filter by merchant name (case-insensitive substring match)
    * @param options.accountId - Filter by account_id
    * @param options.minAmount - Filter by amount >= this
@@ -1294,7 +1297,7 @@ export class CopilotDatabase {
     options: {
       startDate?: string;
       endDate?: string;
-      category?: string;
+      categoryIds?: ReadonlySet<string>;
       merchant?: string;
       accountId?: string;
       minAmount?: number;
@@ -1305,7 +1308,7 @@ export class CopilotDatabase {
     const {
       startDate,
       endDate,
-      category,
+      categoryIds,
       merchant,
       accountId,
       minAmount,
@@ -1324,11 +1327,12 @@ export class CopilotDatabase {
       result = result.filter((txn) => txn.date <= endDate);
     }
 
-    // Apply category filter (case-insensitive)
-    if (category) {
-      const categoryLower = category.toLowerCase();
+    // Apply category filter: exact ids only. This used to be a case-insensitive
+    // substring of the id, a relic of Plaid-taxonomy ids; on opaque Firestore
+    // ids it matched by accident or not at all (#845).
+    if (categoryIds) {
       result = result.filter(
-        (txn) => txn.category_id && txn.category_id.toLowerCase().includes(categoryLower)
+        (txn) => txn.category_id !== undefined && categoryIds.has(txn.category_id)
       );
     }
 

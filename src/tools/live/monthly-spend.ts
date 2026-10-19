@@ -13,9 +13,13 @@
  * recurring link, net of refunds, pending included, to the cent; income
  * and internal transfers do not count. The tool adds `daily_amount` (the
  * day's increase) so callers need not difference the series themselves.
- * `comparisonAmount`'s meaning is unconfirmed: it grows far faster than
- * any prior-month spend, so it is not the "same day last month" figure an
- * earlier description claimed.
+ * Measured again 2026-10-18 (#844): the latest row equals the month's
+ * non-recurring net spend MINUS the uncategorized rows, so uncategorized
+ * transactions are left out too. The same read found the latest row's
+ * `comparisonAmount` equal to the Dashboard's "$N under" budget figure; it
+ * grows far faster than any prior-month spend, so it is not the "same day
+ * last month" figure an earlier description claimed. One measurement each,
+ * recorded in the conformance ledger.
  *
  * The server pads the rest of the month with placeholder rows (captured
  * with both amounts `null`). By default the projection drops every row with
@@ -146,11 +150,11 @@ export function createLiveMonthlySpendToolSchema(): ToolSchema {
       "Current month's NON-RECURRING spend, day by day (live). `total_amount` is CUMULATIVE " +
       "month-to-date; `daily_amount` is that day's increase (the first row's, its own total). " +
       'Counts REGULAR transactions with no recurring link, net of refunds, pending included; ' +
-      'leaves out income, transfers and recurring charges (rent, subscriptions), so it is ' +
-      'NOT the app\'s "spent this month" — for that, sum the POSITIVE amounts from ' +
-      "get_transactions_live (the app's own convention), whose defaults already drop " +
-      'transfers and excluded rows. ' +
-      '`comparison_amount`\'s meaning is unconfirmed; do not use it for "vs last month". ' +
+      'leaves out income, transfers, recurring charges (rent, subscriptions) and ' +
+      'UNCATEGORIZED rows, so it is NOT the app\'s "spent this month" — for that, follow the ' +
+      "spend recipe in get_transactions_live's description. " +
+      'On the latest row, `comparison_amount` matched the Dashboard\'s "$N under" budget ' +
+      'figure (one measurement, #844); it is not a "vs last month" number. ' +
       'A row dated tomorrow can appear. Future rows (null total) are dropped unless ' +
       '`include_future: true`. ≤31 rows. Available when --live-reads is on.',
     inputSchema: {

@@ -174,7 +174,10 @@ export function createLiveUpcomingRecurringsToolSchema(): ToolSchema {
     description:
       'Get the next-due recurring/subscription items — the "about to bill" view ' +
       '(live, GraphQL-backed). Returns unpaid upcoming payments sorted by due date ' +
-      '(soonest first). DISTINCT from `get_recurring_live`, which returns the ' +
+      '(soonest first). HORIZON (unverified, #844, parity row REC-07): one read returned ' +
+      'only rows due within about 14 days, with most configured recurrings absent, so do ' +
+      'not treat this as "every bill left this month"; for bills due later, use ' +
+      "get_recurring_live's nextPaymentDate. DISTINCT from `get_recurring_live`, which returns the " +
       'full set of configured/historical recurrings; use this tool when the user ' +
       'asks "what\'s coming up" or "what bills am I about to pay". ' +
       'Each row carries a `category_name` field joined from the categories cache; ' +

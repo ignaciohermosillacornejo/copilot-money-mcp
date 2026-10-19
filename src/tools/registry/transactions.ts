@@ -7,6 +7,7 @@ import { TRANSACTION_TYPE_FILTERS } from '../constants.js';
 import { TRANSACTION_TYPES } from '../../core/graphql/transactions.js';
 import { TRANSACTION_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
 import { TRANSACTION_TYPE_RULES_TEXT } from '../transaction-type-rules.js';
+import { categoryFilterDescription } from '../category-filter.js';
 
 export const getTransactionsTool = defineTool({
   schema: {
@@ -70,7 +71,7 @@ export const getTransactionsTool = defineTool({
         // Basic filters
         category: {
           type: 'string',
-          description: 'Filter by category (case-insensitive substring)',
+          description: categoryFilterDescription('get_categories'),
         },
         merchant: {
           type: 'string',
