@@ -209,12 +209,11 @@ describe('tool-lookup gate (class-level detector)', () => {
     modesBody?: string;
     omitArgs?: boolean;
     /**
-     * REQUIRED — and enforced at runtime below, not by the type.
-     * `tests/scripts/` is outside every tsconfig program in this repo
-     * (tsconfig.tests.json names its files individually and this is not one),
-     * so `because: string` documents the intent and checks nothing. Omitting
-     * it would otherwise reach `toContain(undefined)`, which fails with a type
-     * complaint instead of naming the row that lost its pin.
+     * REQUIRED — enforced by the type (this file is in tsconfig.tests.json
+     * since #847) AND at runtime below. The runtime check stays because
+     * `bun test` does not typecheck: a row without one would otherwise reach
+     * `toContain(undefined)`, which fails with a type complaint instead of
+     * naming the row that lost its pin.
      */
     because: string;
   }> = [

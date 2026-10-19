@@ -207,6 +207,9 @@
     // and with the same consequence: deleting the line deletes the checking.
     "tests/fixtures/temp-db-leak-probe.ts",
     "tests/context-budget-live.test.ts",
+    // Builds live servers with createMockGraphQLClient to pin
+    // scripts/dump-tool-modes.ts against handleListTools() (#847).
+    "tests/scripts/check-skills.test.ts",
     // The auth surface (#722): the token extractor, the exchange loop and the
     // mid-session uid transition. Added because a required field appeared on
     // `TokenResult` and NOTHING failed — these files were outside every
