@@ -23,7 +23,12 @@ Add a row to the right section with the next free ID. A good case names:
 4. **Expected**: the outcome that counts as PASS, stated so a FAIL is unambiguous.
    Name the tolerance if there is one, and say "expected FAIL by code (file:line)"
    when the code already predicts a failure.
-5. **Last run**: date and result. A FAIL links its issue.
+5. **Last run**: date and result. A FAIL links its issue. When only part of a
+   case ran, say which sources passed and mark the rest SKIP with its reason,
+   e.g. `PASS (cache, live); web SKIP (not read)`. A run that does not repeat a
+   case keeps its earlier result and says so (`…; not re-run <date>`), so a
+   recorded FAIL is never overwritten by a SKIP. A side observation goes in
+   parentheses after the verdict: `PASS (finding: …, #N)`.
 
 Prefix the Case cell of a new row with a priority: **[P1]** could hide a
 release-blocking bug, **[P2]** correctness, **[P3]** nice to have. When a fix
@@ -47,6 +52,11 @@ need it.
   found that a filter PASS on test rows alone is not evidence (TXN-03 passed
   while TXN-08 is a predicted FAIL), so filter cases now compare real data across
   modes.
+- 2026-10-18: re-run after the v3.0 blocker fixes (P1 rows, previous FAILs and
+  a chosen set). #820/#821/#824 verified fixed; W-23 found the new blocker #842
+  (a childless split parent is deletable) and the run filed #843–#848. CAT-02's
+  recipe was corrected to the app's own definition of spend, with the
+  upcoming-recurrings horizon caveat; W-23 and CAT-11 were added.
 
 ## P — Preflight
 
@@ -66,9 +76,9 @@ need it.
 
 | ID | Case | Compare | Expected | Last run |
 |---|---|---|---|---|
-| ACC-01 | [P1] Every visible account | live `get_accounts_live` default vs cache `getAccounts` default vs web Accounts page | Same id set; names identical; balances equal to the cent except intraday-repriced brokerage rows (ACC-03) | 2026-10-18 PASS (one brokerage row per ACC-03) |
+| ACC-01 | [P1] Every visible account | live `get_accounts_live` default vs cache `getAccounts` default vs web Accounts page | Same id set; names identical; balances equal to the cent except intraday-repriced brokerage rows (ACC-03) | 2026-10-18 PASS (live vs web: one brokerage row per ACC-03; cache: one checking balance lagged the desktop sync, P-07) |
 | ACC-02 | [P1] Hidden accounts | live default vs `include_hidden: true`; cache `user_hidden`; web "Hidden" badge | For every id, live `isUserHidden` equals cache `user_hidden` and the web badge; default row counts equal across modes | 2026-10-18 PASS |
-| ACC-03 | [P1] Brokerage repriced intraday | live per-account `balance` vs web account figure; `get_investment_balance_live.current` vs web Investments "Live balance estimate" | Investment total equals web exactly; per-account `balance` is last-synced and may differ (documented in the description) | 2026-10-18 PASS |
+| ACC-03 | [P1] Brokerage repriced intraday | live per-account `balance` vs web account figure; `get_investment_balance_live.current` vs web Investments "Live balance estimate" | Investment total equals web exactly; per-account `balance` is last-synced and may differ (documented in the description) | 2026-10-18 PASS on total; description gap #825 not re-checked |
 | ACC-04 | [P2] No nickname, `name` ≠ `official_name` | cache vs live `name` vs web | All three show `official_name` (#791) | 2026-10-14 PASS |
 | ACC-05 | [P1] Totals | live `total_assets` / `total_liabilities` vs web Assets / Debts | Equal; any difference equals the ACC-03 per-account delta to the cent | 2026-10-18 PASS |
 | ACC-06 | [P3] Field selection | `fields: ["default","balanse","mask"]` | `_field_warning` names `balanse`; `mask` returned | 2026-10-14 PASS |
@@ -94,7 +104,7 @@ need it.
 | INV-01 | [P2] Position detail | live `get_holdings_live` row vs web holding detail (shares, value, average cost, total return) | Equal; return % may differ in the last rounding digit | 2026-10-14 PASS (rounding note #825) |
 | INV-02 | [P1] Holdings sum vs investment balance | Sum `institution_value` vs `get_investment_balance_live.current` | Equal unless a position includes unvested stock-plan shares; then documented | 2026-10-18 differs: unvested shares, Copilot's data (#825) |
 | INV-03 | [P2] Cache vs live holdings | cache `getHoldings` vs live | Same securities and quantities; prices differ by cache age; cash ticker `CUR:USD` vs `USD` (#825) | 2026-10-14 PASS with known ticker diff |
-| INV-04 | [P1] Hidden account that holds something | Hide an investment account in the web (user approval required each run); `refresh_cache`; holdings default vs `include_hidden: true`; investment balance vs web; unhide | Holdings exclude it by default and include it on request; investment balance (live and web) still includes it | 2026-10-18 PASS |
+| INV-04 | [P1] Hidden account that holds something | Hide an investment account in the web (user approval required each run); `refresh_cache`; holdings default vs `include_hidden: true`; investment balance vs web; unhide | Holdings exclude it by default and include it on request; investment balance (live and web) still includes it | 2026-10-18 PASS; description gap #825 not re-checked |
 | INV-05 | [P2] Allocation | `get_investment_allocation_live` vs web allocation; sum vs `get_investment_balance_live.current`; then scoped to one account and unscoped again | Percentages sum to 100 ± 0.1; amounts equal the web; the second unscoped call equals the first, not the scoped one | not run |
 | INV-06 | [P2] Aggregated holdings | `get_aggregated_holdings_live` per security vs the sum of `get_holdings_live` rows, with and without `include_hidden` | Equal to one of the two sums; record which, and flag a description gap if unstated | not run |
 | INV-07 | [P3] Top movers | default, `filter: "PRICE_CHANGE"`, default again, vs web movers | Same securities and order as the web; third call equals the first | not run |
@@ -106,7 +116,7 @@ need it.
 
 | ID | Case | Compare | Expected | Last run |
 |---|---|---|---|---|
-| TXN-01 | [P1] Recent transactions | live vs web Transactions vs cache, same date range | Same id set; amounts to the cent; names equal ignoring case (cache upper-cases, #825) | 2026-10-18 PASS (cache and live; web via category lists) |
+| TXN-01 | [P1] Recent transactions | live vs web Transactions vs cache, same date range | Same id set; amounts to the cent; names equal ignoring case (cache upper-cases, #825) | 2026-10-18 PASS (cache, live); web SKIP (proxied via category lists) |
 | TXN-02 | [P1] Default row shape | live and cache default rows | Same 10 default keys in both; cache omits `internal_transfer` when absent | 2026-10-18 FAIL (cache) #825 |
 | TXN-03 | [P2] Filters on test rows | `pending: true`, `tag` by name (emoji tag), `merchant`, `account_id`, `transaction_type: "tagged"` | Each returns only matching rows, and every matching row in the range. Not evidence of cross-mode parity: see TXN-08 | 2026-10-14 PASS |
 | TXN-04 | [P1] Transfers and income | `exclude_transfers: false`; `type`, `internal_transfer`, category | Transfers flagged; income/transfer rows uncategorised in live and web | 2026-10-18 PASS (#824 fixed) |
@@ -115,7 +125,7 @@ need it.
 | TXN-07 | [P1] Join cache and live by id, one cold month and the current month, every page | `exclude_transfers: false, exclude_excluded: false, fields: ["all"]` both modes, joined by id | Amounts exactly equal, negatives included. Each id only in cache is explained (pending replaced by posted, soft-deleted, split parent, cache window); any unexplained row is a FAIL | 2026-10-18 PASS (cold and current month) |
 | TXN-08 | [P1] `transaction_type` means the same in both modes | `refunds`, `credits`, `hsa_eligible` over 90 days of real data: cache vs live vs web | Same ids. Expected FAIL by code: live `refunds` is every negative amount including paychecks, live `credits` is INCOME rows only (`src/tools/live/transactions.ts` ~459-461); cache uses keyword rules and excludes income (`src/tools/tools.ts` ~1160-1213) | 2026-10-18 FAIL #843 |
 | TXN-09 | [P1] The description's own recipe for spend | Sum `amount` over every page of `get_transactions_live {period:"last_month"}`, as its description says, vs web "spent" for that month | Equal. If INCOME rows net against spend, fix the description | 2026-10-18 FAIL #844 |
-| TXN-10 | [P1] The busiest month | Page through with `limit: 50` in both modes; web row count via its filtered search | Same `total_count` on every page; no duplicate ids; union equals the web count (exercises the 25-row server page cap) | 2026-10-18 PASS (modes; web count not read) |
+| TXN-10 | [P1] The busiest month | Page through with `limit: 50` in both modes; web row count via its filtered search | Same `total_count` on every page; no duplicate ids; union equals the web count (exercises the 25-row server page cap) | 2026-10-18 PASS (cache, live); web count SKIP (not read) |
 | TXN-11 | [P2] Paging while a row is added | Current month: `limit: 1, offset: 0`; create a test row dated today; `offset: 1` | No duplicate or skipped row, or the description says offsets are unstable for live-tier months | not run |
 | TXN-12 | [P2] Pending → posted (observe only) | Note one real pending id (local report only); a day later read both modes | Pending id gone; exactly one posted row; no doubled category total | not run |
 | TXN-13 | [P2] Transaction category names are always real | One month, both modes: every `get_transactions_live` row (`fields: ["default", "category_id"]`) with a category id has a category name that appears in the category list | No raw ids, no blanks, including after a category is deleted (W-22) | not run |
@@ -132,8 +142,8 @@ need it.
 
 | ID | Case | Compare | Expected | Last run |
 |---|---|---|---|---|
-| CAT-01 | [P1] Category list and budget amounts | live `get_categories_live` `budget_amount` vs web Categories BUDGET column | Equal for every category, including negative rollover values | 2026-10-18 PASS |
-| CAT-02 | [P1] Month spend | web Categories "Spent in <month>" (exact, in the All-categories panel) vs: Σ per-category NET spend over REGULAR rows (refunds net within the category; uncategorized and individually-excluded rows not counted) **plus this month's still-unpaid recurrings** (`get_upcoming_recurrings_live` dated in the month, overdue included; zero for a closed month); and `get_monthly_spend_live` last row = non-recurring REGULAR net minus uncategorized rows (read with fields: ["default", "recurring_id", "type"]; #823/#844) | Equal to the cent | 2026-10-18 PASS to the cent with this rule (#844) |
+| CAT-01 | [P1] Category list and budget amounts | live `get_categories_live` `budget_amount` vs web Categories BUDGET column | Equal for every category, including negative rollover values | 2026-10-18 PASS; blank vs 0 note #825 not re-checked |
+| CAT-02 | [P1] Month spend | web Categories `Spent in <month>` (exact, in the All-categories panel) vs: Σ per-category NET spend over REGULAR rows (refunds net within the category; uncategorized and individually-excluded rows not counted) **plus this month's still-unpaid recurrings** (`get_upcoming_recurrings_live` dated in the month, overdue included; zero for a closed month). That tool's set appears to end about 14 days out (2026-10-18: latest row exactly 14 days ahead), so the recipe holds only when the month ends within that window; on a run early in a month, take the remaining unpaid recurrings from the web Recurrings page instead (#844). Separately, `get_monthly_spend_live` last row = non-recurring REGULAR net, excluding uncategorized rows (read with fields: ["default", "recurring_id", "type"]): cumulative non-recurring spend (#823), NOT the web figure | Web figure equal to the cent; monthly-spend last row equal to its own recipe to the cent | 2026-10-18 PASS to the cent with this rule, 13 days before month end (#844) |
 | CAT-03 | [P1] Dashboard | web "budgeted" vs sum of top-level non-excluded `budget_amount`; web "left" vs budgeted minus CAT-02 spend | Equal | 2026-10-18 PASS |
 | CAT-04 | [P1] Spend in a parent category | `get_transactions_live {category: <parent id>}` vs the sum over its children vs web parent "spent" | Returns parent plus children, or the description says the filter matches one exact id (`transactions.ts` ~415) | 2026-10-18 FAIL #845 |
 | CAT-05 | [P1] Category passed by name | `{category: "<real name>"}` in both modes | An error or a warning; a silent 0 is a FAIL (cache substring-matches the id, `src/core/database.ts` ~1197) | 2026-10-18 FAIL #845 |
@@ -204,7 +214,7 @@ Log every write in the ledger **before** sending it (SKILL.md Guardrail 2).
 | W-12 | [P1] Manual balance follows its transactions | Web balance vs baseline after the creates | Baseline minus expenses plus income | 2026-10-18 FAIL: Copilot ignores rows dated before the last balance reset (#848) |
 | W-13 | [P2] `update_category` and `update_tag` | Rename, colour, emoji, `is_excluded: true` then false on the test category; rename + colour on the test tag | Round-trip in live and web; while excluded the test row drops out of default reads and monthly spend; `tag: <old name>` errors, new name works | not run |
 | W-14 | [P2] Create with `note` and `recurring_id` | `create_transaction` with both | Round-trip; the recurring's payments include it | not run |
-| W-15 | [P2] Budget all-months default | `set_budget` without `month`; read current and next month in live and web; restore | Both months show it (the live cache patch touches only the current month, `live-database.ts` ~742: expected FAIL for other months) | 2026-10-18 SKIP (not run) |
+| W-15 | [P2] Budget all-months default | `set_budget` without `month`; read current and next month in live and web; restore | Both months show it (the live cache patch touches only the current month, `live-database.ts` ~742: expected FAIL for other months) | not run |
 | W-16 | [P2] Recurring states and fields | `ARCHIVED` then `ACTIVE`; `update_recurring {frequency, category_id, state}`; `create_recurring` with the `account_id`/`item_id` bypass and `BIWEEKLY` | Each reads back exactly in live and web | not run |
 | W-17 | [P2] Per-row bulk update | `update_transactions` with two rows, different name/date/amount, one with `tag_ids` | All land; the `tag_ids` row's earlier tags are replaced (documented) | not run |
 | W-18 | [P2] Bulk remove, category, type, both target modes | `bulk_edit_transactions {rows, remove_tag_ids}`; `{transaction_ids, category_id}`; `{type:"REGULAR"}`; `review_transactions {transaction_ids}` | Only the removed tag goes; category and type land; both target modes work | not run |
@@ -212,7 +222,7 @@ Log every write in the ledger **before** sending it (SKILL.md Guardrail 2).
 | W-20 | [P2] Split variants | Split an INCOME row; split with a child dated in a cold month; edit a child's category; mixed-sign children | Matches the web; child edits visible (COH) | not run |
 | W-21 | [P2] Parallel writes | In one turn: two `update_transaction` on one test row (name, tags) and two `create_transaction` | Both edits land; each create exists once; balance change equals their sum | not run |
 | W-22 | [P2] Delete a category, tag or recurring still in use | Delete each while a test row references it | The row's category / tags / `recurring_id` in both modes match the web; no dangling ids; `tagged` filter has no ghost | not run |
-| W-23 | [P1] Split parent cannot be deleted (#822) | Split a test row, then `delete_transaction` on the parent; delete both children; `refresh_cache` that month, then `get_transactions_live` for it with fields: ["default", "parent_transaction_id"] and require `_cache_hit: false` (a cached read proves nothing: the parent was evicted locally at split time); `refresh_cache` again; `delete_transaction` on the parent again. Both parent deletes are expected to be REFUSED by the client before anything is sent, which is why this row may call it despite Guardrail 4. If either is accepted, #822 has regressed: stop, record the balance delta, do not retry. See also CL-06 | Both parent deletes refused and nothing sent; the parent id never appears in the fresh read, even with no children left (upgrades the ledger row `Transaction.parentId:childlessParentHidden` to verified-once); web balance back to the baseline | 2026-10-18 FAIL #842 (blocker) |
+| W-23 | [P1] Split parent cannot be deleted (#822) | Split a test row, then `delete_transaction` on the parent; delete both children; `refresh_cache` that month, then `get_transactions_live` for it with fields: ["default", "parent_transaction_id"] and require `_cache_hit: false` (a cached read proves nothing: the parent was evicted locally at split time); `refresh_cache` again; `delete_transaction` on the parent again. Both parent deletes are expected to be REFUSED by the client before anything is sent, which is why this row may call it despite Guardrail 4. If either is accepted, #822 has regressed: stop, record the balance delta, do not retry. See also CL-06 | Both parent deletes refused and nothing sent; the parent id never appears in the fresh read, even with no children left; web balance back to the baseline. The 2026-10-18 run refuted the ledger row `Transaction.parentId:childlessParentHidden`: a childless parent comes back as an ordinary row and the guard lets its delete through (#842). Until #842's fix lands this row is an expected FAIL, and a PASS cannot upgrade that ledger row | 2026-10-18 FAIL #842 (blocker) |
 
 ## COH — Coherence (writes must be visible to the next read)
 
@@ -228,7 +238,7 @@ read once first so it is cached. Check `_cache_hit` and `_cache_oldest_fetched_a
 | COH-05 | [P1] `update_transaction` category / note / tags on a cold-month row | Visible | 2026-10-18 PASS |
 | COH-06 | [P1] `add_transaction_to_recurring` on a cold-month row | `recurring_id` visible | 2026-10-18 PASS |
 | COH-07 | [P1] `delete_transaction` on a cold-month row | Gone | 2026-10-18 PASS |
-| COH-08 | [P2] Manual account balance after a transaction write | `get_accounts_live` shows it | 2026-10-18 SKIP (not run) |
+| COH-08 | [P2] Manual account balance after a transaction write | `get_accounts_live` shows it | 2026-10-14 FAIL (1h stale) #825; not re-run 2026-10-18 |
 | COH-09 | [P1] Edits made in the **web**, read through the MCP: Edit a cold-month test row in the web (category, note, tag, amount) and create one there; read live | Visible; expected FAIL (cold months cached a week). At minimum `refresh_cache` fixes it | 2026-10-18 FAIL as expected; refresh_cache fixes it |
 | COH-10 | [P2] Other live caches after MCP writes: `get_recurring_live` payments after `add_transaction_to_recurring`; `get_budgets_live` after `set_budget`; `get_upcoming_recurrings_live` after PAUSED; `get_monthly_spend_live` after creating a positive non-recurring REGULAR expense dated today (not the W-09-linked row: the series leaves out recurring-linked, income and transfer rows); `get_networth_live` after a manual write | Each shows the write; by code, up to 1h stale | not run |
 | COH-11 | [P2] A month changes tier during the run: Write into a month at age 14 days before UTC midnight, read after | Visible | not run |
@@ -293,7 +303,7 @@ web for that month, and list every write-tool call in the subagent's transcript.
 | CL-03 | [P1] Test category and tag deleted | Gone | 2026-10-18 PASS |
 | CL-04 | [P1] Manual balance equals the P-04 baseline | Equal in live (after `refresh_cache {scope:"accounts"}`) and web | 2026-10-18 FAIL −5, explained by the reset-date rule (#848) |
 | CL-05 | [P1] Real-account settings changed during the run restored | Restored | 2026-10-18 PASS |
-| CL-06 | [P1] Split parents after their children are gone | Record each parent's state in live and web; never delete one; a remaining parent is a known leftover. W-23 checks the same parents through the delete guard | 2026-10-18 FINDING: a childless parent becomes an ordinary row (#842) |
+| CL-06 | [P1] Split parents after their children are gone | Record each parent's state in live and web; never delete one; a remaining parent is a known leftover. W-23 checks the same parents through the delete guard | 2026-10-18 PASS (finding: a childless parent becomes an ordinary row, #842) |
 | CL-07 | [P1] Balance after every cleanup group | Baseline plus the effects of the ledger rows still present; the first drifting step is named | 2026-10-18 PASS |
 | CL-08 | [P2] Real categories touched by the test | Web month totals back to their before-test values | not run |
 | CL-09 | [P2] Cache catches up | After the desktop app syncs, no test rows in the cache; wait at most 15 minutes, then SKIP (stale) | not run |
