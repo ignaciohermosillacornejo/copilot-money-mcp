@@ -25,10 +25,13 @@ Add a row to the right section with the next free ID. A good case names:
    when the code already predicts a failure.
 5. **Last run**: date and result. A FAIL links its issue. When only part of a
    case ran, say which sources passed and mark the rest SKIP with its reason,
-   e.g. `PASS (cache, live); web SKIP (not read)`. A run that does not repeat a
-   case keeps its earlier result and says so (`…; not re-run <date>`), so a
-   recorded FAIL is never overwritten by a SKIP. A side observation goes in
-   parentheses after the verdict: `PASS (finding: …, #N)`.
+   e.g. `PASS (cache, live); web SKIP (not read)`; the same applies to a
+   sub-check not repeated: `PASS (total); description gap SKIP (not re-checked, #N)`.
+   A run that does not repeat a case leaves its cell alone, except that a FAIL
+   or SKIP gets `; not re-run <date>` appended, so a recorded FAIL is never
+   overwritten by a SKIP and a plain PASS never accretes stamps. A side
+   observation goes in the same parentheses after the verdict:
+   `PASS (live, web; finding: …, #N)`.
 
 Prefix the Case cell of a new row with a priority: **[P1]** could hide a
 release-blocking bug, **[P2]** correctness, **[P3]** nice to have. When a fix
@@ -76,9 +79,9 @@ need it.
 
 | ID | Case | Compare | Expected | Last run |
 |---|---|---|---|---|
-| ACC-01 | [P1] Every visible account | live `get_accounts_live` default vs cache `getAccounts` default vs web Accounts page | Same id set; names identical; balances equal to the cent except intraday-repriced brokerage rows (ACC-03) | 2026-10-18 PASS (live, web) (finding: one brokerage row differs per ACC-03); cache SKIP (one checking balance lagged the desktop sync, P-07) |
+| ACC-01 | [P1] Every visible account | live `get_accounts_live` default vs cache `getAccounts` default vs web Accounts page | Same id set; names identical; balances equal to the cent except intraday-repriced brokerage rows (ACC-03) | 2026-10-18 PASS (live, web; finding: one brokerage row differs per ACC-03); cache SKIP (one checking balance lagged the desktop sync, P-07) |
 | ACC-02 | [P1] Hidden accounts | live default vs `include_hidden: true`; cache `user_hidden`; web "Hidden" badge | For every id, live `isUserHidden` equals cache `user_hidden` and the web badge; default row counts equal across modes | 2026-10-18 PASS |
-| ACC-03 | [P1] Brokerage repriced intraday | live per-account `balance` vs web account figure; `get_investment_balance_live.current` vs web Investments "Live balance estimate" | Investment total equals web exactly; per-account `balance` is last-synced and may differ (documented in the description) | 2026-10-18 PASS on total; description gap #825 not re-checked |
+| ACC-03 | [P1] Brokerage repriced intraday | live per-account `balance` vs web account figure; `get_investment_balance_live.current` vs web Investments "Live balance estimate" | Investment total equals web exactly; per-account `balance` is last-synced and may differ (documented in the description) | 2026-10-18 PASS (total); description gap SKIP (not re-checked, #825) |
 | ACC-04 | [P2] No nickname, `name` ≠ `official_name` | cache vs live `name` vs web | All three show `official_name` (#791) | 2026-10-14 PASS |
 | ACC-05 | [P1] Totals | live `total_assets` / `total_liabilities` vs web Assets / Debts | Equal; any difference equals the ACC-03 per-account delta to the cent | 2026-10-18 PASS |
 | ACC-06 | [P3] Field selection | `fields: ["default","balanse","mask"]` | `_field_warning` names `balanse`; `mask` returned | 2026-10-14 PASS |
@@ -103,8 +106,8 @@ need it.
 |---|---|---|---|---|
 | INV-01 | [P2] Position detail | live `get_holdings_live` row vs web holding detail (shares, value, average cost, total return) | Equal; return % may differ in the last rounding digit | 2026-10-14 PASS (rounding note #825) |
 | INV-02 | [P1] Holdings sum vs investment balance | Sum `institution_value` vs `get_investment_balance_live.current` | Equal unless a position includes unvested stock-plan shares; then documented | 2026-10-18 PASS (finding: unvested shares, Copilot's data, #825) |
-| INV-03 | [P2] Cache vs live holdings | cache `getHoldings` vs live | Same securities and quantities; prices differ by cache age; cash ticker `CUR:USD` vs `USD` (#825) | 2026-10-14 PASS with known ticker diff |
-| INV-04 | [P1] Hidden account that holds something | Hide an investment account in the web (user approval required each run); `refresh_cache`; holdings default vs `include_hidden: true`; investment balance vs web; unhide | Holdings exclude it by default and include it on request; investment balance (live and web) still includes it | 2026-10-18 PASS; description gap #825 not re-checked |
+| INV-03 | [P2] Cache vs live holdings | cache `getHoldings` vs live | Same securities and quantities; prices differ by cache age; cash ticker `CUR:USD` vs `USD` (#825) | 2026-10-14 PASS (finding: known ticker diff) |
+| INV-04 | [P1] Hidden account that holds something | Hide an investment account in the web (user approval required each run); `refresh_cache`; holdings default vs `include_hidden: true`; investment balance vs web; unhide | Holdings exclude it by default and include it on request; investment balance (live and web) still includes it | 2026-10-18 PASS; description gap SKIP (not re-checked, #825) |
 | INV-05 | [P2] Allocation | `get_investment_allocation_live` vs web allocation; sum vs `get_investment_balance_live.current`; then scoped to one account and unscoped again | Percentages sum to 100 ± 0.1; amounts equal the web; the second unscoped call equals the first, not the scoped one | not run |
 | INV-06 | [P2] Aggregated holdings | `get_aggregated_holdings_live` per security vs the sum of `get_holdings_live` rows, with and without `include_hidden` | Equal to one of the two sums; record which, and flag a description gap if unstated | not run |
 | INV-07 | [P3] Top movers | default, `filter: "PRICE_CHANGE"`, default again, vs web movers | Same securities and order as the web; third call equals the first | not run |
@@ -142,8 +145,8 @@ need it.
 
 | ID | Case | Compare | Expected | Last run |
 |---|---|---|---|---|
-| CAT-01 | [P1] Category list and budget amounts | live `get_categories_live` `budget_amount` vs web Categories BUDGET column | Equal for every category, including negative rollover values | 2026-10-18 PASS; blank vs 0 note #825 not re-checked |
-| CAT-02 | [P1] Month spend | web Categories `Spent in <month>` (exact, in the All-categories panel) vs: Σ per-category NET spend over REGULAR rows (refunds net within the category; uncategorized and individually-excluded rows not counted) **plus this month's still-unpaid recurrings** (`get_upcoming_recurrings_live` dated in the month, overdue included; zero for a closed month). That tool's set appears to end about 14 days out (2026-10-18: latest row exactly 14 days ahead), so the recipe holds only when the month ends within that window; on a run early in a month, take the remaining unpaid recurrings from the web Recurrings page instead (#844). Separately, `get_monthly_spend_live` last row = non-recurring REGULAR net, excluding uncategorized rows (read with fields: ["default", "recurring_id", "type"]): cumulative non-recurring spend (#823), NOT the web figure | Web figure equal to the cent; monthly-spend last row equal to its own recipe to the cent | 2026-10-18 PASS to the cent with this rule, 13 days before month end (#844) |
+| CAT-01 | [P1] Category list and budget amounts | live `get_categories_live` `budget_amount` vs web Categories BUDGET column | Equal for every category, including negative rollover values | 2026-10-18 PASS; blank vs 0 note SKIP (not re-checked, #825) |
+| CAT-02 | [P1] Month spend | web Categories `Spent in <month>` (exact, in the All-categories panel) vs: Σ per-category NET spend over REGULAR rows (refunds net within the category; uncategorized and individually-excluded rows not counted) **plus this month's still-unpaid recurrings** (`get_upcoming_recurrings_live` dated in the month, overdue included; zero for a closed month). That tool's set appears to end about 14 days out (2026-10-18: latest row exactly 14 days ahead), so the recipe holds only when the month ends within that window; on a run early in a month, take the remaining unpaid recurrings from the web Recurrings page instead (#844). Separately, `get_monthly_spend_live` last row = non-recurring REGULAR net, excluding uncategorized rows (read with fields: ["default", "recurring_id", "type"]): cumulative non-recurring spend (#823), NOT the web figure | Web figure equal to the cent; monthly-spend last row equal to its own recipe to the cent | 2026-10-18 PASS (finding: run 13 days before month end, inside the upcoming horizon, #844) |
 | CAT-03 | [P1] Dashboard | web "budgeted" vs sum of top-level non-excluded `budget_amount`; web "left" vs budgeted minus CAT-02 spend | Equal | 2026-10-18 PASS |
 | CAT-04 | [P1] Spend in a parent category | `get_transactions_live {category: <parent id>}` vs the sum over its children vs web parent "spent" | Returns parent plus children, or the description says the filter matches one exact id (`transactions.ts` ~415) | 2026-10-18 FAIL #845 |
 | CAT-05 | [P1] Category passed by name | `{category: "<real name>"}` in both modes | An error or a warning; a silent 0 is a FAIL (cache substring-matches the id, `src/core/database.ts` ~1197) | 2026-10-18 FAIL #845 |
@@ -173,7 +176,7 @@ need it.
 | REC-04 | [P2] Late evening local time | Run when the UTC date is a day ahead of local: cache "due" grouping and `get_upcoming_recurrings_live` vs web | Same (cache mixes UTC today with the local month, `tools.ts` ~2140) | not run |
 | REC-05 | [P1] Real recurrings don't adopt test rows | After every W create, read `recurring_id` on each test row not linked on purpose; re-run REC-01 | All null; upcoming bills unchanged | 2026-10-18 PASS |
 | REC-06 | [P3] Recurring category names in a fresh session | `get_recurring_live` as the first call after reconnect, before any categories read; then again after a categories read | Null at first (documented), then populated | not run |
-| REC-07 | [P2] Upcoming horizon | Early in a month (day 1–5): `get_upcoming_recurrings_live` vs web Recurrings page, every unpaid recurring due by month end | Either the tool returns every one due this month, or its description states the horizon (one read on 2026-10-18 suggested about 14 days, #844) | not run |
+| REC-07 | [P2] Upcoming horizon | Early in a month (day 1–5): `get_upcoming_recurrings_live` vs web Recurrings page, every unpaid recurring due by month end | Either the tool returns every one due this month, or its description states the horizon and the returned set matches it (one read on 2026-10-18 suggested about 14 days, #844) | not run |
 
 ## GOAL — Goals (cache-only tools)
 

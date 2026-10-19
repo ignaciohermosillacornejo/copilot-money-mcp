@@ -17,8 +17,9 @@ change this file only when the procedure itself changes.
 
 A full run is long. When time is short, run every **[P1]** row plus the rows
 whose Last run is a FAIL. Leave the rest as they are: a row this run did not
-repeat keeps its earlier result with `; not re-run <date>` appended, and a
-recorded FAIL is never replaced by a SKIP (test-matrix.md, How to extend).
+repeat keeps its earlier result, a FAIL or SKIP with `; not re-run <date>`
+appended, and a recorded FAIL is never replaced by a SKIP (test-matrix.md,
+How to extend).
 
 ## When to use
 
@@ -197,7 +198,7 @@ out of the web app) runs last of all, because it ends the web session.
 1. Update **Last run** for every case you ran in `test-matrix.md` (date + PASS /
    FAIL #N / SKIP with reason; partial results per its How to extend). Rows you
    did not run keep their result, with `; not re-run <date>` appended to an
-   earlier FAIL. Add rows for anything new you tested.
+   earlier FAIL or SKIP. Add rows for anything new you tested.
 2. File each new defect as a GitHub issue: search first, use synthetic numbers,
    include reproduction steps, root cause if found, a fix direction, and a
    class-level detector (CONTRIBUTING.md "Bug Response Ritual"). Batch
