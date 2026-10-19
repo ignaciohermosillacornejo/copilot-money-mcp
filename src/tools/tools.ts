@@ -633,6 +633,30 @@ function typeFlagsPatch(type: string): Pick<Transaction, 'internal_transfer' | '
 }
 
 /**
+ * `type` when it is one of Copilot's known TransactionType values, else
+ * undefined. Response validation is warn-only, so a drifted spelling must not
+ * be trusted over the request (it would clear both flags).
+ */
+function knownTransactionType(type: unknown): TransactionType | undefined {
+  return typeof type === 'string' && (TRANSACTION_TYPES as readonly string[]).includes(type)
+    ? (type as TransactionType)
+    : undefined;
+}
+
+/**
+ * The server's word for the category a write left on a row, when a field the
+ * write touched can change it (category_id, or a type change, which clears it
+ * for INCOME/INTERNAL_TRANSFER): the returned `categoryId` when it is a string
+ * (`''` is Copilot's "no category"), else the request-derived fallback.
+ */
+function serverCategory(
+  server: { categoryId?: unknown } | undefined,
+  fallback: string | undefined
+): string | undefined {
+  return typeof server?.categoryId === 'string' ? server.categoryId : fallback;
+}
+
+/**
  * Build the optimistic cache patch for one applied edit: writes to the
  * in-memory cache so a subsequent read returns the new value without needing
  * refresh_database + re-decode.
@@ -644,7 +668,10 @@ function typeFlagsPatch(type: string): Pick<Transaction, 'internal_transfer' | '
  * INCOME/INTERNAL_TRANSFER clearing the category server-side (verified live),
  * so a follow-up read doesn't show a stale category.
  */
-function buildEditCachePatch(edit: TransactionEdit, serverType?: string): Partial<Transaction> {
+function buildEditCachePatch(
+  edit: TransactionEdit,
+  server?: { type?: unknown; categoryId?: unknown }
+): Partial<Transaction> {
   const patch: Partial<Transaction> = {};
   if ('name' in edit && edit.name !== undefined) patch.name = edit.name.trim();
   if ('category_id' in edit && edit.category_id !== undefined) patch.category_id = edit.category_id;
@@ -656,10 +683,18 @@ function buildEditCachePatch(edit: TransactionEdit, serverType?: string): Partia
   if (edit.type === 'INCOME' || edit.type === 'INTERNAL_TRANSFER') {
     patch.category_id = '';
   }
+  // Category and type both follow the server's returned row when it carries
+  // them (#864 review): one provenance for the whole patch.
+  if (edit.category_id !== undefined || edit.type !== undefined) {
+    const category = serverCategory(server, patch.category_id);
+    if (category !== undefined) patch.category_id = category;
+  }
   // The local model's counterparts of Copilot's type (internal_transfer,
   // income): the decoder derives them from it and get_transactions' type
   // filters read them (#864 review).
-  if (edit.type !== undefined) Object.assign(patch, typeFlagsPatch(serverType ?? edit.type));
+  if (edit.type !== undefined) {
+    Object.assign(patch, typeFlagsPatch(knownTransactionType(server?.type) ?? edit.type));
+  }
   return patch;
 }
 
@@ -3682,7 +3717,7 @@ export class CopilotMoneyTools {
       // Map GraphQL field names back to MCP API names in the response.
       const updated = Object.keys(result.changed).map((k) => EDIT_GRAPHQL_TO_API_NAME[k] ?? k);
 
-      const patch = buildEditCachePatch(args, result.transaction?.type);
+      const patch = buildEditCachePatch(args, result.transaction);
       if (Object.keys(patch).length > 0) {
         this.db.patchCachedTransaction(transaction_id, patch);
       }
@@ -3840,7 +3875,7 @@ export class CopilotMoneyTools {
         });
         // Patch per success, not once at the end: on a partial batch the cache
         // must reflect the rows that actually landed and nothing else.
-        const patch = buildEditCachePatch(edit, result.transaction?.type);
+        const patch = buildEditCachePatch(edit, result.transaction);
         if (Object.keys(patch).length > 0) {
           this.db.patchCachedTransaction(route.id, patch);
         }
@@ -4374,9 +4409,13 @@ export class CopilotMoneyTools {
       // the cache is unloaded or the id is absent — both acceptable, same as
       // delete_transaction's eviction-is-a-no-op contract. The returned
       // `transaction` stays a verbatim transcription of the response.
+      const linkedType = knownTransactionType(tx.type);
       this.db.patchCachedTransaction(transaction_id, {
         recurring_id: tx.recurringId ?? recurring_id,
         ...(typeof tx.categoryId === 'string' ? { category_id: tx.categoryId } : {}),
+        // Linking is not known to change the type, but the returned row says
+        // what it is, so the type-derived flags follow it like the category.
+        ...(linkedType !== undefined ? typeFlagsPatch(linkedType) : {}),
       });
       // Live cache: the server's row, which already carries the new category.
       this.liveDb?.upsertLiveTransaction(tx);
@@ -5064,8 +5103,14 @@ export class CopilotMoneyTools {
           if (category_id !== undefined) patch.category_id = category_id;
           if (reviewed !== undefined) patch.user_reviewed = reviewed;
           if (type === 'INCOME' || type === 'INTERNAL_TRANSFER') patch.category_id = '';
-          // The type-derived flags, from the server's row (#864 review).
-          if (type !== undefined) Object.assign(patch, typeFlagsPatch(tx.type ?? type));
+          // Category and the type-derived flags from the server's row (#864 review).
+          if (category_id !== undefined || type !== undefined) {
+            const category = serverCategory(tx, patch.category_id);
+            if (category !== undefined) patch.category_id = category;
+          }
+          if (type !== undefined) {
+            Object.assign(patch, typeFlagsPatch(knownTransactionType(tx.type) ?? type));
+          }
           if (add_tag_ids !== undefined || remove_tag_ids !== undefined) {
             patch.tag_ids = tx.tags.map((t) => t.id);
           }

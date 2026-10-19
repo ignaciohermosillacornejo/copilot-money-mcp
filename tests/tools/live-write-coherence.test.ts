@@ -65,6 +65,8 @@ const TX_BATCH_1 = 'cD5yL1rS4oP9wT6uZ0xA';
 const TX_BATCH_2 = 'eF7zM3tU6qR1yV8wB2zC';
 /** Seeded as an INTERNAL_TRANSFER, so a retype must clear the old flag too. */
 const TX_BATCH_3 = 'eG8aN4uV7rS2zW9xC3aD';
+/** Seeded as INCOME, retyped REGULAR: the income flag's clear direction. */
+const TX_BATCH_4 = 'eH9bO5vW8sT3aX0yD4bE';
 const TX_RECURRING = 'gH9aN5vW8sT3aX0yD4bE';
 const TX_REVIEW = 'iJ1bO7xY0uV5cZ2aF6dG';
 const TX_BULK_1 = 'kL3cP9zA2wX7eB4cH8fI';
@@ -121,7 +123,10 @@ const SEED: TransactionNode[] = [
   TX_SPLIT_PARENT,
 ]
   .map((id) => seedNode(id))
-  .concat([seedNode(TX_BATCH_3, { type: 'INTERNAL_TRANSFER', categoryId: '' })]);
+  .concat([
+    seedNode(TX_BATCH_3, { type: 'INTERNAL_TRANSFER', categoryId: '' }),
+    seedNode(TX_BATCH_4, { type: 'INCOME', categoryId: '' }),
+  ]);
 
 /**
  * A row as a MUTATION returns it: the mutations' TransactionFields fragment
@@ -456,11 +461,14 @@ const CASES: Record<string, Case> = {
         },
         // transfer → income: clears one derived flag and sets the other.
         { ...routing, transaction_id: TX_BATCH_3, type: 'INCOME' as TransactionType },
+        // income → regular: the income flag's clear direction.
+        { ...routing, transaction_id: TX_BATCH_4, type: 'REGULAR' as TransactionType },
       ],
     },
     verify: (rows) => {
       expect(rows.get(TX_BATCH_1)).toMatchObject({ type: 'INTERNAL_TRANSFER', category_id: null });
       expect(rows.get(TX_BATCH_3)).toMatchObject({ type: 'INCOME', category_id: null });
+      expect(rows.get(TX_BATCH_4)).toMatchObject({ type: 'REGULAR' });
       expect(rows.get(TX_BATCH_2)).toMatchObject({
         category_id: CAT_NEW,
         user_reviewed: false,
@@ -508,6 +516,9 @@ const CASES: Record<string, Case> = {
     },
   },
 
+  // Sets a type, not a category: the two cannot be combined in one bulk edit,
+  // and the type path is the one the local-mirror table needs. The bulk
+  // category patch stays gated by tests/tools/bulk-edit-transactions.test.ts.
   bulk_edit_transactions: {
     mocks: {
       BulkEditTransactions: {
@@ -642,14 +653,15 @@ const MIRRORED_FIELDS: Record<string, string> = {
 /**
  * Per tool: the rows whose local copy must mirror the server, or the rows the
  * write must remove from the local cache. create_transaction inserts nothing
- * locally by design (the next refresh picks the row up), so it has neither.
+ * locally by design (the next refresh picks the row up), which its `removed`
+ * entry for the created id pins.
  */
 const LOCAL_MIRROR: Record<string, { mirrored: string[]; removed: string[] }> = {
   create_transaction: { mirrored: [], removed: [TX_CREATED] },
   split_transaction: { mirrored: [], removed: [TX_SPLIT_PARENT, TX_CHILD_1, TX_CHILD_2] },
   delete_transaction: { mirrored: [], removed: [TX_DELETE] },
   update_transaction: { mirrored: [TX_UPDATE], removed: [] },
-  update_transactions: { mirrored: [TX_BATCH_1, TX_BATCH_2, TX_BATCH_3], removed: [] },
+  update_transactions: { mirrored: [TX_BATCH_1, TX_BATCH_2, TX_BATCH_3, TX_BATCH_4], removed: [] },
   add_transaction_to_recurring: { mirrored: [TX_RECURRING], removed: [] },
   review_transactions: { mirrored: [TX_REVIEW], removed: [] },
   bulk_edit_transactions: { mirrored: [TX_BULK_1, TX_BULK_2], removed: [] },

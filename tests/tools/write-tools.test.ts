@@ -1060,6 +1060,24 @@ describe('addTransactionToRecurring', () => {
     expect(cached?.recurring_id).toBe('rec-server');
   });
 
+  test('the type-derived flags follow the returned row', async () => {
+    const client = createMockGraphQLClient({
+      AddTransactionToRecurring: {
+        addTransactionToRecurring: {
+          transaction: { ...linkedTx, type: 'INCOME', categoryId: '' },
+        },
+      },
+    });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await tools.addTransactionToRecurring(validArgs);
+
+    const cached = (
+      (mockDb as any)._transactions as Array<{ transaction_id: string; income?: boolean }>
+    ).find((t) => t.transaction_id === 'tx1');
+    expect(cached?.income).toBe(true);
+  });
+
   test("an empty returned category (Copilot's 'no category') is patched in", async () => {
     const client = createMockGraphQLClient({
       AddTransactionToRecurring: {
@@ -1708,3 +1726,65 @@ interface SplitTransactionInputShape {
   amount: number;
   categoryId: string;
 }
+
+describe('update_transaction local patch follows the server row (#864 review)', () => {
+  const ACCT = 'Ac1sD4fG7hJ0kL3zX6cV';
+  const ITEM = 'It2dF5gH8jK1lZ4xC7vB';
+  const TXN = 'Tx3fG6hJ9kL2zX5cV8bN';
+  const CAT_REQ = 'Ca4gH7jK0lZ3xC6vB9nM';
+  const CAT_SRV = 'Cb5hJ8kL1zX4cV7bN0mQ';
+
+  function setupEdit(returned: Partial<CreatedTransaction>) {
+    const db = new CopilotDatabase('/nonexistent');
+    (db as any).dbPath = '/fake';
+    (db as any)._transactions = [
+      { transaction_id: TXN, account_id: ACCT, item_id: ITEM, category_id: 'old', amount: 1 },
+    ];
+    (db as any)._userCategories = [
+      { category_id: CAT_REQ, name: 'Req', excluded: false },
+      { category_id: CAT_SRV, name: 'Srv', excluded: false },
+    ];
+    db._markLoadedForTesting();
+    const client = createMockGraphQLClient({
+      EditTransaction: {
+        editTransaction: {
+          transaction: {
+            id: TXN,
+            accountId: ACCT,
+            itemId: ITEM,
+            name: 'n',
+            date: '2026-04-01',
+            amount: 1,
+            categoryId: CAT_REQ,
+            type: 'REGULAR',
+            isPending: false,
+            isReviewed: false,
+            createdAt: 1,
+            recurringId: null,
+            userNotes: null,
+            tipAmount: null,
+            suggestedCategoryIds: [],
+            tags: [],
+            goal: null,
+            ...returned,
+          } as CreatedTransaction,
+        },
+      },
+    });
+    const t = new CopilotMoneyTools(db, client);
+    const local = () => ((db as any)._transactions as Array<Record<string, unknown>>)[0]!;
+    return { t, local };
+  }
+
+  test("the server's category wins over the requested one", async () => {
+    const { t, local } = setupEdit({ categoryId: CAT_SRV });
+    await t.updateTransaction({ transaction_id: TXN, category_id: CAT_REQ });
+    expect(local().category_id).toBe(CAT_SRV);
+  });
+
+  test('a drifted type spelling falls back to the requested type for the flags', async () => {
+    const { t, local } = setupEdit({ type: 'income' as never, categoryId: '' });
+    await t.updateTransaction({ transaction_id: TXN, type: 'INCOME' });
+    expect(local()).toMatchObject({ income: true, internal_transfer: false });
+  });
+});
