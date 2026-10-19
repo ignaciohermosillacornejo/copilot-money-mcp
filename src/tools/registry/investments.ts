@@ -112,7 +112,10 @@ export const getHoldingsTool = defineTool({
       'Joins data from account holdings, securities, and optionally historical snapshots. ' +
       'Filter by account or ticker symbol. Note: cost_basis may be unavailable for ' +
       'cash-equivalent positions. Positions on hidden and merged accounts are EXCLUDED by ' +
-      'default, matching get_accounts — pass include_hidden: true for them.',
+      'default, matching get_accounts — pass include_hidden: true for them. ' +
+      'Do NOT sum holdings as portfolio value: unvested stock-plan shares are reported as ' +
+      'holdings, so the sum can far exceed the investment balance; with --live-reads use ' +
+      'get_investment_balance_live for the total.',
     inputSchema: {
       type: 'object',
       properties: {

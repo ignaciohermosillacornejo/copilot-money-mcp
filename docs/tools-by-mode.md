@@ -6,7 +6,7 @@ This server exposes different tools depending on which CLI flags you enable. The
 
 | Tool | Status | Notes |
 |---|---|---|
-| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). Rows are terse by default as of v3.0.0 (the preset names 10 fields; a cache row carries the ones it has, so a row that is categorized, not pending and not a transfer is 8 — an uncategorized one is 7, and the CHANGELOG's measured 9 is a real 100-row page whose rows carry a ninth key — the arithmetic forces one of `pending` / `internal_transfer`, and does not say which); `fields: ["all"]` returns the full document (~30 fields on a real row; the schema declares 64) and `fields: ["default", "tag_ids"]` adds named fields. The `compact` boolean was removed |
+| `get_transactions` | ✅ | Query transactions with filters (date range, category, merchant, amount, account, text search, etc.). Rows are terse by default as of v3.0.0 (the preset names 10 fields; a cache row carries the ones it has, plus the derived `excluded` and, since #825, `internal_transfer` (defaulted to `false`), so a row that is categorized and not pending is 9 and an uncategorized one is 8; the CHANGELOG's measured 9 predates the `internal_transfer` default); `fields: ["all"]` returns the full document (~30 fields on a real row; the schema declares 64) and `fields: ["default", "tag_ids"]` adds named fields. The `compact` boolean was removed |
 | `get_accounts` | ✅ | List accounts with balances; filter by type. `name` is your Copilot **nickname** when you have set one, else the provider's label — it is user-editable and can change under you, so key on `account_id`, never on `name` (#660/#663). Rows are terse by default (`fields: [...]` opts into `holdings`, `official_name`, `logo`, etc.) |
 | `get_categories` | ✅ | Category hierarchy with spending totals |
 | `get_budgets` | ✅ | Budgets vs. spending |
@@ -27,7 +27,7 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 
 | Tool | Replaces? | Status | Notes |
 |---|---|---|---|
-| `get_transactions_live` | `get_transactions` | ✅ | Windowed cache; paginates per month. Terse by default too, same 10 preset names — but live emits both booleans unconditionally, where a cache row carries only the document fields it has, so a categorized cache row that is neither pending nor a transfer is 8 keys and its live counterpart is 10. An uncategorized live row is 9 on the wire: `categoryId` is nullable, so `category_name` maps to `undefined` and `JSON.stringify` drops the key |
+| `get_transactions_live` | `get_transactions` | ✅ | Windowed cache; paginates per month. Terse by default too, same 10 preset names — but live emits `pending` unconditionally, where a cache row carries it only when the document has it, so a categorized cache row that is not pending is 9 keys and its live counterpart is 10 (both modes always emit `excluded` and `internal_transfer`). An uncategorized live row is 9 on the wire: `categoryId` is nullable, so `category_name` maps to `undefined` and `JSON.stringify` drops the key |
 | `get_accounts_live` | `get_accounts` | ✅ | 1h cache. Same naming contract as cache-mode `get_accounts`: `name` is your Copilot **nickname** when set, else the provider's label, and it is user-editable — key on `id` (the live row's identifier field), never on `name`. Rows are terse by default (`fields: [...]` opts into the sync/plumbing fields, `mask`, `color`, `limit`) |
 | `get_categories_live` | `get_categories` | ✅ | 24h cache; reflects rollovers per user setting. Terse by default as of v3.0.0: rows are `{id, parentId, name, colorName, isExcluded, budget_amount}`. The embedded `budget` object comes back with `fields: ["default", "budget"]`; `templateId`, `icon`, `isRolloverDisabled` and `canBeDeleted` are separate top-level fields and each has to be named too (or take `fields: ["all"]`) |
 | `get_budgets_live` | `get_budgets` | ✅ | Projection over `categories_live` data |
@@ -74,3 +74,18 @@ Enabling `--write` automatically turns on `--live-reads`, so the tools below are
 | Stock-split data | ⚠️ Available via `get_investment_splits` for currently-held securities that have split (one row per `(security_id, effective_date)` with adjustment multiplier). Empty for securities that never split. Securities a user no longer holds eventually fall out of the cache. There is no GraphQL endpoint for splits — this is the only way to get them, and only for held securities. |
 | Long time-series responses | ⚠️ The MCP single-tool-result token cap means very long histories (e.g., multi-year daily prices or balances) are capped at 500 rows by default. Use `max_rows` / `offset` parameters, or narrow `time_frame` to fetch more. **`get_investment_balance_live` is the exception**: its series is capped by `history_limit` (default 30, `0` = unlimited) rather than `max_rows`. |
 | 🔒 Browser authentication | Both `--live-reads` and `--write` require a logged-in browser session against `app.copilot.money` (the server uses the same Firebase refresh-token flow as the web app). Reads in default mode require nothing. |
+
+## ↔️ Cache vs live: same concept, different value
+
+Where the two modes return different values for the same thing on the same transaction. Most of these come from the data each mode reads (the local Firestore cache vs Copilot's GraphQL API), not from this server.
+
+| Topic | Cache mode | Live mode |
+|---|---|---|
+| Transaction name casing | Upper-cased: bank names, and also your renames (a rename typed in mixed case is stored upper-cased) | The case the app displays |
+| Name shown in the app | The transaction's own name | The transaction's own name. The web app shows a recurring-linked row under the **recurring's** name instead, so match on `recurring_id` when comparing with what you see |
+| Note field | `user_note` | `user_notes`. Either spelling works in `fields` in either mode, with no `_field_warning`; each mode returns its own name |
+| A note you cleared | Absent | `""`. A note never set is `null` |
+| Category of an uncategorized income or transfer row | Absent, or `""` where the document still carried an old category (#824) | `null` (the API sends `""`; normalised) |
+| `internal_transfer` on a default row | Always present, `false` unless the document marks a transfer | Always present (`type === "INTERNAL_TRANSFER"`) |
+| `excluded` on a row the user excluded individually | `true`, and dropped by `exclude_excluded` | `false`, and returned: the API does not expose the per-transaction flag. Category-level exclusion agrees in both modes |
+| Cash holding ticker | `CUR:USD` | `USD`. A `ticker_symbol` filter of either spelling matches the cash sleeve in both modes |

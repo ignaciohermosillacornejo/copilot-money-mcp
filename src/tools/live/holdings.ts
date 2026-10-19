@@ -37,6 +37,7 @@ import { fetchAccounts } from '../../core/graphql/queries/accounts.js';
 import { isVisibleAccountNode } from '../../models/account.js';
 import { computeTotalReturnPercent, roundAmount } from '../../utils/round.js';
 import { clampMaxRows, clampOffset } from '../../utils/pagination.js';
+import { tickerMatches } from '../../utils/ticker.js';
 import type { ToolSchema } from '../tools.js';
 
 const DEFAULT_LIMIT = 100;
@@ -216,7 +217,7 @@ export class LiveHoldingsTools {
 
     const limit = clampMaxRows(args.limit, { hardMax: MAX_LIMIT, defaultValue: DEFAULT_LIMIT });
     const offset = clampOffset(args.offset);
-    const tickerLower = args.ticker_symbol?.toLowerCase();
+    const tickerFilter = args.ticker_symbol;
 
     // Account visibility, the live half of #683. get_accounts_live filters
     // isUserHidden/isUserClosed; this tool loaded holdings and filtered
@@ -239,7 +240,7 @@ export class LiveHoldingsTools {
     const filtered = cached.filter((h) => {
       if (hiddenAccountIds?.has(h.accountId)) return false;
       if (args.account_id && h.accountId !== args.account_id) return false;
-      if (tickerLower && h.security.symbol.toLowerCase() !== tickerLower) return false;
+      if (tickerFilter && !tickerMatches(h.security.symbol, tickerFilter)) return false;
       return true;
     });
 
@@ -312,7 +313,10 @@ export function createLiveHoldingsToolSchema(): ToolSchema {
       'use cache-mode `get_holdings` with `include_history: true` — history ' +
       'is not available on the live query. Positions on hidden and closed ' +
       'accounts are EXCLUDED by default, matching get_accounts_live — pass ' +
-      'include_hidden: true for them. Available when --live-reads is on.',
+      'include_hidden: true for them. ' +
+      'Do NOT sum holdings as portfolio value: Copilot reports unvested stock-plan shares as holdings, so the sum can far exceed the investment balance; use ' +
+      'get_investment_balance_live for the total (it matches the web, and unlike this tool it includes hidden accounts). ' +
+      'Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -324,7 +328,9 @@ export function createLiveHoldingsToolSchema(): ToolSchema {
         },
         ticker_symbol: {
           type: 'string',
-          description: "Filter — case-insensitive match on the security's ticker symbol.",
+          description:
+            "Filter — case-insensitive match on the security's ticker symbol. The cash sleeve " +
+            'is USD here and CUR:USD in cache mode; either spelling matches it in both modes.',
         },
         include_hidden: {
           type: 'boolean',

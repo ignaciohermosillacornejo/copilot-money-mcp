@@ -65,7 +65,11 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   // bigger on real documents, which carry the Plaid metadata and intelligence
   // arrays this fixture does not — see the CHANGELOG for the real-cache
   // measurement.
-  get_transactions: 1_080,
+  //
+  // Raised 1_080 -> 1_220 by #825: `internal_transfer` is now defaulted to
+  // false on every cache row, as live mode always emits it, so the two modes'
+  // default rows carry the same keys. ~25 chars a row; measured 1_196.
+  get_transactions: 1_220,
   get_cache_info: 870,
   refresh_database: 245,
   // 795 -> 635 by #597 Tier 2: rows are terse by default (DEFAULT_ACCOUNT_FIELDS
@@ -178,7 +182,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   //
   // Combined after #858 was rebased onto merged #854: both texts on one schema,
   // measured 7_065 (7_117 at the series tip, after #858 round 6), so 7_230.
-  get_transactions: 7_230,
+  //
+  // IN FORCE: 7_390, raised from 7_230 by #860, measured 7_243 (~2.0%). #860
+  // adds one sentence to the shared `fields` fragment (user_note and user_notes
+  // both work in either mode, #825) and the "category must still be a real id"
+  // clause stays from #858. Re-measured on the rebased tip, not carried.
+  get_transactions: 7_390,
   get_cache_info: 640,
   refresh_database: 485,
   // Raised from 1_315 by #597 Tier 2: adds the `fields` param (shared
@@ -250,7 +259,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // caller sees their holdings total move and has nothing to read. Measured
   // 1_456 against 1_515 — 3.9% headroom. Schema cost is paid once per
   // session; a wrong portfolio total is paid every time someone asks.
-  get_holdings: 1_515,
+  // Raised 1_515 -> 1_700 by #825: one sentence saying not to sum holdings as
+  // portfolio value (unvested shares count as holdings) and where the total
+  // comes from, and the `ticker_symbol` param states the CUR:USD / USD rule and
+  // that the match is case-insensitive, as the live tool's does.
+  // IN FORCE: 1_895, raised from 1_515 by #860 (#825), measured 1_856 (~2.1%).
+  get_holdings: 1_895,
   get_balance_history: 1_395,
   get_goal_history: 1_040,
   // Live (--live-reads) tools
@@ -284,7 +298,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // spend recipe instead, and `category` states its rules (exact id, parent
   // includes children, unknown id errors). Measured 6_073 on its own; 6_865
   // combined with #843's text after the rebase, so 7_020 (~2.3%).
-  get_transactions_live: 7_020,
+  //
+  // IN FORCE: 7_640, raised from 7_020 by #860, measured 7_491 (~2.0%). #860
+  // adds the line that the web shows a recurring-linked row under the
+  // recurring's name (#848), the individually-excluded note on
+  // exclude_excluded (#848), the shared alias sentence, and the
+  // transaction_id "category must still be a real id" clause (#858 round 7).
+  get_transactions_live: 7_640,
   // Raised from 570 by #597 Tier 2: adds the `fields` param (shared verbatim
   // with get_accounts — see ACCOUNT_FIELDS_PARAM_SCHEMA) plus a description
   // sentence naming the excluded sync/plumbing fields (`hasHistoricalUpdates`,
@@ -299,7 +319,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // "`name` is editable, key on the id" contract. Same sentence, naming `id`
   // rather than `account_id`, because that is this row's key. Measured 1_814
   // (~10% headroom).
-  get_accounts_live: 1_995,
+  // IN FORCE: 2_265, raised from 1_995 by #860 (#825), measured 2_221 (~2.0%):
+  // hidden accounts are in the investment total but not in this list;
+  // `balance` lags the web's intraday repricing; and `liveBalance` is a flag,
+  // not an amount. Each was misread in the v3.0 test pass.
+  get_accounts_live: 2_265,
   // Raised from 1_555 by #597 Tier 1: adds the `fields` param (excludes the
   // embedded `budget` object — {current, histories}, ~62% of a row and a
   // duplicate of get_budgets_live — from the default row, replacing it with
@@ -316,7 +340,7 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_tags_live: 530,
   get_budgets_live: 905,
   // Raised from 755 by #606: adds the `fields` param (excludes `rule` — the
-  // server-side matcher config — and `payments` — the full payment history,
+  // server-side matcher config — and `payments` — the next scheduled payment,
   // which duplicates get_transactions_live — together ~45% of a row, plus
   // `icon` since `emoji` already carries the display character) plus a
   // description sentence naming the excluded tokens, per the #597
@@ -332,7 +356,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // Raised 1_890 -> 2_030 by #844: the description states the ~14-day horizon
   // one read observed (unverified, parity row REC-07), because "what bills are
   // left this month" otherwise gets a silently truncated set. Measured 1_978.
-  get_upcoming_recurrings_live: 2_030,
+  //
+  // IN FORCE: 2_080, raised from 2_030 by #860, measured 2_039 (~2.0%): the
+  // `_category_warning` sentence and the `payments` correction (it holds only
+  // the next payment, #847/#856).
+  get_upcoming_recurrings_live: 2_080,
   // Lowered 1_235 -> 1_135 by #823, whose rewritten description is shorter.
   // Measured 1_041 after the PR's last description edit (~9% headroom).
   get_monthly_spend_live: 1_135,
@@ -346,7 +374,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // description note landed later in the same PR, which is the shape the
   // ledger header now has a rule about: a present-tense measurement in a
   // comment goes false on the next commit and nothing re-derives it.
-  get_holdings_live: 1_615,
+  // IN FORCE: 2_030, raised from 1_615 by #860 (#825), measured 1_987 (~2.2%):
+  // the do-not-sum-holdings sentence (as on get_holdings) and the ticker note
+  // on `ticker_symbol` (CUR:USD and USD both match the cash sleeve; CUR:USD
+  // matches only cash).
+  get_holdings_live: 2_030,
   get_balance_history_live: 1_800,
   get_investment_prices_live: 1_835,
   get_investment_allocation_live: 810,
@@ -371,7 +403,10 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // revision of this comment pinned the ceiling at 1_615 and argued a tighter
   // bound was a stronger ratchet; that left 0.4% headroom, which is a trap
   // for the next legitimate wording fix rather than a ratchet.
-  get_investment_balance_live: 1_770,
+  // IN FORCE: 1_855, raised from 1_770 by #860 (#825), measured 1_817 (~2.1%):
+  // says the total includes hidden accounts and is the one to use instead of
+  // summing holdings.
+  get_investment_balance_live: 1_855,
   refresh_cache: 1_335,
   // Write (--write) tools
   create_transaction: 1_980,
@@ -480,7 +515,17 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // Combined after #858 was rebased onto merged #854: measured 81_067 (81_120 at
 // the series tip, after #858 round 6), so 81_700
 // (~0.8%), still deliberately tight.
-const SCHEMA_TOTAL_BUDGET = 81_700;
+//
+// IN FORCE: 84_280, raised from 81_700 by #860, measured 83_447 (~1.0%). #860
+// is read-side description text across nine schemas (#825/#848): holdings vs
+// balance and hidden accounts on the holdings, accounts and investment-balance
+// tools; intraday repricing; the individually-excluded gap and recurring names
+// on get_transactions_live; `payments` holding only the next payment and the
+// `_category_warning` line on both recurring tools; the alias sentence in the
+// shared fields fragment; and the transaction_id category clause. Re-measured
+// on the rebased tip; earlier figures in this file's history predate the
+// rebase onto #854 and #858 and are not current.
+const SCHEMA_TOTAL_BUDGET = 84_280;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

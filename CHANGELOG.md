@@ -126,6 +126,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`get_transactions_live` no longer tells callers to sum `amount` for spending** ([#844](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/844)). Following it literally netted paychecks against everything: for one real month, about 1% of actual spending. The description now gives the app's own recipe: per category, the net sum over REGULAR rows (refunds net within the category), skipping uncategorized and excluded rows, plus this month's still-unpaid recurrings for the current month. `get_monthly_spend_live` now says its series also leaves out uncategorized rows and points at that recipe instead of "sum the positive amounts". It also records that the latest row's `comparison_amount` matched the Dashboard's "$N under" figure in one measurement. `get_upcoming_recurrings_live` states the ~14-day horizon one read observed, marked unverified (parity row REC-07). Both measurements are in the conformance ledger.
 
+- **Read-side parity and description fixes from the v3.0 and 2026-10-18 release test passes** ([#848](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/848) items 1, 4, 5; [#825](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/825) read-side items).
+  - **`get_recurring_live` and `get_upcoming_recurrings_live` name categories on a cold cache.** Both returned `category_name: null` on every row until some other tool had loaded categories. They now load categories themselves, as `get_transactions_live` does.
+  - **Cache and live default rows agree on keys and values.** A cache row always carries `internal_transfer` (default `false`). A live uncategorized income or transfer row reports `category_id: null` instead of `""`. `fields` accepts `user_note` and `user_notes` in both modes without a `_field_warning`, and each mode returns its own name. A `ticker_symbol` filter of `USD` or `CUR:USD` matches the cash sleeve in both modes. The differences that remain (name casing, a cleared note reading `""` in live mode, an individually excluded row) are tabled in `docs/tools-by-mode.md`.
+  - **Descriptions.**
+    - Holdings can exceed the account balance (unvested shares), so use `get_investment_balance_live` for the total.
+    - Hidden accounts are in that total but excluded by default from holdings and accounts.
+    - A brokerage account's `balance` can differ from the web's intraday figure, and `liveBalance` is a flag, not an amount.
+    - The web shows a recurring-linked transaction under the recurring's name.
+    - `exclude_excluded` cannot see an individually excluded transaction in live mode. Now observed on a real row, so the ledger entry is upgraded to verified-once.
+    - A live recurring's `payments` holds only the next scheduled payment, not a history.
+
 ## [2.2.2] - 2026-06-14
 
 ### Fixed

@@ -179,6 +179,18 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(result.holdings[0]?.ticker_symbol).toBe('ACME');
   });
 
+  // #825: the cache spells the cash sleeve CUR:USD; that spelling must find
+  // live mode's USD row too.
+  test('ticker_symbol CUR:USD matches the USD cash sleeve', async () => {
+    const client = makeClient([equityHolding, mutualFundHolding, cashHolding]);
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    const result = await tools.getHoldings({ ticker_symbol: 'CUR:USD' });
+
+    expect(result.count).toBe(1);
+    expect(result.holdings[0]?.ticker_symbol).toBe('USD');
+  });
+
   test('pagination: limit + offset produce correct count / total_count / has_more', async () => {
     const client = makeClient([equityHolding, mutualFundHolding, cashHolding]);
     const tools = new LiveHoldingsTools(makeLive(client));

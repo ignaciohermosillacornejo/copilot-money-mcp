@@ -36,7 +36,7 @@ import { getMonthRange, monthsCovered } from '../utils/date.js';
 import { pLimit } from '../utils/concurrency.js';
 import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache/index.js';
 import type { AccountNode } from './graphql/queries/accounts.js';
-import type { CategoryNode } from './graphql/queries/categories.js';
+import { fetchCategories, type CategoryNode } from './graphql/queries/categories.js';
 import type { TagNode } from './graphql/queries/tags.js';
 import type { RecurringNode } from './graphql/queries/recurrings.js';
 import type { NetworthHistoryNode } from './graphql/queries/networth.js';
@@ -571,14 +571,21 @@ export class LiveCopilotDatabase {
   }
 
   /**
-   * Cold-safe category-id → name lookup map. Returns an empty Map when
-   * the categories cache is cold (no fetch is triggered). Used by tools
-   * that want to enrich rows with category names but don't need to force
-   * a category fetch for that enrichment.
+   * Category-id → name map, loading the categories cache when it is cold —
+   * with the same rollovers-aware fetch every other consumer uses, so whoever
+   * warms the cache warms it with the same payload.
+   *
+   * This replaced a peek-only lookup (#848): get_recurring_live and
+   * get_upcoming_recurrings_live returned `category_name: null` on every row
+   * of a cold call and a real name on the next one, so the same question
+   * answered differently depending on which tool had run first in the
+   * session. get_transactions_live always loaded; now all three do.
    */
-  peekCategoryNameMap(): Map<string, string> {
-    const rows = this.categoriesCache.peek();
-    if (rows === undefined) return new Map();
+  async loadCategoryNameMap(): Promise<Map<string, string>> {
+    const { rows } = await this.categoriesCache.read(async () => {
+      const rollovers = await this.resolveRolloversFlag();
+      return fetchCategories(this.graphql, { rollovers });
+    });
     const map = new Map<string, string>();
     for (const cat of rows) {
       if (cat.id) map.set(cat.id, cat.name);

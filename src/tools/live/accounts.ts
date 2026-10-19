@@ -230,7 +230,12 @@ export function createLiveAccountsToolSchema(): ToolSchema {
       '— which describe Plaid sync state rather than the account, plus `mask` and `color` ' +
       '(display detail) and `limit` (credit-line detail; charge-card 0 is normalized to null ' +
       'either way, before or after opting in). Request any of them with ' +
-      'fields: ["default", "hasHistoricalUpdates"], or "all" / "*" for full rows.',
+      'fields: ["default", "hasHistoricalUpdates"], or "all" / "*" for full rows. ' +
+      "Hidden accounts are excluded by default, but Copilot's investment total " +
+      '(get_investment_balance_live) includes them. `balance` is the last synced value: the ' +
+      'web reprices brokerage accounts intraday, so a brokerage row can differ from the web ' +
+      'while get_investment_balance_live.current matches its total. `liveBalance` is a ' +
+      'boolean flag, not an amount, and can be true on a row whose hasLiveBalance is false.',
     inputSchema: {
       type: 'object' as const,
       properties: {

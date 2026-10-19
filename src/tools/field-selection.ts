@@ -196,8 +196,9 @@ export const CATEGORY_LIVE_FIELDS_PARAM_SCHEMA = {
  * Default fields for live recurring rows (#597 Tier 1).
  *
  * Excludes `rule` (the server-side matcher config: min/max amount, match
- * strings — operational detail no caller reasons about) and `payments` (the
- * full payment history, which duplicates what get_transactions returns).
+ * strings — operational detail no caller reasons about) and `payments` (only
+ * the NEXT scheduled payment, not a history — parity run 2026-10-18, #847;
+ * charge history comes from get_transactions_live by recurring_id).
  * Together they are ~45% of a row. `icon` goes too: `emoji` already carries
  * the display character without the union wrapper.
  */
@@ -246,8 +247,9 @@ export const RECURRING_FIELDS_PARAM_SCHEMA = {
     'Return only these fields per recurring row. Default when omitted: id, name, state, ' +
     'frequency, nextPaymentAmount, nextPaymentDate, categoryId, category_name, emoji. ' +
     'EXCLUDED by default because together they are roughly half of a full row: `rule` ' +
-    "(Copilot's server-side matcher config) and `payments` (full payment history — the same " +
-    'charges are queryable via get_transactions). Request them with ' +
+    "(Copilot's server-side matcher config) and `payments` (only the NEXT scheduled payment, " +
+    'not a history; for past charges use get_transactions_live and match recurring_id). ' +
+    'Request them with ' +
     'fields: ["default", "rule", "payments"], or use "all" / "*" for full rows. ' +
     'Unknown names are omitted and reported via _field_warning.',
 } as const;
@@ -441,6 +443,32 @@ export function expandFieldSelection(
     );
   }
   return expanded;
+}
+
+/**
+ * The transaction note is `user_note` on a cache row and `user_notes` on a live
+ * row (#825). Each mode accepts the other's spelling in `fields`, without a
+ * `_field_warning`, and returns the field under its own name, so a caller can
+ * write one `fields` list that works in both modes.
+ */
+export const CACHE_TRANSACTION_FIELD_ALIASES: Readonly<Record<string, string>> = {
+  user_notes: 'user_note',
+};
+export const LIVE_TRANSACTION_FIELD_ALIASES: Readonly<Record<string, string>> = {
+  user_note: 'user_notes',
+};
+
+/** Rewrite aliased names in a `fields` list to the mode's own names. */
+export function applyFieldAliases(
+  fields: string[] | undefined,
+  aliases: Readonly<Record<string, string>>
+): string[] | undefined {
+  if (!Array.isArray(fields)) return fields;
+  return fields.map((f) =>
+    typeof f === 'string' && Object.prototype.hasOwnProperty.call(aliases, f)
+      ? (aliases[f] ?? f)
+      : f
+  );
 }
 
 /** Options for {@link projectRows}. */

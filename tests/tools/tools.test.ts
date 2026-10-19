@@ -1216,9 +1216,9 @@ describe('CopilotMoneyTools', () => {
       expect(result.transactions[0]?.excluded).toBe(true);
     });
 
-    test('an UNCATEGORIZED cache row is 7 keys on the wire', async () => {
+    test('an UNCATEGORIZED cache row is 8 keys on the wire', async () => {
       // 'a sparse cache row omits the preset fields the document lacks' gives
-      // its fixture a category deliberately, so its 8 holds. Named by title
+      // its fixture a category deliberately, so its 9 holds. Named by title
       // rather than by direction — the next insertion between them moves
       // whichever word you pick. This is the third condition on that number,
       // and the guide framed the dropped `category_name` as live mode's
@@ -1228,7 +1228,7 @@ describe('CopilotMoneyTools', () => {
       // reason; live merely starts from 10.
       //
       // Asserted after a JSON round-trip for that reason — `Object.keys()` off
-      // the object is 8 here and would pin the wrong thing.
+      // the object is 9 here and would pin the wrong thing.
       (db as any)._userCategories = [{ category_id: 'groceries', name: 'Groceries', order: 0 }];
       (db as any)._transactions = [
         {
@@ -1250,11 +1250,13 @@ describe('CopilotMoneyTools', () => {
         string,
         unknown
       >;
-      expect(Object.keys(onTheWire)).toHaveLength(7);
+      expect(Object.keys(onTheWire)).toHaveLength(8);
       expect(onTheWire).not.toHaveProperty('category_name');
-      // ...and the derived key is still there, because a derivation always has
-      // a value — that is what separates it from the dropped ones.
+      // ...and the derived keys are still there, because a derivation always has
+      // a value — that is what separates them from the dropped ones. Since #825
+      // internal_transfer is one of them (defaulted to false, as live emits it).
       expect(onTheWire.excluded).toBe(false);
+      expect(onTheWire.internal_transfer).toBe(false);
     });
 
     test('the transaction_id path enriches identically to the windowed one', async () => {
@@ -1332,10 +1334,11 @@ describe('CopilotMoneyTools', () => {
       });
 
       const keys = Object.keys(result.transactions[0]!).sort();
-      expect(keys).toEqual(
-        CACHE_PRESET_NAMES.filter((n) => n !== 'pending' && n !== 'internal_transfer').sort()
-      );
-      expect(keys).toHaveLength(8);
+      // #825: internal_transfer is now defaulted (false) like excluded, so only
+      // `pending` — a document field with no derivation — is missing.
+      expect(keys).toEqual(CACHE_PRESET_NAMES.filter((n) => n !== 'pending').sort());
+      expect(keys).toHaveLength(9);
+      expect(result.transactions[0]!.internal_transfer).toBe(false);
     });
 
     test('a TRANSFER-CATEGORY row without the raw flag reports internal_transfer falsy', async () => {
@@ -3823,6 +3826,17 @@ describe('getHoldings', () => {
     expect(result.holdings[0].average_cost).toBeUndefined();
     expect(result.holdings[0].total_return).toBeUndefined();
     expect(result.holdings[0].total_return_percent).toBeUndefined();
+  });
+
+  // #825: live mode spells the cash sleeve USD and the cache CUR:USD (this
+  // fixture uses USD); either spelling must select it in either mode.
+  test('ticker_symbol CUR:USD and USD select the same cash holding', async () => {
+    const plain = await tools.getHoldings({ ticker_symbol: 'USD' });
+    const prefixed = await tools.getHoldings({ ticker_symbol: 'cur:usd' });
+    expect(plain.count).toBeGreaterThan(0);
+    expect(prefixed.holdings.map((h) => h.ticker_symbol)).toEqual(
+      plain.holdings.map((h) => h.ticker_symbol)
+    );
   });
 
   test('ticker_symbol filter is case-insensitive', async () => {

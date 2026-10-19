@@ -445,7 +445,7 @@ const CASES: Record<string, Case> = {
       ],
     },
     verify: (rows) => {
-      expect(rows.get(TX_BATCH_1)).toMatchObject({ type: 'INCOME', category_id: '' });
+      expect(rows.get(TX_BATCH_1)).toMatchObject({ type: 'INCOME', category_id: null });
       expect(rows.get(TX_BATCH_2)).toMatchObject({
         category_id: CAT_NEW,
         user_reviewed: false,

@@ -16,11 +16,14 @@ import {
 import { READ_TOOL_DEFS, WRITE_TOOL_DEFS } from './registry/index.js';
 import { normalizeMerchantName } from '../utils/merchant.js';
 import { resolveCategoryFilter } from './category-filter.js';
+import { tickerMatches } from '../utils/ticker.js';
 import {
   DEFAULT_TRANSACTION_FIELDS,
   DEFAULT_INVESTMENT_PRICE_FIELDS,
   DEFAULT_RECURRING_CACHE_FIELDS,
   DEFAULT_ACCOUNT_FIELDS,
+  CACHE_TRANSACTION_FIELD_ALIASES,
+  applyFieldAliases,
   projectRows,
 } from './field-selection.js';
 import type { LiveCopilotDatabase } from '../core/live-database.js';
@@ -308,7 +311,7 @@ function projectTransactionFields<T extends Record<string, unknown>>(
   txns: T[],
   fields: string[] | undefined
 ): { rows: T[]; warning?: string } {
-  return projectRows(txns, fields, {
+  return projectRows(txns, applyFieldAliases(fields, CACHE_TRANSACTION_FIELD_ALIASES), {
     preset: DEFAULT_TRANSACTION_FIELDS,
     knownFields: TRANSACTION_KNOWN_FIELDS,
     validFieldsHint:
@@ -826,6 +829,7 @@ export class CopilotMoneyTools {
         category_name?: string;
         normalized_merchant: string;
         excluded: boolean;
+        internal_transfer: boolean;
       }
     >
   > {
@@ -860,6 +864,10 @@ export class CopilotMoneyTools {
         excluded:
           txn.excluded === true ||
           (txn.category_id ? excludedCategoryIds.has(txn.category_id) : false),
+        // Defaulted to false when the document has no flag (#825), so a default
+        // row always carries it, as a live row does. Still the raw flag — see
+        // the comment below for why it is not the exclude_transfers union.
+        internal_transfer: txn.internal_transfer === true,
         // `internal_transfer` deliberately does NOT get the same treatment,
         // and the asymmetry is the point rather than an oversight. The rule is
         // "the field means the same thing in both modes", not "the field
@@ -2840,7 +2848,7 @@ export class CopilotMoneyTools {
     if (ticker_symbol) {
       tickerSecurityIds = new Set<string>();
       for (const [id, sec] of securityMap) {
-        if (sec.ticker_symbol?.toLowerCase() === ticker_symbol.toLowerCase()) {
+        if (tickerMatches(sec.ticker_symbol, ticker_symbol)) {
           tickerSecurityIds.add(id);
         }
       }

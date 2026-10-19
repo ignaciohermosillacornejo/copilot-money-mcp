@@ -117,7 +117,7 @@ this corpus actually says, across all 59 entries:
 | Found by | Count | |
 |---|---|---|
 | `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 15 | █████████████ |
-| `live-probe` — a probe or smoke against the real backend | 13 | ████████████ |
+| `live-probe` — a probe or smoke against the real backend | 14 | █████████████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
 | `incidental` — found while working on something else | 8 | ███████ |
 | `user-report` | 8 | ███████ |

@@ -1064,7 +1064,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     surface: 'Transaction.excluded:synthesized',
     kind: 'response-shape',
     oracle: null,
-    class: 'unverified',
+    class: 'verified-once',
     evidence:
       'Probe 2026-09-11: the exclusion spellings `excluded`, `isExcluded`, `userExcluded`, ' +
       '`isUserExcluded` and `excludeFromSpending` all return `Cannot query field "<name>" on ' +
@@ -1089,10 +1089,15 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'cache mode answer "not excluded" for a row live mode called excluded. Deriving the ' +
       'union fixes that, and was verified against that same row (cache now `true`, live ' +
       '`true`). ' +
-      'Still classed unverified, for the half that remains: a transaction excluded ' +
-      'INDIVIDUALLY in the app reads `excluded: true` in cache mode and `false` in live ' +
-      'mode, and no probe has exercised it — 0 of 521 cache rows carried the raw flag, so ' +
-      "the parity run's agreement on that half is trivially false === false, not evidence.",
+      'The half that was unverified until 2026-10-18: a transaction excluded INDIVIDUALLY ' +
+      'in the app reads `excluded: true` in cache mode and `false` in live mode. The ' +
+      '2026-09-11 run could not exercise it (0 of 521 cache rows carried the raw flag). ' +
+      'OBSERVED 2026-10-18 in the release parity re-run (#848 item 5): a real transaction ' +
+      'the web shows as EXCLUDED, in a category that is not excluded, came back ' +
+      '`excluded: false` from get_transactions_live and was NOT filtered by its default ' +
+      'exclude_excluded, exactly as predicted; that row is also one reason a live spend sum ' +
+      "differs from the app's. Upgraded to verified-once on that read. get_transactions_live " +
+      "states the gap in its description and in exclude_excluded's.",
   },
   {
     surface: 'Transaction.parentId:splitChildren',
@@ -1167,6 +1172,18 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedQueryResponseShape('tags'),
   queryOperation('recurrings'),
   gatedQueryResponseShape('recurrings'),
+  {
+    surface: 'RecurringNode.payments:nextPaymentOnly',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      "Parity run 2026-10-18, #847/#856: a live recurring's `payments` array held only the " +
+      'NEXT scheduled payment, not the payment history the descriptions of ' +
+      'get_recurring_live, get_upcoming_recurrings_live and the shared recurring `fields` ' +
+      'parameter claimed. Those now say so and send callers to get_transactions_live, ' +
+      'matched on recurring_id, for past charges. One run; nothing re-checks it.',
+  },
   queryOperation('unpaidUpcomingRecurrings'),
   gatedQueryResponseShape('unpaidUpcomingRecurrings'),
   queryOperation('monthlySpending'),

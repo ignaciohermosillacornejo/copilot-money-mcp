@@ -37,15 +37,36 @@ function mkCat(partial: Partial<CategoryNode> & { id: string; name: string }): C
   };
 }
 
-function mkLiveReturning(rows: UpcomingRecurringNode[]): {
+/**
+ * A client that answers the tool's own query with `rows` and, since #848, the
+ * User + Categories queries a cold call now makes to resolve category names
+ * (`categories`, empty by default). Tests that count round-trips count the
+ * tool's own operation, not those.
+ */
+function mkLiveReturning(
+  rows: UpcomingRecurringNode[],
+  categories: CategoryNode[] = []
+): {
   live: LiveCopilotDatabase;
   client: { query: ReturnType<typeof mock> };
+  ownQueryCount: () => number;
 } {
   const client = {
-    query: mock(() => Promise.resolve({ unpaidUpcomingRecurrings: rows })),
+    query: mock((operation: string) => {
+      if (operation === 'User')
+        return Promise.resolve({ user: { id: 'Us3rQ7mK2nW9vR4xT8sL', budgetingConfig: null } });
+      if (operation === 'Categories')
+        return Promise.resolve({
+          categories: categories.map(({ parentId: _p, ...rest }) => rest),
+        });
+      return Promise.resolve({ unpaidUpcomingRecurrings: rows });
+    }),
   } as unknown as GraphQLClient & { query: ReturnType<typeof mock> };
   const live = new LiveCopilotDatabase(client, FAKE_DB);
-  return { live, client };
+  const ownQueryCount = () =>
+    client.query.mock.calls.filter((c: unknown[]) => c[0] !== 'User' && c[0] !== 'Categories')
+      .length;
+  return { live, client, ownQueryCount };
 }
 
 // A row carrying `rule` AND `payments` — used by the terse-default tests
@@ -87,7 +108,7 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
   });
 
   test('warm call returns _cache_hit=true and does not re-query', async () => {
-    const { live, client } = mkLiveReturning([
+    const { live, ownQueryCount } = mkLiveReturning([
       mkUpcoming({ id: 'r1', name: 'Item', nextPaymentDate: '2026-05-10' }),
     ]);
     const { LiveUpcomingRecurringsTools } =
@@ -98,7 +119,7 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
     const result = await tools.getUpcomingRecurrings({});
 
     expect(result._cache_hit).toBe(true);
-    expect(client.query).toHaveBeenCalledTimes(1);
+    expect(ownQueryCount()).toBe(1);
   });
 
   test('returns empty list and count=0 when nothing is upcoming', async () => {
@@ -151,17 +172,22 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
     expect(item?.category_name).toBe('Utilities');
   });
 
-  test('category_name is null when categoriesCache is cold', async () => {
-    const { live } = mkLiveReturning([
-      mkUpcoming({
-        id: 'r1',
-        name: 'Mystery Sub',
-        nextPaymentAmount: 5,
-        nextPaymentDate: '2026-05-10',
-        categoryId: 'cat-unknown',
-      }),
-    ]);
+  // #848 sibling: same peek-only join as get_recurring_live, same fix.
+  test('a cold categories cache is loaded, so category_name is populated (#848)', async () => {
+    const { live } = mkLiveReturning(
+      [
+        mkUpcoming({
+          id: 'r1',
+          name: 'Cellphone Plan',
+          nextPaymentAmount: 5,
+          nextPaymentDate: '2026-05-10',
+          categoryId: 'Kc4vN8qT2mW6rL9xP3sB',
+        }),
+      ],
+      [mkCat({ id: 'Kc4vN8qT2mW6rL9xP3sB', name: 'Utilities', parentId: null })]
+    );
     // Do NOT pre-warm categoriesCache.
+    expect(live.getCategoriesCache().peek()).toBeUndefined();
 
     const { LiveUpcomingRecurringsTools } =
       await import('../../../src/tools/live/upcoming-recurrings.js');
@@ -169,7 +195,7 @@ describe('LiveUpcomingRecurringsTools.getUpcomingRecurrings', () => {
     const result = await tools.getUpcomingRecurrings({});
 
     const item = result.upcoming.find((r) => r.id === 'r1');
-    expect(item?.category_name).toBeNull();
+    expect(item?.category_name).toBe('Utilities');
   });
 
   test('category_name is null when the row has no categoryId (null categoryId)', async () => {

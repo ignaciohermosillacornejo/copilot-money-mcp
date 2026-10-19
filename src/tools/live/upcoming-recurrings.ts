@@ -58,9 +58,9 @@ export type GetUpcomingRecurringsLiveRow = {
   rule: RecurringRuleNode | null;
   payments: RecurringPaymentNode[];
   /**
-   * Joined from `categoriesCache.peek()` by `categoryId`. `null` if the
-   * categories cache is cold (no fetch is triggered to populate it) or
-   * if the category for this row's `categoryId` was not found
+   * Joined from the categories list by `categoryId`, loading it when the
+   * cache is cold (#848). `null` when the row has no category or
+   * its `categoryId` was not found
    * (e.g., deleted upstream). Mirrors `get_recurring_live`'s same join.
    */
   category_name: string | null;
@@ -124,7 +124,7 @@ export class LiveUpcomingRecurringsTools {
       hit,
     } = await cache.read(() => fetchUpcomingRecurrings(this.live.getClient()));
 
-    const categoryNameById = this.live.peekCategoryNameMap();
+    const categoryNameById = await this.live.loadCategoryNameMap();
 
     const rows: GetUpcomingRecurringsLiveRow[] = cached
       .map((r) => ({
@@ -180,14 +180,13 @@ export function createLiveUpcomingRecurringsToolSchema(): ToolSchema {
       "get_recurring_live's nextPaymentDate. DISTINCT from `get_recurring_live`, which returns the " +
       'full set of configured/historical recurrings; use this tool when the user ' +
       'asks "what\'s coming up" or "what bills am I about to pay". ' +
-      'Each row carries a `category_name` field joined from the categories cache; ' +
-      '`null` if the cache is cold or the category was deleted upstream. ' +
-      'To guarantee `category_name` is populated, call `get_categories_live` first ' +
-      'in the same session to warm the cache. ' +
+      'Each row carries a `category_name` resolved from the categories list (loaded on ' +
+      'first use); `null` only when the row has no category or its category was deleted. ' +
       'Default rows are terse: id, name, state, frequency, nextPaymentAmount, ' +
       'nextPaymentDate, categoryId, category_name, emoji. That excludes `rule` (the ' +
-      'server-side matcher config) and `payments` (full payment history — the same charges ' +
-      'are queryable via get_transactions_live), plus `icon` (redundant with `emoji`). ' +
+      'server-side matcher config) and `payments` (only the NEXT scheduled payment, not a ' +
+      'history; for past charges use get_transactions_live and match recurring_id), plus ' +
+      '`icon` (redundant with `emoji`). ' +
       'See `fields` for how to get any of them back.',
     inputSchema: {
       type: 'object' as const,

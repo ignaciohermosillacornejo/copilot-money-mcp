@@ -19,7 +19,9 @@ import { fetchTags } from '../../core/graphql/queries/tags.js';
 import type { ToolSchema, TransactionTypeFilter } from '../tools.js';
 import {
   DEFAULT_TRANSACTION_FIELDS,
+  LIVE_TRANSACTION_FIELD_ALIASES,
   TRANSACTION_FIELDS_PARAM_SCHEMA,
+  applyFieldAliases,
   projectRows,
 } from '../field-selection.js';
 import { rejectRemovedArgs, REMOVED_TRANSACTION_ARGS } from '../errors.js';
@@ -179,7 +181,8 @@ export interface CategoryIndex {
  * tests/scripts/synthesized-field-coverage.test.ts.
  *
  * Ledger entries: `Transaction.internalTransfer:synthesized` (class
- * verified-once) and `Transaction.excluded:synthesized` (class unverified,
+ * verified-once) and `Transaction.excluded:synthesized` (class verified-once
+ * since #848 observed the gap on a real row; originally unverified,
  * for the reason above) in src/conformance/ledger.ts.
  *
  * How each enriched (tool-facing, snake_case) field is computed from a raw
@@ -198,7 +201,10 @@ const ENRICHED_FIELD_MAPPERS: {
   transaction_id: (n) => n.id,
   account_id: (n) => n.accountId,
   item_id: (n) => n.itemId,
-  category_id: (n) => n.categoryId,
+  // GraphQL sends "" for an uncategorized income or transfer row; cache mode
+  // has no category there at all. Normalised to null so "no category" has
+  // one spelling (#825).
+  category_id: (n) => (n.categoryId ? n.categoryId : null),
   category_name: (n, cats) => (n.categoryId ? cats.names.get(n.categoryId) : undefined),
   recurring_id: (n) => n.recurringId,
   parent_transaction_id: (n) => n.parentId,
@@ -240,7 +246,7 @@ function projectLiveTransactionFields(
   rows: Partial<EnrichedTransaction>[],
   fields: string[] | undefined
 ): { rows: Partial<EnrichedTransaction>[]; warning?: string } {
-  return projectRows(rows, fields, {
+  return projectRows(rows, applyFieldAliases(fields, LIVE_TRANSACTION_FIELD_ALIASES), {
     preset: DEFAULT_TRANSACTION_FIELDS,
     knownFields: LIVE_TRANSACTION_KNOWN_FIELDS,
     validFieldsHint:
@@ -641,6 +647,9 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
       'user_notes, tip_amount, suggested_category_ids, iso_currency_code, ' +
       'normalized_merchant, type, created_timestamp. Ask for any of them by name with ' +
       'fields: ["default", "tag_ids"], or take the full row with fields: ["all"] (or "*"). ' +
+      "Names are the transaction's own; the web app shows a recurring-linked row " +
+      "(recurring_id set) under the RECURRING's name instead, so match on recurring_id " +
+      'when comparing with what the user sees. ' +
       'If the backend is unreachable this returns an isError result; it does NOT fall ' +
       'back to the local cache.',
     inputSchema: {
@@ -704,7 +713,11 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
         exclude_excluded: {
           type: 'boolean',
           description:
-            'Exclude transactions in user-excluded categories (default: true; checked against Category.isExcluded from the local cache).',
+            'Exclude transactions in user-excluded categories (default: true; checked against ' +
+            "each category's isExcluded from the categories list). A transaction the user " +
+            'excluded INDIVIDUALLY (the web shows it as EXCLUDED) is NOT caught: the API does not ' +
+            'expose that flag, so such a row comes back with excluded: false (observed, #848). ' +
+            'Cache mode does catch it.',
           default: true,
         },
         exclude_split_parents: {

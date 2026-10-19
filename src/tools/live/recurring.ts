@@ -12,7 +12,8 @@
  * --live-reads or use get_transactions_live + their own grouping.
  *
  * v3 (#597 Tier 1): `rule` (the server-side matcher config) and `payments`
- * (the full payment history, which duplicates get_transactions) are, per
+ * (only the next scheduled payment, not a history — parity run 2026-10-18,
+ * #847; charge history comes from get_transactions_live by recurring_id) are, per
  * the #597 audit, together ~45% of a row. Both are EXCLUDED from the
  * default row via the shared field-selection engine
  * (DEFAULT_RECURRING_LIVE_FIELDS in src/tools/field-selection.ts); `icon` is
@@ -61,9 +62,9 @@ export type GetRecurringLiveRow = {
   rule: RecurringRuleNode | null;
   payments: RecurringPaymentNode[];
   /**
-   * Joined from `categoriesCache.peek()` by `categoryId`. `null` if the
-   * categories cache is cold (no fetch is triggered to populate it) or
-   * if the category for this recurring's `categoryId` was not found
+   * Joined from the categories list by `categoryId`, loading it when the
+   * cache is cold (#848). `null` when the row has no category or
+   * its `categoryId` was not found
    * (e.g., deleted upstream). Mirrors `get_transactions_live`'s same join.
    */
   category_name: string | null;
@@ -128,7 +129,7 @@ export class LiveRecurringTools {
       hit,
     } = await cache.read(() => fetchRecurrings(this.live.getClient()));
 
-    const categoryNameById = this.live.peekCategoryNameMap();
+    const categoryNameById = await this.live.loadCategoryNameMap();
 
     const rows: GetRecurringLiveRow[] = cached
       .map((r) => ({
@@ -174,14 +175,13 @@ export function createLiveRecurringToolSchema(): ToolSchema {
       'Replaces get_recurring_transactions when --live-reads is on. ' +
       "NOTE: pattern-based detection from transactions is NOT included — only Copilot's " +
       'native subscription tracking. Run without --live-reads if you need pattern detection. ' +
-      'Each row carries a `category_name` field joined from the categories cache; ' +
-      '`null` if the cache is cold or the category was deleted upstream. ' +
-      'To guarantee `category_name` is populated, call `get_categories_live` first ' +
-      'in the same session to warm the cache. ' +
+      'Each row carries a `category_name` resolved from the categories list (loaded on ' +
+      'first use); `null` only when the row has no category or its category was deleted. ' +
       'Default rows are terse: id, name, state, frequency, nextPaymentAmount, ' +
       'nextPaymentDate, categoryId, category_name, emoji. That excludes `rule` (the ' +
-      'server-side matcher config) and `payments` (full payment history — the same charges ' +
-      'are queryable via get_transactions_live), plus `icon` (redundant with `emoji`). ' +
+      'server-side matcher config) and `payments` (only the NEXT scheduled payment, not a ' +
+      'history; for past charges use get_transactions_live and match recurring_id), plus ' +
+      '`icon` (redundant with `emoji`). ' +
       'See `fields` for how to get any of them back.',
     inputSchema: {
       type: 'object' as const,

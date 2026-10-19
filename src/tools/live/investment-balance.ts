@@ -192,7 +192,10 @@ export function createLiveInvestmentBalanceToolSchema(): ToolSchema {
       '(whole net worth) and get_balance_history_live (per-account). The history cache holds ' +
       'the most-recently-requested time_frame; requesting a different value refetches it. ' +
       '`history` is capped to the most recent `history_limit` points (default 30) — see that ' +
-      'param to fetch more of the series. Available when --live-reads is on.',
+      "param to fetch more of the series. Matches the web's investment total, which INCLUDES " +
+      'hidden accounts and is the right total to use instead of summing holdings ' +
+      '(get_holdings_live counts unvested shares and excludes hidden accounts by default). ' +
+      'Available when --live-reads is on.',
     inputSchema: {
       type: 'object' as const,
       properties: {

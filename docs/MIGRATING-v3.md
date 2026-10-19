@@ -73,14 +73,15 @@ Two things that are **not** symptoms of this release:
 
 - **Fewer keys than the preset names.** Cache rows carry only the fields the
   underlying document actually has, so a `get_transactions` row that is
-  categorized, not pending and not a transfer is 8 keys, not 10 — `pending` and
-  `internal_transfer` are absent when unset. An absent key is falsy, so boolean
-  reads behave the same.
+  categorized and not pending is 9 keys, not 10 — `pending` is absent when
+  unset. An absent key is falsy, so boolean reads behave the same.
+  (`internal_transfer` used to be absent too; since #825 it defaults to
+  `false`, as `excluded` always has.)
 
   `category_name` drops in **both** modes, for the same reason and by a
   different route: it resolves to `undefined` when there is no category name to
   resolve, and serialization omits undefined values. So an uncategorized cache
-  row is **7** and an uncategorized live row is **9** — live starts from 10
+  row is **8** and an uncategorized live row is **9** — live starts from 10
   because its mappers always write every preset key. Live drops it in one more
   case than cache does: a non-null category id that is missing from the category
   index (a deleted category, or a stale index) resolves to `undefined` too.
