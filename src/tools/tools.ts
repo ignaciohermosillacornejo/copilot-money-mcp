@@ -3621,14 +3621,15 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Per-field validation shared by update_transaction and update_transactions.
-   *
-   * Runs BEFORE any write so a rejected edit mutates nothing. `label` prefixes
-   * every message: the singular tool passes its own name so its error strings
-   * are unchanged; the plural passes `update_transactions edits[i]` so a
-   * failure in a 200-row batch names the row that caused it.
+   * The pure, synchronous half of {@link validateEditFields}: every field
+   * check that needs no lookup. Both update tools run it before the split
+   * check's window load (#836 review), so an input no retry can make valid
+   * neither pays the load nor is reported as a failed one. `label` prefixes
+   * every message: the singular tool passes its own name; the plural passes
+   * `update_transactions edits[i]` so a failure in a 200-row batch names the
+   * row that caused it.
    */
-  private async validateEditFields(edit: TransactionEdit, label: string): Promise<void> {
+  private static validateEditFieldShapes(edit: TransactionEdit, label: string): void {
     if ('name' in edit && edit.name !== undefined) {
       const trimmed = edit.name.trim();
       if (trimmed.length === 0) {
@@ -3637,13 +3638,11 @@ export class CopilotMoneyTools {
     }
     if ('category_id' in edit && edit.category_id !== undefined) {
       validateDocId(edit.category_id, 'category_id');
-      await this.validateCategoryId(edit.category_id);
     }
     if ('tag_ids' in edit && edit.tag_ids !== undefined) {
       for (const tagId of edit.tag_ids) {
         validateDocId(tagId, 'tag_id');
       }
-      await this.validateTagIds(edit.tag_ids);
     }
     if ('type' in edit && edit.type !== undefined) {
       if (!TRANSACTION_TYPES.includes(edit.type)) {
@@ -3693,6 +3692,44 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Per-field validation shared by update_transaction and update_transactions:
+   * the pure checks, then the category and tag lookups (the only I/O). Runs
+   * BEFORE any write so a rejected edit mutates nothing.
+   */
+  private async validateEditFields(edit: TransactionEdit, label: string): Promise<void> {
+    CopilotMoneyTools.validateEditFieldShapes(edit, label);
+    if ('category_id' in edit && edit.category_id !== undefined) {
+      await this.validateCategoryId(edit.category_id);
+    }
+    if ('tag_ids' in edit && edit.tag_ids !== undefined) {
+      await this.validateTagIds(edit.tag_ids);
+    }
+  }
+
+  /**
+   * Every argument check of one edit that needs no I/O, run by both update
+   * tools before the split check's window load (#836 review): the id
+   * formats (labelled, so a 200-entry batch says which entry), the routing
+   * pair (both ids from a live read, or neither: half a pair is always a
+   * caller mistake), and {@link validateEditFieldShapes}.
+   */
+  private static checkEditArgs(edit: TransactionEdit, label: string): void {
+    if ((edit.account_id === undefined) !== (edit.item_id === undefined)) {
+      throw new Error(
+        `${label}: account_id and item_id must be passed together (both from a live read) to bypass local resolution`
+      );
+    }
+    try {
+      validateDocId(edit.transaction_id, 'transaction_id');
+      if (edit.account_id !== undefined) validateDocId(edit.account_id, 'account_id');
+      if (edit.item_id !== undefined) validateDocId(edit.item_id, 'item_id');
+    } catch (e) {
+      throw new Error(`${label}: ${e instanceof Error ? e.message : String(e)}`, { cause: e });
+    }
+    CopilotMoneyTools.validateEditFieldShapes(edit, label);
+  }
+
+  /**
    * Structural validation + account/item resolution for a batch of edits.
    *
    * Resolution is the reason this is batched: `resolveTransactionMeta` takes
@@ -3702,37 +3739,20 @@ export class CopilotMoneyTools {
    *
    * Callers supplying BOTH account_id and item_id (from a live read) bypass
    * resolution entirely for that row — that is how out-of-window transactions
-   * stay writable. Half a pair is always a caller mistake; reject it rather
-   * than silently resolving.
+   * stay writable. Both callers have already rejected half a pair and a
+   * malformed id (checkEditArgs, before the window load).
    */
   private async resolveEditRoutes(
     edits: TransactionEdit[],
-    label: (index: number) => string,
     notFoundSuffix: string,
     loadWindow?: () => Promise<TransactionNode[]>
   ): Promise<Array<{ id: string; accountId: string; itemId: string }>> {
     const needsResolution: string[] = [];
-    edits.forEach((edit, i) => {
-      if ((edit.account_id === undefined) !== (edit.item_id === undefined)) {
-        throw new Error(
-          `${label(i)}: account_id and item_id must be passed together (both from a live read) to bypass local resolution`
-        );
-      }
-      if (edit.account_id !== undefined && edit.item_id !== undefined) {
-        // Prefix with the row label like every other per-entry error — a bare
-        // "Invalid account_id" in a 200-row batch doesn't say which row.
-        try {
-          validateDocId(edit.account_id, 'account_id');
-          validateDocId(edit.item_id, 'item_id');
-        } catch (e) {
-          throw new Error(`${label(i)}: ${e instanceof Error ? e.message : String(e)}`, {
-            cause: e,
-          });
-        }
-      } else {
+    for (const edit of edits) {
+      if (edit.account_id === undefined || edit.item_id === undefined) {
         needsResolution.push(edit.transaction_id);
       }
-    });
+    }
 
     let metaMap = new Map<string, { accountId: string; itemId: string }>();
     if (needsResolution.length > 0) {
@@ -3855,7 +3875,10 @@ export class CopilotMoneyTools {
       throw new Error('update_transaction requires at least one field to update');
     }
 
-    validateDocId(transaction_id, 'transaction_id');
+    // Pure argument checks before any I/O (#836 review): ids, the routing
+    // pair, and every field check that needs no lookup. An input no retry can
+    // fix must not pay the window load, or be reported as a failed one.
+    CopilotMoneyTools.checkEditArgs(args, 'update_transaction');
 
     // Routing bypass: a caller-supplied account_id + item_id pair (from a
     // live read) is forwarded verbatim — no local resolution, so writes can
@@ -3864,15 +3887,10 @@ export class CopilotMoneyTools {
     // The check runs first: the window omits a split parent that still has
     // children, so resolution would answer "not found" and recommend a
     // routing bypass the check then refuses (#836).
-    // Pure argument checks before any I/O: a malformed routing id must not
-    // pay the window load, or be reported as a failed load.
-    if (args.account_id !== undefined) validateDocId(args.account_id, 'account_id');
-    if (args.item_id !== undefined) validateDocId(args.item_id, 'item_id');
     const loadWindow = this.sharedWindowLoad();
     await this.refuseSplitParentBalanceEdit(args, 'update_transaction', loadWindow);
     const [route] = await this.resolveEditRoutes(
       [args],
-      () => 'update_transaction',
       ' Pass account_id and item_id (from a live read) to write anyway.',
       loadWindow
     );
@@ -3992,16 +4010,6 @@ export class CopilotMoneyTools {
       if (typeof edit.transaction_id !== 'string') {
         throw new Error(`${label(i)}: transaction_id is required`);
       }
-      validateDocId(edit.transaction_id, 'transaction_id');
-      // Routing-id format here too, before Phase 2's window load (#836).
-      try {
-        if (edit.account_id !== undefined) validateDocId(edit.account_id, 'account_id');
-        if (edit.item_id !== undefined) validateDocId(edit.item_id, 'item_id');
-      } catch (e) {
-        throw new Error(`${label(i)}: ${e instanceof Error ? e.message : String(e)}`, {
-          cause: e,
-        });
-      }
       if (mutableEditKeys(edit).length === 0) {
         throw new Error(`${label(i)} requires at least one field to update`);
       }
@@ -4016,6 +4024,8 @@ export class CopilotMoneyTools {
         );
       }
       seen.add(edit.transaction_id);
+      // Every pure check, before Phase 2's window load (#836 review).
+      CopilotMoneyTools.checkEditArgs(edit, label(i));
     });
 
     // --- Phase 2: split parents (#836) — an amount/date/type edit of one
@@ -4031,7 +4041,6 @@ export class CopilotMoneyTools {
     // --- Phase 3: routing resolution, batched (one windowed fetch) ---
     const routes = await this.resolveEditRoutes(
       edits,
-      label,
       ' Pass account_id and item_id (from a live read) on those entries to write anyway, or drop them from the batch.',
       loadWindow
     );
@@ -4552,10 +4561,14 @@ export class CopilotMoneyTools {
       // the decode above loaded them when it ran, and neither a second full
       // read (the per-collection fallback) nor a retried decode is worth
       // paying on a write's split check.
+      // The in-memory array first in cache-only mode too: getAllTransactions
+      // returns a fresh copy per call, which would defeat the per-array split
+      // index (one rebuild per id). Same content; the full read only when the
+      // cache has not been loaded.
       rows =
         this.liveDb || !readable
           ? (this.db.peekLoadedTransactions() ?? [])
-          : await this.db.getAllTransactions();
+          : (this.db.peekLoadedTransactions() ?? (await this.db.getAllTransactions()));
     } catch {
       // Same as above.
     }
@@ -5431,17 +5444,31 @@ export class CopilotMoneyTools {
     // Pure format checks before any I/O: a malformed id must not pay the window
     // load. A non-array target list falls through to resolveBulkTargets, which
     // reports it.
-    const requested = Array.isArray(args.rows)
-      ? args.rows.map((r) => r?.transaction_id)
-      : args.transaction_ids;
+    // rows-wins, as in resolveBulkTargets: a present but malformed `rows`
+    // names no targets here, so its structural error is the one reported.
+    const requested =
+      args.rows !== undefined
+        ? Array.isArray(args.rows)
+          ? args.rows.map((r) => r?.transaction_id)
+          : []
+        : args.transaction_ids;
     const requestedIds = (Array.isArray(requested) ? requested : []).filter(
       (id): id is string => typeof id === 'string'
     );
     for (const id of requestedIds) validateDocId(id, 'transaction_id');
     if (Array.isArray(args.rows)) {
       for (const row of args.rows) {
-        if (typeof row?.account_id === 'string') validateDocId(row.account_id, 'account_id');
-        if (typeof row?.item_id === 'string') validateDocId(row.item_id, 'item_id');
+        // A present routing id must be a string: validateDocId would coerce
+        // 42 to "42" and pass it (#836 review). A missing one is left to
+        // resolveBulkTargets, which reports the rows shape.
+        for (const key of ['account_id', 'item_id'] as const) {
+          const value: unknown = row?.[key];
+          if (value === undefined) continue;
+          if (typeof value !== 'string') {
+            throw new Error(`Invalid ${key} format: expected a string id, got ${typeof value}`);
+          }
+          validateDocId(value, key);
+        }
       }
     }
 

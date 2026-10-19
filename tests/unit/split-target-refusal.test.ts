@@ -20,7 +20,7 @@
  * Mutation.splitTransaction:resplit, Mutation.splitTransaction:splitChild).
  */
 
-import { describe, test, expect, afterAll } from 'bun:test';
+import { describe, test, expect, afterAll, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -459,6 +459,28 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
     expect(client._calls.filter((c) => c.op === 'EditTransaction')).toHaveLength(1);
   });
 
+  test('a cache-only batch reads the in-memory rows, not a fresh copy per id', async () => {
+    // getAllTransactions copies the array, so calling it per id would defeat
+    // the per-array split index (one rebuild per id).
+    const client = createMockGraphQLClient(MUTATIONS);
+    const db = new CopilotDatabase('/nonexistent');
+    (db as any).dbPath = '/fake';
+    (db as any)._transactions = [
+      { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
+      { transaction_id: CHILD_1, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 10 },
+    ];
+    db._markLoadedForTesting();
+    const copies = spyOn(db, 'getAllTransactions');
+    const tools = new CopilotMoneyTools(db, client);
+    await tools.updateTransactions({
+      edits: [
+        { transaction_id: PLAIN_ID, ...routing, amount: 30 },
+        { transaction_id: CHILD_1, ...routing, amount: 12 },
+      ],
+    });
+    expect(copies).toHaveBeenCalledTimes(0);
+  });
+
   test('a cache-only split parent (local children) is still refused', async () => {
     const client = createMockGraphQLClient(MUTATIONS);
     const db = new CopilotDatabase('/nonexistent');
@@ -660,10 +682,75 @@ describe('batch tools: input errors before I/O, and error precedence (#836)', ()
     ).rejects.toThrow(/is a split parent/);
   });
 
-  test('an invalid type on a split parent gets the split refusal first', async () => {
-    const { tools } = setup();
+  test('an invalid type is rejected before the split check, with nothing fetched', async () => {
+    // Round 8 reversed this precedence: an input no retry can make valid must
+    // not pay the window load, even on a split parent.
+    const { tools, sent } = setup();
     await expect(
       tools.updateTransaction({ transaction_id: PARENT_ID, ...routing, type: 'BOGUS' as never })
-    ).rejects.toThrow(/is a split parent/);
+    ).rejects.toThrow(/type must be one of/);
+    expect(sent('Transactions')).toHaveLength(0);
   });
+
+  test('bulk_edit_transactions: a non-string routing id is rejected, not coerced', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.bulkEditTransactions({
+        rows: [{ transaction_id: PLAIN_ID, account_id: 42 as never, item_id: ITEM_ID }],
+        type: 'REGULAR',
+      })
+    ).rejects.toThrow(/Invalid account_id format: expected a string id, got number/);
+    expect(sent('Transactions')).toHaveLength(0);
+    expect(sent('BulkEditTransactions')).toHaveLength(0);
+  });
+
+  test('bulk_edit_transactions: a malformed rows wins over transaction_ids (rows-wins)', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.bulkEditTransactions({
+        rows: null as never,
+        transaction_ids: [PARENT_ID],
+        type: 'INCOME',
+      })
+    ).rejects.toThrow(/rows must be a non-empty array/);
+    expect(sent('Transactions')).toHaveLength(0);
+    expect(sent('BulkEditTransactions')).toHaveLength(0);
+  });
+});
+
+describe('update tools: every pure check runs before the window load (#836)', () => {
+  const BAD: Array<[string, Record<string, unknown>, RegExp]> = [
+    ['a non-calendar date', { amount: 1, date: '2026-02-30' }, /date/i],
+    ['a bogus type', { type: 'BOGUS' }, /type must be one of/],
+    ['an infinite amount', { amount: Infinity }, /amount must be a finite number/],
+    ['half a routing pair', { amount: 1, account_id: ACCOUNT_ID }, /must be passed together/],
+    ['a malformed transaction id', { amount: 1, transaction_id: 'bad id!' }, /transaction_id/],
+  ];
+
+  test.each(BAD)(
+    'update_transaction: %s is rejected with nothing fetched',
+    async (_l, bad, msg) => {
+      const { tools, sent } = setup();
+      await expect(
+        tools.updateTransaction({ transaction_id: PLAIN_ID, ...bad } as never)
+      ).rejects.toThrow(msg);
+      expect(sent('Transactions')).toHaveLength(0);
+    }
+  );
+
+  test.each(BAD)(
+    'update_transactions: %s is rejected with nothing fetched, naming the entry',
+    async (_l, bad, msg) => {
+      const { tools, sent } = setup();
+      await expect(
+        tools.updateTransactions({
+          edits: [
+            { transaction_id: PLAIN_ID, ...routing, amount: 2 },
+            { transaction_id: CHILD_1, ...bad } as never,
+          ],
+        })
+      ).rejects.toThrow(new RegExp(`edits\\[1\\][\\s\\S]*${msg.source}`));
+      expect(sent('Transactions')).toHaveLength(0);
+    }
+  );
 });

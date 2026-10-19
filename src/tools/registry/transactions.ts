@@ -324,7 +324,7 @@ export const addTransactionToRecurringTool = defineTool({
       "Copilot's auto-detection missed a rent/subscription/etc. charge that should be grouped " +
       'with a recurring. All four IDs are required (transaction_id, account_id, item_id, ' +
       'recurring_id). The transaction must already exist — create_transaction followed by ' +
-      'add_transaction_to_recurring is the manual flow. Refuses a known split parent. ' +
+      'add_transaction_to_recurring is the manual flow. Refuses a known split parent (or when unchecked). ' +
       "Copilot also sets the row's category to the recurring's. Returns the updated " +
       'transaction with its recurring_id and category.',
     inputSchema: {
@@ -376,7 +376,7 @@ export const splitTransactionTool = defineTool({
       'reference it via parent_transaction_id); it reappears as an ordinary row once its ' +
       'children are all deleted. A split cannot be undone: there is no unsplit, ' +
       'and deleting the parent corrupts the balance (delete_transaction refuses it) — delete ' +
-      'the children to remove the split; a known split parent or child is not split. Splits ' +
+      'the children to remove the split; a known split parent or child (or when unchecked) is not split. Splits ' +
       'accept no per-split tags/notes/reviewed — set those via update_transaction on each ' +
       'child afterwards.',
     inputSchema: {
@@ -766,7 +766,7 @@ export const bulkEditTransactionsTool = defineTool({
       'name/note/date/amount edits, use update_transactions instead. Tags are add/remove ' +
       "only, never replace (to set a row's whole tag list use update_transaction tag_ids). " +
       'type INCOME/INTERNAL_TRANSFER clears the category server-side — cannot be combined ' +
-      'with category_id; a type change on a known split parent is refused. Max 500 targets ' +
+      'with category_id; a type change on a known split parent (or when unchecked) is refused. Max 500 targets ' +
       'per call. All ids are validated before the write ' +
       'because Copilot does NOT validate them server-side; if any row is rejected or ' +
       'silently skipped the call throws and names it.',

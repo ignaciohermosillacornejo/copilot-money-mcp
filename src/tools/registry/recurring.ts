@@ -151,7 +151,7 @@ export const createRecurringTool = defineTool({
       'The recurring inherits its merchant name, account, and initial amount from that transaction; ' +
       'you only supply the cadence (frequency). If the seed transaction cannot be resolved ' +
       'locally (outside the resolution window), pass account_id and item_id (from a live read) ' +
-      'to create the recurring anyway. Refuses a known split parent. Writes directly to ' +
+      'to create the recurring anyway. Refuses a known split parent (or when unchecked). Writes directly to ' +
       'Copilot Money via GraphQL.',
     inputSchema: {
       type: 'object',
