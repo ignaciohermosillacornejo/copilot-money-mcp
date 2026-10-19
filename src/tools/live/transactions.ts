@@ -334,9 +334,13 @@ export class LiveTransactionsTools {
 
   /**
    * Live side of the shared `category` filter (#845). An id no category has is
-   * accepted when a row in the fetched window carries it; the server never
-   * returns deleted rows or split parents, so the window is already the set of
-   * rows this call can return.
+   * accepted when a row in the fetched window carries it. The server never
+   * returns deleted rows or split parents, so the window is already free of
+   * the two classes cache mode has to filter out of its corpus. On the
+   * windowed path it is not the set of rows the call returns: postFilter still
+   * drops transfers, excluded rows and whatever the other filters ask for, in
+   * both modes alike. The transaction_id lookup, the other caller, applies no
+   * postFilter at all and finds its row in the same window directly.
    */
   private async resolveLiveCategoryFilter(
     category: string,
@@ -726,7 +730,9 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
         transaction_id: {
           type: 'string',
           description:
-            'Get one transaction by ID — REQUIRES account_id, item_id, and a date range alongside (all from a previous result).',
+            'Get one transaction by ID — REQUIRES account_id, item_id, and a date range alongside ' +
+            '(all from a previous result). Other filters are ignored, though a `category` value ' +
+            'must still be a real id.',
         },
         query: {
           type: 'string',

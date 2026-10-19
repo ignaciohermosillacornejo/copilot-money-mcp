@@ -766,9 +766,13 @@ export class CopilotMoneyTools {
    * EXCEPTIONS, both stated rather than hidden:
    *   - With no date bounds (cache allows that; live does not) the corpus is
    *     the whole cache, and the error says "in the cache".
-   *   - The corpus read shares the main query's date bounds and 50k cap but
-   *     not its merchant/account/amount filters, so above 50k rows in range
-   *     the two could truncate differently. Unreachable in practice.
+   *   - On the filtered path, the corpus read shares the main query's date
+   *     bounds and 50k cap but not its merchant/account/amount filters, so
+   *     above 50k rows in range the two could truncate differently.
+   *     Unreachable in practice. On the transaction_id lookup path there is no
+   *     main query: the lookup searches the whole cache, so the corpus does
+   *     too, uncapped (`unbounded`), and an orphan id is judged against every
+   *     row the lookup could find (#858 review round 7).
    *
    * WHY, dated: the first version checked the whole cache, so an
    * out-of-window orphan id returned zero rows silently in cache mode and
@@ -784,7 +788,7 @@ export class CopilotMoneyTools {
     category: string,
     startDate: string | undefined,
     endDate: string | undefined,
-    keep: { excludeDeleted: boolean; excludeSplitParents: boolean }
+    keep: { excludeDeleted: boolean; excludeSplitParents: boolean; unbounded?: boolean }
   ): Promise<Set<string>> {
     const userCategories = await this.db.getUserCategories();
     const nodes = userCategories.map((c) => ({
@@ -792,9 +796,17 @@ export class CopilotMoneyTools {
       parentId: c.parent_category_id ?? null,
       name: c.name ?? null,
     }));
+    // One fact feeds both the read and the error's label: `unbounded` (the
+    // transaction_id path) overrides the date args, and no date args means the
+    // whole cache too (#860 review: the two used to be derived separately).
+    const wholeCache =
+      keep.unbounded === true || (startDate === undefined && endDate === undefined);
     const knownElsewhere =
       !nodes.some((n) => n.id === category) &&
-      (await this.db.getTransactions({ startDate, endDate, limit: 50000 })).some(
+      (wholeCache
+        ? await this.db.getAllTransactions()
+        : await this.db.getTransactions({ startDate, endDate, limit: 50000 })
+      ).some(
         (t) =>
           t.category_id === category &&
           !(keep.excludeDeleted && t.plaid_deleted) &&
@@ -803,7 +815,7 @@ export class CopilotMoneyTools {
     return resolveCategoryFilter(category, nodes, {
       listTool: 'get_categories',
       knownElsewhere,
-      ...(startDate === undefined && endDate === undefined ? { corpus: 'in the cache' } : {}),
+      ...(wholeCache ? { corpus: 'in the cache' } : {}),
     });
   }
 
@@ -1079,6 +1091,7 @@ export class CopilotMoneyTools {
         await this.resolveCacheCategoryFilter(category, undefined, undefined, {
           excludeDeleted: false,
           excludeSplitParents: false,
+          unbounded: true,
         });
       }
       const allTransactions = await this.db.getAllTransactions();

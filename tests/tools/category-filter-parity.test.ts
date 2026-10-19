@@ -8,7 +8,7 @@
  *     instead of a silent zero-row answer.
  */
 
-import { describe, test, expect, mock } from 'bun:test';
+import { describe, test, expect, mock, spyOn } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
@@ -290,6 +290,24 @@ describe('the cache lookup path searches the whole cache (#858 review round 6)',
       end_date: '2026-04-30',
     });
     expect(result.transactions.map((t) => t.transaction_id)).toEqual([ROWS[4].id]);
+  });
+
+  // #860 review: the uncapped read is unobservable without a 50k-row fixture,
+  // so pin the call instead — the lookup path must never fall back to the
+  // capped, date-bounded read.
+  test('the lookup path reads the uncapped whole cache, never the 50k-capped window', async () => {
+    const tools = cacheTools();
+    const db = (tools as unknown as { db: CopilotDatabase }).db;
+    const capped = spyOn(db, 'getTransactions');
+    const whole = spyOn(db, 'getAllTransactions');
+    await tools.getTransactions({
+      transaction_id: ROWS[4].id,
+      category: ORPHAN,
+      start_date: '2026-04-01',
+      end_date: '2026-04-30',
+    });
+    expect(capped).not.toHaveBeenCalled();
+    expect(whole).toHaveBeenCalled();
   });
 
   test('an unknown category on a lookup names the cache as the corpus', async () => {
