@@ -553,3 +553,45 @@ describe('the local split index stays current (#836)', () => {
     ).rejects.toThrow(/is a split child/);
   });
 });
+
+describe('create_recurring and update_transaction: split check before routing resolution (#836)', () => {
+  test('a split parent without routing ids gets the split refusal, not "not found"', async () => {
+    // The window omits a parent that still has children, so resolving it first
+    // would answer "not found" and recommend the routing bypass.
+    const { tools, sent } = setup();
+    await expect(
+      tools.createRecurring({ transaction_id: PARENT_ID, frequency: 'MONTHLY' })
+    ).rejects.toThrow(/is a split parent/);
+    await expect(
+      tools.updateTransaction({ transaction_id: PARENT_ID, amount: 150 })
+    ).rejects.toThrow(/is a split parent/);
+    expect(sent('CreateRecurring')).toHaveLength(0);
+    expect(sent('EditTransaction')).toHaveLength(0);
+  });
+
+  test('create_recurring without routing ids: one load resolves the id and checks it', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    const target = { ...node('Uy3iO6pA9sD2fG5hJ8kL', 25), date: today };
+    const { tools, sent } = setup({
+      Transactions: {
+        transactions: {
+          edges: [{ cursor: 'c-1', node: target }],
+          pageInfo: { endCursor: null, hasNextPage: false },
+        },
+      },
+    });
+    await tools.createRecurring({ transaction_id: target.id, frequency: 'MONTHLY' });
+    expect(sent('Transactions')).toHaveLength(
+      monthsCovered(CopilotMoneyTools.writeResolveWindow()).length
+    );
+    expect(sent('CreateRecurring')).toHaveLength(1);
+  });
+
+  test('create_recurring is refused when the window cannot be loaded', async () => {
+    const { tools, sent } = setup({ Transactions: new Error('synthetic network failure') });
+    await expect(
+      tools.createRecurring({ transaction_id: PLAIN_ID, ...routing, frequency: 'MONTHLY' })
+    ).rejects.toThrow(/could not check/);
+    expect(sent('CreateRecurring')).toHaveLength(0);
+  });
+});

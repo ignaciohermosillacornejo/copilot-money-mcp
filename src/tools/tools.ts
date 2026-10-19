@@ -3847,8 +3847,12 @@ export class CopilotMoneyTools {
     // Routing bypass: a caller-supplied account_id + item_id pair (from a
     // live read) is forwarded verbatim — no local resolution, so writes can
     // reach transactions outside the resolution window.
-    // One window load serves routing resolution and the split-parent check.
+    // One window load serves the split-parent check and routing resolution.
+    // The check runs first: the window omits a split parent that still has
+    // children, so resolution would answer "not found" and recommend a
+    // routing bypass the check then refuses (#836).
     const loadWindow = this.sharedWindowLoad();
+    await this.refuseSplitParentBalanceEdit(args, 'update_transaction', loadWindow);
     const [route] = await this.resolveEditRoutes(
       [args],
       () => 'update_transaction',
@@ -3860,7 +3864,6 @@ export class CopilotMoneyTools {
 
     // Per-field validation (runs BEFORE any write for atomicity).
     await this.validateEditFields(args, 'update_transaction');
-    await this.refuseSplitParentBalanceEdit(args, 'update_transaction', loadWindow);
 
     try {
       const result = await editTransaction(client, {
@@ -4441,8 +4444,8 @@ export class CopilotMoneyTools {
    *     (refuseUncheckedSplitTarget).
    *
    * Callers: delete_transaction, the amount/date/type edits of
-   * update_transaction(s), add_transaction_to_recurring, split_transaction and
-   * bulk_edit_transactions with a type. Each pays the local-cache read above,
+   * update_transaction(s), add_transaction_to_recurring, create_recurring,
+   * split_transaction and bulk_edit_transactions with a type. Each pays the local-cache read above,
    * which can decode (worst case the decode timeout), and the window load.
    *
    * `parentOfTarget`: a window row for `id`, when present, decides it over
@@ -4539,17 +4542,17 @@ export class CopilotMoneyTools {
    */
   private readonly splitRowIndexes = new WeakMap<
     readonly Transaction[],
-    { length: number; parents: Set<string>; parentOf: Map<string, string | null> }
+    { length: number; parents: Set<string>; parentOf: Map<string, string> }
   >();
 
   private splitRowIndex(rows: readonly Transaction[]): {
     parents: Set<string>;
-    parentOf: Map<string, string | null>;
+    parentOf: Map<string, string>;
   } {
     const cached = this.splitRowIndexes.get(rows);
     if (cached && cached.length === rows.length) return cached;
     const parents = new Set<string>();
-    const parentOf = new Map<string, string | null>();
+    const parentOf = new Map<string, string>();
     for (const t of rows) {
       if (t.parent_transaction_id) parents.add(t.parent_transaction_id);
       if ((t.children_transaction_ids?.length ?? 0) > 0) parents.add(t.transaction_id);
@@ -5868,32 +5871,15 @@ export class CopilotMoneyTools {
         'create_recurring: account_id and item_id must be passed together (both from a live read) to bypass local resolution'
       );
     }
-    let txnMeta: { accountId: string; itemId: string };
-    if (args.account_id !== undefined && args.item_id !== undefined) {
-      validateDocId(args.account_id, 'account_id');
-      validateDocId(args.item_id, 'item_id');
-      txnMeta = { accountId: args.account_id, itemId: args.item_id };
-    } else {
-      // Resolve routing ids the same way update_transaction does — live-first
-      // in live mode, local cache only in degraded mode. See
-      // resolveTransactionMeta(). Fixes the class bug where a transaction
-      // older than the local cache window could not be made recurring.
-      const { meta, liveWindowMonths } = await this.resolveTransactionMeta([args.transaction_id]);
-      const resolved = meta.get(args.transaction_id);
-      if (!resolved) {
-        throw new Error(
-          CopilotMoneyTools.transactionsNotFoundMessage([args.transaction_id], liveWindowMonths) +
-            ' Pass account_id and item_id (from a live read) to create the recurring anyway.'
-        );
-      }
-      txnMeta = resolved;
-    }
-
+    const loadWindow = this.sharedWindowLoad();
     // Split parents (#836): a recurring seeded from one would count the
     // parent's amount on top of its children's, and derive its expected
     // amount from it; what the server does is unverified. Refused before
-    // sending, as add_transaction_to_recurring refuses it.
-    const evidence = await this.splitParentEvidence(args.transaction_id);
+    // sending, as add_transaction_to_recurring refuses it. Checked before
+    // routing resolution: the window omits a parent that still has children,
+    // so resolution would otherwise answer "not found" first and recommend a
+    // routing bypass that this check then refuses. One window load serves both.
+    const evidence = await this.splitParentEvidence(args.transaction_id, loadWindow);
     // mutation-guard: a recurring is not seeded from a split parent
     if (evidence.isParent) {
       throw new Error(
@@ -5904,6 +5890,30 @@ export class CopilotMoneyTools {
       );
     }
     CopilotMoneyTools.refuseUncheckedSplitTarget(evidence, args.transaction_id, 'create_recurring');
+
+    let txnMeta: { accountId: string; itemId: string };
+    if (args.account_id !== undefined && args.item_id !== undefined) {
+      validateDocId(args.account_id, 'account_id');
+      validateDocId(args.item_id, 'item_id');
+      txnMeta = { accountId: args.account_id, itemId: args.item_id };
+    } else {
+      // Resolve routing ids the same way update_transaction does — live-first
+      // in live mode, local cache only in degraded mode. See
+      // resolveTransactionMeta(). Fixes the class bug where a transaction
+      // older than the local cache window could not be made recurring.
+      const { meta, liveWindowMonths } = await this.resolveTransactionMeta(
+        [args.transaction_id],
+        loadWindow
+      );
+      const resolved = meta.get(args.transaction_id);
+      if (!resolved) {
+        throw new Error(
+          CopilotMoneyTools.transactionsNotFoundMessage([args.transaction_id], liveWindowMonths) +
+            ' Pass account_id and item_id (from a live read) to create the recurring anyway.'
+        );
+      }
+      txnMeta = resolved;
+    }
 
     try {
       const result = await gqlCreateRecurring(client, {

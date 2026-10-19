@@ -653,6 +653,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFailingTests: [
       'an amount edit is refused when the window cannot be loaded',
       'add_transaction_to_recurring and split_transaction are refused too',
+      'create_recurring is refused when the window cannot be loaded',
     ],
     expectFails: 'tests/unit/split-target-refusal.test.ts',
   },

@@ -586,7 +586,12 @@ export class CopilotDatabase {
    * @param fields - Partial transaction fields to merge
    * @returns true if the transaction was found and patched, false otherwise
    */
-  patchCachedTransaction(transactionId: string, fields: Partial<Transaction>): boolean {
+  patchCachedTransaction(
+    transactionId: string,
+    // The split fields are excluded by type: CopilotMoneyTools' split-evidence
+    // index (#836) assumes no patch rewrites them in place.
+    fields: Partial<Omit<Transaction, 'parent_transaction_id' | 'children_transaction_ids'>>
+  ): boolean {
     if (!this._transactions) return false;
     const txn = this._transactions.find((t) => t.transaction_id === transactionId);
     if (!txn) return false;
