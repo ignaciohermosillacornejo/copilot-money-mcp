@@ -5,8 +5,13 @@
  * back to the account a second time (the children already replaced it), so
  * the balance ends wrong by the parent's amount. There is no unsplit
  * mutation, so the tool refuses before any network call whenever the target
- * is a KNOWN split parent — known from the local cache, the live window
- * cache, or this session's own split/child-delete history.
+ * is a KNOWN split parent — known from the local cache (soft-deleted children
+ * included, #842), the live window cache, or the split record this server
+ * keeps (in memory and persisted).
+ *
+ * #842: no evidence is ever negative. Once all of a parent's children are
+ * deleted, Copilot returns it as an ordinary row, and deleting it still
+ * double-credits — so a row for the id never makes it deletable again.
  */
 
 import { describe, test, expect, afterAll } from 'bun:test';
@@ -17,6 +22,8 @@ import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
+import { SplitParentStore } from '../../src/core/persistence/split-parent-store.js';
+import { createTestDb } from '../helpers/test-db.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
 import type { CreatedTransaction } from '../../src/core/graphql/transactions.js';
 import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
@@ -113,6 +120,11 @@ const SPLIT_MOCK = {
 
 /** A date inside the write-resolve window (the window ends today). */
 const IN_WINDOW_DATE = new Date().toISOString().slice(0, 10);
+
+const inWindow = (id: string, amount: number, parentId: string | null = null) => ({
+  ...node(id, amount, parentId),
+  date: IN_WINDOW_DATE,
+});
 
 /**
  * Transactions-query mock for the window fetch delete_transaction runs in live
@@ -311,11 +323,6 @@ describe('delete_transaction refuses a split parent (#822)', () => {
 });
 
 describe('delete_transaction split-parent evidence: live path, staleness, drift (#822 review)', () => {
-  const inWindow = (id: string, amount: number, parentId: string | null = null) => ({
-    ...node(id, amount, parentId),
-    date: IN_WINDOW_DATE,
-  });
-
   test('(f) parent known only via the live window fetch → refused, nothing deleted', async () => {
     // Nothing cached, no session record: the only evidence is a child row the
     // write-resolve window fetch returns from the server.
@@ -334,22 +341,29 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
     expect(deletes(client)).toHaveLength(0);
   });
 
-  test('live mode never decodes the local cache', async () => {
+  test('live mode reads the local cache once for split evidence (#842)', async () => {
+    // Delete is rare and destructive, so the first one in a process pays for
+    // the local decode every cache read uses; later deletes reuse it.
     const client = createMockGraphQLClient({
       ...WINDOW([inWindow(PLAIN_ID, 20)]),
       DeleteTransaction: { deleteTransaction: true },
     });
-    const db = makeDb();
-    let localReads = 0;
-    db.getAllTransactions = () => {
-      localReads += 1;
-      return Promise.resolve([]);
+    const db = new CopilotDatabase('/nonexistent');
+    (db as any).dbPath = '/fake';
+    let decodes = 0;
+    (db as any).loadAllCollections = () => {
+      decodes += 1;
+      (db as any)._transactions = [];
+      (db as any)._splitParentIds = new Set<string>();
+      (db as any)._allCollectionsLoaded = true;
+      return Promise.resolve();
     };
     const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
 
     await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
-    expect(localReads).toBe(0);
-    expect(deletes(client)).toHaveLength(1);
+    await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+    expect(decodes).toBe(1);
+    expect(deletes(client)).toHaveLength(2);
   });
 
   test('a failed window fetch does not block the delete — remaining evidence still applies', async () => {
@@ -370,7 +384,7 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
     expect(deletes(client).map((c) => (c.variables as { id: string }).id)).toEqual([PLAIN_ID]);
   });
 
-  test('the refusal names the way out when the split was removed in the app', async () => {
+  test('the refusal offers no retry: a childless parent still cannot be deleted (#842)', async () => {
     const client = createMockGraphQLClient({ ...WINDOW([inWindow(CHILD_1, 60, PARENT_ID)]) });
     const db = makeDb();
     const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
@@ -379,49 +393,67 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
       .deleteTransaction({ transaction_id: PARENT_ID, ...routing })
       .then(() => null)
       .catch((e: Error) => e);
-    expect(err?.message).toMatch(/removed this split in the Copilot app/i);
-    expect(err?.message).toMatch(/refresh_cache/);
-    // refresh_database is not scoped to cache mode: in live mode stale local
-    // rows already in memory can refuse too, and only it clears them.
-    expect(err?.message).toMatch(/refresh_database if the split was cached locally/);
+    expect(err?.message).toMatch(/reappears as an ordinary transaction/);
+    expect(err?.message).toMatch(/still cannot be deleted safely/);
+    expect(err?.message).not.toMatch(/retry/i);
+    expect(err?.message).not.toMatch(/refresh_cache|refresh_database/);
   });
 
-  test('a session record is retired when the server returns the id as an ordinary row', async () => {
-    // Split this session, then the split is removed in the app: the window
-    // fetch now returns the former parent as a normal row. The Transactions
-    // query omits split parents, so that row proves it is no longer one.
+  test('(842) split, delete both children, the parent comes back as an ordinary row → still refused', async () => {
+    // The exact #842 sequence. After its children are deleted Copilot returns
+    // the ex-parent as an ordinary row (parentId null) from a freshly fetched
+    // month, and deleting it still credits its amount back a second time. The
+    // #822 guard took that row as proof the id was no longer a parent.
     let parentVisible = false;
+    const fetches = { n: 0 };
     const client = createMockGraphQLClient({
       ...SPLIT_MOCK,
-      Transactions: () => ({
-        transactions: {
-          edges: parentVisible ? [{ cursor: 'c-p', node: inWindow(PARENT_ID, 100) }] : [],
-          pageInfo: { endCursor: null, hasNextPage: false },
-        },
-      }),
+      Transactions: () => {
+        fetches.n += 1;
+        return {
+          transactions: {
+            edges: parentVisible ? [{ cursor: 'c-p', node: inWindow(PARENT_ID, 100) }] : [],
+            pageInfo: { endCursor: null, hasNextPage: false },
+          },
+        };
+      },
       DeleteTransaction: { deleteTransaction: true },
     });
     const db = makeDb();
     const liveDb = makeLiveDb(client, db);
-    liveDb.getTransactionsWindowCache().ingestMonth('2025-03', [node(PARENT_ID, 100)], 1);
     const tools = new CopilotMoneyTools(db, client, liveDb);
     await tools.splitTransaction({
       transaction_id: PARENT_ID,
       ...routing,
       splits: [
-        { amount: 60, category_id: CAT_A },
-        { amount: 40, category_id: CAT_B },
+        { amount: 60, category_id: CAT_A, name: 'A', date: IN_WINDOW_DATE },
+        { amount: 40, category_id: CAT_B, name: 'B', date: IN_WINDOW_DATE },
       ],
     });
+    await tools.deleteTransaction({ transaction_id: CHILD_1, ...routing });
+    await tools.deleteTransaction({ transaction_id: CHILD_2, ...routing });
+
+    // What refresh_cache does; then the server shows the ex-parent again.
+    liveDb.getTransactionsWindowCache().invalidate('all');
+    parentVisible = true;
+    const fetchesBefore = fetches.n;
     await expect(
       tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
     ).rejects.toThrow(REFUSAL);
+    expect(deletes(client).map((c) => (c.variables as { id: string }).id)).toEqual([
+      CHILD_1,
+      CHILD_2,
+    ]);
+    // Refused from the record, before any fetch could offer the row.
+    expect(fetches.n).toBe(fetchesBefore);
 
-    // What refresh_cache does, then the server shows the row again.
-    liveDb.getTransactionsWindowCache().invalidate('all');
-    parentVisible = true;
-    const res = await tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing });
-    expect(res.deleted).toBe(true);
+    // And again once the row is cached from a fresh fetch (a read in between).
+    await liveDb.getTransactions(CopilotMoneyTools.writeResolveWindow());
+    expect(liveDb.lookupTransactionNodes([PARENT_ID]).get(PARENT_ID)?.parentId).toBeNull();
+    await expect(
+      tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
+    ).rejects.toThrow(REFUSAL);
+    expect(deletes(client)).toHaveLength(2);
   });
 
   test('(g) split recorded even when mapping a drifted response throws', async () => {
@@ -464,7 +496,7 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
     // nor its children (the #820 shape) — it is dropped, so the next read
     // refetches. 2025-03 is outside the write-resolve window, so the window
     // fetch never refreshes it: what is exercised is the eviction and the
-    // fetched_at guard, not a cold-tier refetch.
+    // record, not a cold-tier refetch.
     const drifted = { ...serverTx(PARENT_ID, 100, ''), tags: null };
     const client = createMockGraphQLClient({
       ...WINDOW(),
@@ -498,12 +530,12 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
     expect(deletes(client)).toHaveLength(0);
   });
 
-  test('a stale cached row cannot retire the session record — only a refetched one', async () => {
-    // Record taken, then some other write invalidates an unrelated month (so
-    // the cheap path is skipped) while the parent's pre-split row is still
-    // cached in a month the window fetch does not refetch. 2025-03 is outside
-    // the write-resolve window, so this exercises the fetched_at guard, not
-    // the cold-tier-within-TTL path.
+  test('a stale cached row does not retire the record either', async () => {
+    // Record taken, then some other write invalidates an unrelated month
+    // while the parent's pre-split row is still cached in a month the window
+    // fetch does not refetch (2025-03 is outside the write-resolve window).
+    // Under #822 only a refetched row could retire a record; since #842 no
+    // row does, and a stale one least of all.
     const client = createMockGraphQLClient({
       ...WINDOW(),
       ...SPLIT_MOCK,
@@ -522,8 +554,8 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
         { amount: 40, category_id: CAT_B },
       ],
     });
-    // Put a stale copy back, as a drifted path could leave it, and bump the
-    // cache generation the way an unrelated write's invalidation does.
+    // Put a stale copy back, as a drifted path could leave it, and invalidate
+    // an unrelated month the way another write does.
     cache.ingestMonth('2025-03', [node(PARENT_ID, 100)], 1);
     cache.invalidate(['2024-01']);
 
@@ -584,7 +616,7 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
     expect(deletes(client)).toHaveLength(0);
   });
 
-  test('live mode + an unloaded local cache → no decode is triggered', async () => {
+  test('live mode + an unreadable local cache → the delete is not blocked', async () => {
     const client = createMockGraphQLClient({
       ...WINDOW([inWindow(PLAIN_ID, 20)]),
       DeleteTransaction: { deleteTransaction: true },
@@ -594,17 +626,141 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
     let decodes = 0;
     (db as any).loadAllCollections = () => {
       decodes += 1;
-      return Promise.resolve();
-    };
-    db.getAllTransactions = () => {
-      decodes += 1;
-      return Promise.resolve([]);
+      return Promise.reject(new Error('synthetic unreadable cache'));
     };
     const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
 
     const res = await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
     expect(res.deleted).toBe(true);
-    expect(decodes).toBe(0);
-    expect(db.getCacheLoadedAt()).toBeNull();
+    expect(decodes).toBeGreaterThan(0);
+  });
+});
+
+describe('split-parent evidence that survives a restart (#842)', () => {
+  // A real LevelDB fixture: the parent's two children were deleted (in the app,
+  // or by an earlier process), so Copilot soft-deleted their documents —
+  // `user_deleted: true`, `parent_transaction_id` kept — and the ex-parent is
+  // an ordinary document with no split marker. Nothing else in the cache says
+  // it was ever split.
+  const LEVELDB_DIR = mkdtempSync(join(tmpdir(), 'delete-split-parent-leveldb-'));
+  afterAll(() => rmSync(LEVELDB_DIR, { recursive: true, force: true }));
+
+  const deletedChild = (id: string, amount: number) => ({
+    collection: 'transactions',
+    id,
+    fields: {
+      transaction_id: id,
+      ...routing,
+      amount,
+      date: '2025-03-12',
+      name: 'Hardware Store',
+      category_id: CAT_A,
+      parent_transaction_id: PARENT_ID,
+      user_deleted: true,
+    },
+  });
+
+  async function fixtureDb(): Promise<CopilotDatabase> {
+    const dbPath = join(mkdtempSync(join(LEVELDB_DIR, 'db-')), 'leveldb');
+    await createTestDb(dbPath, [
+      {
+        collection: 'transactions',
+        id: PARENT_ID,
+        fields: {
+          transaction_id: PARENT_ID,
+          ...routing,
+          amount: 100,
+          date: '2025-03-12',
+          name: 'Hardware Store',
+          category_id: CAT_B,
+        },
+      },
+      deletedChild(CHILD_1, 60),
+      deletedChild(CHILD_2, 40),
+      {
+        collection: 'transactions',
+        id: PLAIN_ID,
+        fields: {
+          transaction_id: PLAIN_ID,
+          ...routing,
+          amount: 20,
+          date: '2025-03-10',
+          name: 'Bakery',
+          category_id: CAT_B,
+        },
+      },
+    ]);
+    return new CopilotDatabase(dbPath);
+  }
+
+  test('live mode, empty session: a soft-deleted child in the local cache refuses its parent', async () => {
+    // The server shows the ex-parent as an ordinary row; the process has no
+    // record of the split. Only the deleted children's documents remain.
+    const client = createMockGraphQLClient({
+      ...WINDOW([inWindow(PARENT_ID, 100), inWindow(PLAIN_ID, 20)]),
+      DeleteTransaction: { deleteTransaction: true },
+    });
+    const db = await fixtureDb();
+    const tools = new CopilotMoneyTools(db, client, makeLiveDb(client, db));
+
+    await expect(
+      tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
+    ).rejects.toThrow(REFUSAL);
+    expect(deletes(client)).toHaveLength(0);
+    // The deleted children are evidence only, never rows.
+    const ids = (await db.getAllTransactions()).map((t) => t.transaction_id).sort();
+    expect(ids).toEqual([PARENT_ID, PLAIN_ID].sort());
+
+    const plain = await tools.deleteTransaction({ transaction_id: PLAIN_ID, ...routing });
+    expect(plain.deleted).toBe(true);
+  });
+
+  test('cache-only mode: a soft-deleted child in the local cache refuses its parent', async () => {
+    const client = createMockGraphQLClient({ DeleteTransaction: { deleteTransaction: true } });
+    const tools = new CopilotMoneyTools(await fixtureDb(), client);
+
+    await expect(
+      tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
+    ).rejects.toThrow(REFUSAL);
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('a split recorded by one process is refused by the next one (persisted record)', async () => {
+    const storeDir = mkdtempSync(join(META_DIR, 'split-parents-'));
+    const store = () =>
+      new SplitParentStore({ baseDir: storeDir, uidProvider: () => 'Qe7rT2yU9iO4pA1sD6fG' });
+
+    const client1 = createMockGraphQLClient({
+      ...WINDOW(),
+      ...SPLIT_MOCK,
+      DeleteTransaction: { deleteTransaction: true },
+    });
+    const db1 = makeDb();
+    const first = new CopilotMoneyTools(db1, client1, makeLiveDb(client1, db1), {
+      splitParentStore: store(),
+    });
+    await first.splitTransaction({
+      transaction_id: PARENT_ID,
+      ...routing,
+      splits: [
+        { amount: 60, category_id: CAT_A, name: 'A', date: IN_WINDOW_DATE },
+        { amount: 40, category_id: CAT_B, name: 'B', date: IN_WINDOW_DATE },
+      ],
+    });
+
+    // Restart: a fresh process whose server shows the ex-parent as an
+    // ordinary row and whose local cache knows nothing.
+    const client2 = createMockGraphQLClient({
+      ...WINDOW([inWindow(PARENT_ID, 100)]),
+      DeleteTransaction: { deleteTransaction: true },
+    });
+    const db2 = makeDb();
+    const second = new CopilotMoneyTools(db2, client2, makeLiveDb(client2, db2), {
+      splitParentStore: store(),
+    });
+    await expect(
+      second.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
+    ).rejects.toThrow(REFUSAL);
+    expect(deletes(client2)).toHaveLength(0);
   });
 });

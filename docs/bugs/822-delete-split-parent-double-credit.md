@@ -87,6 +87,13 @@ delete through, and the `refresh_cache` the refusal recommends is what opens tha
 Ledger: `Transaction.parentId:childlessParentHidden` (unverified; parity row W-23 would
 upgrade it to verified-once).
 
+**Refuted 2026-10-18 ([#842](842-childless-split-parent-deletable.md)).** W-23 found that
+the ex-parent does come back as an ordinary row once its children are deleted, so the
+retirement let its delete through, as described above. #842 removed the retirement and the
+"refresh and retry" advice, persisted the record, and added the soft-deleted children in
+the local cache as evidence. The ledger entry is replaced by
+`Transaction.parentId:childlessParentReappears`.
+
 There is no opt-in override. Both tool descriptions now state the rule, and the smoke harness deregisters the parent before it
 sends the split, so cleanup deletes only the children even when the split's response is
 lost.

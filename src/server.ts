@@ -20,6 +20,8 @@ import { GraphQLClient, GraphQLError } from './core/graphql/client.js';
 import { FirebaseAuth } from './core/auth/firebase-auth.js';
 import { extractRefreshTokenCandidates } from './core/auth/browser-token.js';
 import { LiveCopilotDatabase, preflightLiveAuth } from './core/live-database.js';
+import { SplitParentStore } from './core/persistence/split-parent-store.js';
+import { defaultPersistenceDir } from './core/persistence/dir.js';
 import { LiveTransactionsTools } from './tools/live/transactions.js';
 import { LiveAccountsTools } from './tools/live/accounts.js';
 import { LiveCategoriesTools } from './tools/live/categories.js';
@@ -128,7 +130,19 @@ export class CopilotMoneyServer {
       }
     }
 
-    this.tools = new CopilotMoneyTools(this.db, graphqlClient, liveDb);
+    // The split-parent record outlives the process (#842): a parent split
+    // through this server stays refused by delete_transaction after a
+    // restart, when no server row can say it was ever split. Uid-scoped like
+    // the routing-id index beside it; a client without a uid persists nothing.
+    const client = graphqlClient;
+    const splitParentStore =
+      writeEnabled && client
+        ? new SplitParentStore({
+            baseDir: defaultPersistenceDir(),
+            uidProvider: () => client.getUserId(),
+          })
+        : undefined;
+    this.tools = new CopilotMoneyTools(this.db, graphqlClient, liveDb, { splitParentStore });
     this.server = new Server(
       {
         name: 'copilot-money-mcp',

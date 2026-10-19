@@ -455,6 +455,95 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFailingTests: [
       '(b) delete both children, then the parent',
       '(d) parent known only via a live-cache child row',
+      '(842) split, delete both children, the parent comes back as an ordinary row',
+    ],
+    expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
+  {
+    name: 'a fresh row never retires a split record',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'Once all of its children are deleted, Copilot returns a split parent as an ordinary ' +
+      'row with no split marker, and deleting it still credits its amount back a second time ' +
+      '(#842). So a recorded split parent must be refused whatever the server now returns for ' +
+      'the id: the #822 guard retired its record on a freshly fetched row and sent the delete.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: a fresh row never retires a split record\n' +
+        '    if (this.isRecordedSplitParent(id)) return { isParent: true, parentOfTarget: null };',
+      with:
+        '    // mutation-guard: a fresh row never retires a split record\n' +
+        '    if (false) return { isParent: true, parentOfTarget: null };',
+    },
+    expectFailingTests: [
+      '(842) split, delete both children, the parent comes back as an ordinary row',
+    ],
+    expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
+  {
+    name: 'split-parent records survive a restart',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'After a restart no server row can say an id was ever split (#842), so a parent split ' +
+      'through this server must stay refused by the next process: the split record is ' +
+      'persisted per uid and consulted on every delete.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: split-parent records survive a restart\n' +
+        '    return this.knownSplitParents.has(id) || (this.splitParentStore?.has(id) ?? false);',
+      with:
+        '    // mutation-guard: split-parent records survive a restart\n' +
+        '    return this.knownSplitParents.has(id);',
+    },
+    expectFailingTests: ['a split recorded by one process is refused by the next one'],
+    expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
+  {
+    name: "delete reads the local cache's split evidence in live mode",
+    file: 'src/tools/tools.ts',
+    invariant:
+      'A soft-deleted split child keeps its parent_transaction_id in the local cache, and it ' +
+      'is the only evidence left of a parent whose children were deleted in the app or by an ' +
+      'earlier process (#842). Live mode, which every shipped write runs in, must consult it ' +
+      'too — decoding the local cache if no read has yet — or the childless parent is deleted.',
+    mutation: {
+      kind: 'replace',
+      find:
+        "    // mutation-guard: delete reads the local cache's split evidence in live mode\n" +
+        '    const local = await this.localSplitEvidence(id);',
+      with:
+        "    // mutation-guard: delete reads the local cache's split evidence in live mode\n" +
+        '    const local = this.liveDb\n' +
+        '      ? { isParent: false, parentOfTarget: null }\n' +
+        '      : await this.localSplitEvidence(id);',
+    },
+    expectFailingTests: [
+      'live mode, empty session: a soft-deleted child in the local cache refuses its parent',
+    ],
+    expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
+  {
+    name: 'soft-deleted split children still name their parent',
+    file: 'src/core/decoder.ts',
+    invariant:
+      'The decoder drops soft-deleted transaction documents as rows (#326), but a deleted ' +
+      "split child's parent_transaction_id must still be collected: after its last child is " +
+      'deleted nothing else marks a split parent, and deleting it double-credits (#842).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '        // mutation-guard: soft-deleted split children still name their parent\n' +
+        '        collectSplitParentIds(fields, documentId, rawSplitParentIds);',
+      with:
+        '        // mutation-guard: soft-deleted split children still name their parent\n' +
+        '        if (isDecodableTransactionDocument(fields))\n' +
+        '          collectSplitParentIds(fields, documentId, rawSplitParentIds);',
+    },
+    expectFailingTests: [
+      'live mode, empty session: a soft-deleted child in the local cache refuses its parent',
+      'cache-only mode: a soft-deleted child in the local cache refuses its parent',
     ],
     expectFails: 'tests/unit/delete-split-parent.test.ts',
   },

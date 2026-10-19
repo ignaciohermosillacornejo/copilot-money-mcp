@@ -13,6 +13,7 @@ import {
   decodeGoals,
   decodeGoalHistory,
   decodeCategories,
+  decodeAllCollections,
 } from '../../src/core/decoder.js';
 import { __resetWarnedKeys } from '../../src/core/schema-warn.js';
 import {
@@ -23,6 +24,7 @@ import {
   createGoalDb,
   createCategoryDb,
   createEmptyDb,
+  createTestDb,
   cleanupTestDb,
   type TestTransaction,
   type TestAccount,
@@ -239,6 +241,41 @@ describe('LevelDB Decoder', () => {
 
       const ids = result.map((t) => t.transaction_id).sort();
       expect(ids).toEqual(['txn_explicit_false', 'txn_no_field']);
+    });
+
+    test('soft-deleted split children still name their parent in splitParentIds — #842', async () => {
+      // A deleted split child keeps `parent_transaction_id` in the cache, and
+      // after the last child is deleted it is the only trace of the split.
+      // The documents stay out of `transactions`; only the parent id is kept.
+      const dbPath = path.join(FIXTURES_DIR, 'split-parent-ids-db');
+      const txn = (id: string, extra: Record<string, unknown>) => ({
+        collection: 'transactions',
+        id,
+        fields: { transaction_id: id, amount: 10, date: '2024-01-15', name: 'Synthetic', ...extra },
+      });
+      await createTestDb(dbPath, [
+        txn('Rt4yU9iO2pA7sD1fG6hK', {}),
+        txn('Zx8cV3bN6mQ1wE4rT7yU', {
+          parent_transaction_id: 'Rt4yU9iO2pA7sD1fG6hK',
+          user_deleted: true,
+        }),
+        txn('Pl0kM9nJ8bH7gV6fC5xZ', { children_transaction_ids: ['Qa1sW2eD3rF4tG5yH6uJ'] }),
+        txn('Qa1sW2eD3rF4tG5yH6uJ', { parent_transaction_id: 'Pl0kM9nJ8bH7gV6fC5xZ' }),
+        txn('Bn1mK6jH3gF8dS2aQ5wE', {}),
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+      expect([...result.splitParentIds].sort()).toEqual(
+        ['Pl0kM9nJ8bH7gV6fC5xZ', 'Rt4yU9iO2pA7sD1fG6hK'].sort()
+      );
+      expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual(
+        [
+          'Bn1mK6jH3gF8dS2aQ5wE',
+          'Pl0kM9nJ8bH7gV6fC5xZ',
+          'Qa1sW2eD3rF4tG5yH6uJ',
+          'Rt4yU9iO2pA7sD1fG6hK',
+        ].sort()
+      );
     });
 
     test('skips transactions with zero amount', async () => {

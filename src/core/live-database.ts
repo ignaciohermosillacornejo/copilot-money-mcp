@@ -19,8 +19,7 @@
  * See docs/superpowers/plans/2026-04-25-graphql-live-tiered-cache.md.
  */
 
-import { homedir } from 'os';
-import { join } from 'path';
+import { defaultPersistenceDir } from './persistence/dir.js';
 import type { GraphQLClient } from './graphql/client.js';
 import type { CopilotDatabase } from './database.js';
 import { TransactionMetaStore } from './persistence/transaction-meta-store.js';
@@ -156,7 +155,7 @@ export class LiveCopilotDatabase {
     this.metaStore =
       opts.metaStore ??
       new TransactionMetaStore({
-        baseDir: join(homedir(), '.claude', 'copilot-money'),
+        baseDir: defaultPersistenceDir(),
         uidProvider: () => {
           try {
             return this.graphql.getUserId();

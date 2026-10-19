@@ -80,7 +80,7 @@ a class yet.
 | Class | Definition | Detector |
 |---|---|---|
 | `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. Includes treating content as identity, e.g. a dedup key built from a display name. | `assertOpaqueIds` fixture invariant (#461); `tests/core/dedup-identity.test.ts` — the five primary decoder dedups must preserve two documents identical in content and differing only by id, and every other dedup site must be explicitly listed as omitted (#662) |
-| `aggregation-double-count` | Summing across a parent/child hierarchy without excluding parents, so the same money is counted twice — in our own arithmetic, or by a write that makes Copilot's server count it twice. | partial (mutation-verified) — `tests/unit/delete-split-parent.test.ts` + the `delete_transaction refuses a split parent` mutation-guard row: `delete_transaction` must refuse a known split parent before sending anything (#822). Nothing covers the read-side sums |
+| `aggregation-double-count` | Summing across a parent/child hierarchy without excluding parents, so the same money is counted twice — in our own arithmetic, or by a write that makes Copilot's server count it twice. | partial (mutation-verified) — `tests/unit/delete-split-parent.test.ts` + the `delete_transaction refuses a split parent` mutation-guard row: `delete_transaction` must refuse a known split parent before sending anything (#822), including once its children are deleted and the server shows it as an ordinary row — four more rows pin the evidence that still knows it then: the never-retired record, its persistence across restarts, and the soft-deleted children in the local cache, read in live mode too (#842). Nothing covers the read-side sums |
 | `sign-convention` | Ignoring the domain's sign/direction convention, so the stored sign is not the semantic sign and naive sums are wrong. | none |
 | `ui-parity` | A reimplementation of an app-side computation uses different semantics — time window, enumeration set, exclusion rules — and disagrees with the Copilot app. | partial — `smoke:cache` check 9 (#824) covers income/transfer rows carrying a category, raw documents against decoded rows; nothing covers the class at large |
 | `config-blind-default` | Hardcoding a parameter the vendor's own client derives from live user configuration; silently wrong for everyone whose config differs from the guess. | none |
@@ -112,12 +112,12 @@ a class yet.
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 55 entries:
+this corpus actually says, across all 56 entries:
 
 | Found by | Count | |
 |---|---|---|
 | `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 15 | █████████████ |
-| `live-probe` — a probe or smoke against the real backend | 10 | █████████ |
+| `live-probe` — a probe or smoke against the real backend | 11 | ██████████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
 | `incidental` — found while working on something else | 8 | ███████ |
 | `user-report` | 8 | ███████ |
@@ -236,13 +236,14 @@ record near-misses.
 | #394 | [Cache-mode tag filter compared tag names against opaque tag IDs — always zero results](394-tag-filter-name-vs-id.md) | `dogfooding` | 2026-05-12 |
 | #662 | [Content-based dedup key silently dropped real accounts — the same defect as #122, in the collection nobody swept](662-account-dedup-drops-documents.md) | `code-review` | 2026-08-21 |
 
-**`aggregation-double-count`** — 3
+**`aggregation-double-count`** — 4
 
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #315 | [Split transactions returned parent AND children, doubling spend totals](315-split-parent-double-count.md) | `dogfooding` | 2026-04-21 |
 | #363 | [total_budgeted double-counted child categories — parent.amount already includes them](363-budget-total-double-count.md) | `audit-sweep` | 2026-05-04 |
 | #822 | [delete_transaction accepted a split parent, and Copilot credited the parent's amount back a second time](822-delete-split-parent-double-credit.md) | `live-probe` | 2026-10-15 |
+| #842 | [delete_transaction accepted a split parent once its children were deleted, because Copilot returns it as an ordinary row again](842-childless-split-parent-deletable.md) | `live-probe` | 2026-10-18 |
 
 **`sign-convention`** — 1
 

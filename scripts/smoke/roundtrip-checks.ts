@@ -998,9 +998,10 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
       // otherwise leave the parent registered, and cleanup would delete a
       // split parent. The trade-off: when the split genuinely fails, one
       // visible, un-split marker row leaks — a clutter cost, not a wrong
-      // balance. That the parent stays hidden once its children are deleted
-      // is an unverified assumption, so the run logs the id it leaves behind.
-      // ledger: Transaction.parentId:childlessParentHidden (unverified)
+      // balance. Once its children are deleted the parent reappears as an
+      // ordinary row, and deleting it still double-credits (#842), so it is
+      // left behind for good; the run logs the id.
+      // ledger: Transaction.parentId:childlessParentReappears (verified-once)
       ctx.registry.remove(parent.id);
       ctx.log(
         `split_transaction: intentionally leaving split parent '${ctx.state.marker}-txn-c' ` +

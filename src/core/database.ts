@@ -288,6 +288,8 @@ export class CopilotDatabase {
   private _tags: Tag[] | null = null;
   private _holdingsHistory: HoldingsHistory[] | null = null;
   private _balanceHistory: BalanceHistory[] | null = null;
+  /** See AllCollectionsResult.splitParentIds (#842). */
+  private _splitParentIds: ReadonlySet<string> | null = null;
 
   // Promises for in-flight loads to prevent duplicate loading
   private _loadingTransactions: Promise<Transaction[]> | null = null;
@@ -448,6 +450,7 @@ export class CopilotDatabase {
     this._holdingsHistory = null;
     this._tags = null;
     this._balanceHistory = null;
+    this._splitParentIds = null;
 
     // Clear in-flight loading promises
     this._loadingTransactions = null;
@@ -501,6 +504,7 @@ export class CopilotDatabase {
     balanceHistory?: BalanceHistory[];
     categoryNameMap?: Map<string, string>;
     accountNameMap?: Map<string, string>;
+    splitParentIds?: string[];
   }): void {
     if (data.transactions !== undefined) this._transactions = data.transactions;
     if (data.accounts !== undefined) this._accounts = data.accounts;
@@ -518,6 +522,7 @@ export class CopilotDatabase {
     if (data.balanceHistory !== undefined) this._balanceHistory = data.balanceHistory;
     if (data.categoryNameMap !== undefined) this._categoryNameMap = data.categoryNameMap;
     if (data.accountNameMap !== undefined) this._accountNameMap = data.accountNameMap;
+    if (data.splitParentIds !== undefined) this._splitParentIds = new Set(data.splitParentIds);
     this._allCollectionsLoaded = true;
     this._cacheLoadedAt = Date.now();
   }
@@ -699,6 +704,23 @@ export class CopilotDatabase {
   }
 
   /**
+   * Every id the local cache names as a split parent, soft-deleted split
+   * children included (#842) — see AllCollectionsResult.splitParentIds.
+   * Runs the batch decode every read uses when nothing is loaded yet, and
+   * otherwise answers from what is loaded, as loadTransactions does. Empty
+   * when the loaded data did not come from a full decode pass (injected test
+   * data, the per-collection fallback), which carry no such evidence.
+   * Throws when the cache cannot be read; callers that must not be blocked by
+   * an unreadable cache catch it.
+   */
+  async getSplitParentIds(): Promise<ReadonlySet<string>> {
+    if (this._splitParentIds === null && !this._allCollectionsLoaded) {
+      await this.loadAllCollections();
+    }
+    return this._splitParentIds ?? new Set();
+  }
+
+  /**
    * Summarize per-collection decode health from the last full decode pass.
    *
    * Surfaces silent schema drops (issue #442): documents that failed Zod
@@ -830,6 +852,7 @@ export class CopilotDatabase {
       this._holdingsHistory = result.holdingsHistory;
       this._tags = result.tags;
       this._balanceHistory = result.balanceHistory;
+      this._splitParentIds = new Set(result.splitParentIds);
 
       this._decodeStats = result.decodeStats;
 

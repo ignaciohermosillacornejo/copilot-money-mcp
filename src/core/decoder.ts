@@ -825,6 +825,19 @@ export interface AllCollectionsResult {
   featureTracking: FeatureTracking[];
   supportDocs: Support[];
   /**
+   * Every id some transaction document names as a split parent (#842): the
+   * `parent_transaction_id` of any transaction document, and the id of any
+   * document carrying a non-empty `children_transaction_ids` — INCLUDING
+   * soft-deleted (`user_deleted: true`) documents, which yield no row in
+   * `transactions`. Copilot keeps a deleted split child's
+   * `parent_transaction_id` (ledger:
+   * FirestoreTransaction.parent_transaction_id:survivesSoftDelete), and after
+   * the last child is deleted nothing else marks its parent, so this is the
+   * only local evidence that a childless ex-parent is still unsafe to delete.
+   * Evidence only: no row is built from a deleted document. Deduped.
+   */
+  splitParentIds: string[];
+  /**
    * Per-collection decode health for this pass: docs that passed Zod
    * (`decoded`), docs silently dropped on Zod failure (`dropped`), and unique
    * unread raw fields (`unread_field_warnings`). Surfaced to users via
@@ -869,6 +882,24 @@ function decodableTransactionCore(
  */
 export function isDecodableTransactionDocument(fields: Map<string, FirestoreValue>): boolean {
   return decodableTransactionCore(fields) !== null;
+}
+
+/**
+ * Append the split-parent ids a transaction document names (#842) — see
+ * `AllCollectionsResult.splitParentIds`. Runs on every transaction document,
+ * before and regardless of `decodableTransactionCore`: a soft-deleted split
+ * child yields no row, but still names its parent.
+ */
+function collectSplitParentIds(
+  fields: Map<string, FirestoreValue>,
+  docId: string,
+  into: string[]
+): void {
+  const parentId = getString(fields, 'parent_transaction_id');
+  if (parentId) into.push(parentId);
+  if ((getStringArray(fields, 'children_transaction_ids')?.length ?? 0) > 0) {
+    into.push(transactionDocumentId(fields, docId));
+  }
 }
 
 /**
@@ -3211,6 +3242,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawUserItems: UserItems[] = [];
   const rawFeatureTracking: FeatureTracking[] = [];
   const rawSupportDocs: Support[] = [];
+  const rawSplitParentIds: string[] = [];
 
   // Single pass through the database
   for await (const doc of iterateDocuments(dbPath)) {
@@ -3242,6 +3274,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
         break;
       }
       case 'transactions': {
+        // mutation-guard: soft-deleted split children still name their parent
+        collectSplitParentIds(fields, documentId, rawSplitParentIds);
         const txn = processTransaction(fields, documentId);
         if (txn) rawTransactions.push(txn);
         break;
@@ -3676,6 +3710,7 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     userItems,
     featureTracking,
     supportDocs,
+    splitParentIds: [...new Set(rawSplitParentIds)],
     decodeStats: getDecodeStats(),
   };
 }

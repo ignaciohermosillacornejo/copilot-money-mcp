@@ -272,8 +272,8 @@ export const deleteTransactionTool = defineTool({
       'There is no soft-delete and no undo. All three IDs (transaction_id, ' +
       'account_id, item_id) are required — no id lookups — so a typo in one field ' +
       "returns 'Transaction not found' rather than silently deleting a different " +
-      'transaction. Refuses a split parent known from live data or this session: ' +
-      'Copilot would credit its amount back a second time and leave the balance ' +
+      'transaction. Refuses a known split parent, even a childless one that looks ' +
+      'ordinary: Copilot would credit its amount back twice, leaving the balance ' +
       'wrong — delete its children instead. The source account may re-add Plaid ' +
       'rows on its next sync, without user metadata (category, tags, notes, ' +
       'reviewed, goal, split children).',
@@ -362,7 +362,8 @@ export const splitTransactionTool = defineTool({
       'If the parent cannot be resolved locally (outside the resolution window), the split ' +
       'still proceeds when every entry carries explicit `name` and `date`; the sum check ' +
       'then defers to the server. On success the parent is hidden but not deleted (children ' +
-      'reference it via parent_transaction_id). A split cannot be undone: there is no unsplit, ' +
+      'reference it via parent_transaction_id); it reappears as an ordinary row once its ' +
+      'children are all deleted. A split cannot be undone: there is no unsplit, ' +
       'and deleting the parent corrupts the balance (delete_transaction refuses it) — delete ' +
       'the children to remove the split. Splits accept no per-split ' +
       'tags/notes/reviewed — set those via update_transaction on each child afterwards.',

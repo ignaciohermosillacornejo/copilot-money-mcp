@@ -1115,24 +1115,44 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'operations.generated.ts. Nothing re-checks it.',
   },
   {
-    surface: 'Transaction.parentId:childlessParentHidden',
+    surface: 'Transaction.parentId:childlessParentReappears',
     kind: 'response-shape',
     oracle: null,
-    class: 'unverified',
+    class: 'verified-once',
     evidence:
-      'Two #822 decisions assume that a split parent whose children have ALL been deleted ' +
-      'stays absent from the Transactions query (and off the balance): (1) the round-trip ' +
-      "smoke's split check leaves the parent behind instead of deleting it, and (2) " +
-      "delete_transaction's live-first check RETIRES a session record when a row for the id " +
-      'comes back from a freshly fetched month, taking that row as proof the id is not a ' +
-      'split parent. If a childless ex-parent did reappear as an ordinary row, (2) would ' +
-      'send the delete and the server would credit its amount back a second time. The path ' +
-      'needs the cache generation to move first, and `refresh_cache`, which the refusal ' +
-      'message recommends, does exactly that. `Transaction.parentId:splitChildren` above ' +
-      'only observed parents that still had children, so it does not cover this. A one-shot ' +
-      'check upgrades it to verified-once (a manual parity row cannot gate it): split a ' +
-      'throwaway manual transaction, delete both children, refresh_cache, then read its month ' +
-      'with a fresh fetch and record whether the parent id appears (release parity row W-23).',
+      'Replaces the #822 `Transaction.parentId:childlessParentHidden` assumption (unverified), ' +
+      'which this probe refuted. LIVE PROBE 2026-10-18 (#842; manual test account, a ' +
+      'synthetic row split into two children, dated before the balance reset so no balance ' +
+      'effect): GraphQL `Transaction` carries NO split marker. Its only split-named field, ' +
+      '`hasSplitError`, was false on the parent, the children and the ex-parent alike, and ' +
+      'twenty-odd candidate names (isSplit, children, splitTransactions, hasChildren, …) do ' +
+      'not exist. While the parent has children, the Transactions query omits it and ' +
+      '`transaction(id)` returns it with `parentId: null`. After both children are deleted, ' +
+      'the ex-parent comes back from BOTH queries as an ordinary row (parentId null, the ' +
+      "parent's amount), indistinguishable from any other; its raw Firestore document has no " +
+      "marker either. The #822 post-mortem's repro shows that deleting such a childless " +
+      'ex-parent still credits its amount back a second time. Consequences: ' +
+      'delete_transaction never treats a row for the id as proof it is not a split parent ' +
+      '(the session record is never retired), and the round-trip smoke leaves the parent ' +
+      'behind. Nothing re-checks it.',
+  },
+  {
+    surface: 'FirestoreTransaction.parent_transaction_id:survivesSoftDelete',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'LIVE PROBE 2026-10-18 (#842, same run as ' +
+      '`Transaction.parentId:childlessParentReappears`): deleting a split child does not ' +
+      "remove its document from the desktop app's local Firestore cache — the document stays " +
+      'with `user_deleted: true` and keeps `parent_transaction_id` set to the parent id, ' +
+      "including the probe's own children deleted that day. The decoder drops these " +
+      'documents as rows (#326) but collects the parent ids every transaction document names, ' +
+      'deleted or not (`AllCollectionsResult.splitParentIds`), and delete_transaction refuses ' +
+      'those ids in both modes. It is the only local evidence a childless ex-parent leaves ' +
+      'behind, and the only evidence that survives a restart for a split made outside this ' +
+      'server, once the desktop app has synced it. Best-effort by construction: Copilot ' +
+      'could compact soft-deleted documents at any time, and nothing re-checks it.',
   },
 
   queryOperation('categories'),
