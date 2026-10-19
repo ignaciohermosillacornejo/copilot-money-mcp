@@ -605,6 +605,27 @@ describe('ambiguous --browser-profile', () => {
   const mac = (selection: NonNullable<ReturnType<typeof parseBrowserSelection>>) =>
     extractRefreshTokenCandidates(undefined, { platform: 'darwin', home, env: {}, selection });
 
+  /**
+   * A refusal is only useful if what it suggests works: every prefixed value
+   * it offers must select exactly one profile, and together they must cover
+   * every profile the ambiguous name matched.
+   */
+  async function expectSuggestionsResolve(
+    browser: 'chrome' | 'edge' | 'firefox',
+    problem: string | undefined,
+    expectedTokens: string[]
+  ): Promise<void> {
+    const picks = [...(problem ?? '').matchAll(/"((?:dir|name):[^"]+)"/g)].map((m) => m[1]!);
+    expect(picks).toHaveLength(expectedTokens.length);
+    const got: string[] = [];
+    for (const pick of picks) {
+      const result = await mac({ browser, profile: pick });
+      expect(result.candidates).toHaveLength(1);
+      got.push(result.candidates[0]!.token);
+    }
+    expect(got.sort()).toEqual([...expectedTokens].sort());
+  }
+
   test('Edge off-by-one display names: a directory name that is another profile’s display name is refused', async () => {
     const edge = join(appSupport, 'Microsoft Edge');
     plantChromium(edge, 'Default', fakeToken('default'));
@@ -615,8 +636,8 @@ describe('ambiguous --browser-profile', () => {
     expect(result.candidates).toEqual([]);
     expect(result.selection?.problem).toBe(
       '--browser-profile "Profile 1" is ambiguous in Microsoft Edge: it matches directory ' +
-        '"Profile 1" and the display name of directory "Default". Pick one by its directory ' +
-        'name with the dir: prefix: --browser-profile "dir:Default" or "dir:Profile 1".'
+        '"Profile 1" and the display name of directory "Default". Pick exactly one with ' +
+        '--browser-profile "dir:Default" or "dir:Profile 1".'
     );
     const message = noCopilotSessionError(result.checked, result.selection).message;
     expect(message).toStartWith(
@@ -651,8 +672,8 @@ describe('ambiguous --browser-profile', () => {
     expect(result.candidates).toEqual([]);
     expect(result.selection?.problem).toBe(
       '--browser-profile "Work" is ambiguous in Chrome: it matches the display name of ' +
-        'directory "Default" and the display name of directory "Profile 3". Pick one by its ' +
-        'directory name with the dir: prefix: --browser-profile "dir:Default" or "dir:Profile 3".'
+        'directory "Default" and the display name of directory "Profile 3". Pick exactly one with ' +
+        '--browser-profile "dir:Default" or "dir:Profile 3".'
     );
     // name: does not make a duplicate display name unique.
     const named = await mac({ browser: 'chrome', profile: 'name:Work' });
@@ -671,9 +692,16 @@ describe('ambiguous --browser-profile', () => {
     writeLocalState(edge, Object.fromEntries(layout.map(([dir, name]) => [dir, { name }])));
 
     // Every middle "Profile N" names a directory and another profile's display name.
-    for (const typed of ['Profile 1', 'Profile 2']) {
+    for (const [typed, a, b] of [
+      ['Profile 1', 'Default', 'Profile 1'],
+      ['Profile 2', 'Profile 1', 'Profile 2'],
+    ] as const) {
       const refused = await mac({ browser: 'edge', profile: typed });
       expect(refused.selection?.selectionError).toBe('ambiguous');
+      await expectSuggestionsResolve('edge', refused.selection?.problem, [
+        fakeToken(a),
+        fakeToken(b),
+      ]);
     }
     for (const [dir, name] of layout) {
       const byDir = await mac({ browser: 'edge', profile: `dir:${dir}` });
@@ -739,8 +767,8 @@ describe('ambiguous --browser-profile', () => {
     expect(result.candidates).toEqual([]);
     expect(result.selection?.problem).toBe(
       '--browser-profile "work" is ambiguous in Firefox: it matches directory "a1.work" and ' +
-        'the profiles.ini Name= of "Profiles/b2.default-release". Pick one by its directory ' +
-        'name with the dir: prefix: --browser-profile "dir:a1.work" or "dir:b2.default-release".'
+        'the profiles.ini Name= of "Profiles/b2.default-release". Pick exactly one with ' +
+        '--browser-profile "dir:a1.work" or "dir:b2.default-release".'
     );
     // Both suggested forms resolve, as does name: for the ini entry.
     const viaDir = await mac({ browser: 'firefox', profile: 'dir:b2.default-release' });
@@ -750,6 +778,55 @@ describe('ambiguous --browser-profile', () => {
     // The full directory name is unambiguous.
     const exact = await mac({ browser: 'firefox', profile: 'a1.work' });
     expect(exact.candidates.map((c) => c.token)).toEqual([fakeToken('a')]);
+  });
+
+  test('Firefox: a Name= kept outside the profiles dir is offered as name:, which resolves', async () => {
+    const root = join(appSupport, 'Firefox');
+    plantFirefox(join(root, 'Profiles'), 'a1.work', fakeToken('listed'));
+    const elsewhere = join(home, 'relocated');
+    plantFirefox(elsewhere, 'other', fakeToken('relocated'));
+    writeFileSync(
+      join(root, 'profiles.ini'),
+      `[Profile0]\nName=work\nIsRelative=0\nPath=${join(elsewhere, 'other')}\n`
+    );
+
+    const result = await mac({ browser: 'firefox', profile: 'work' });
+    expect(result.selection?.selectionError).toBe('ambiguous');
+    // dir: cannot see a directory outside the listing, so it is not offered.
+    expect(result.selection?.problem).toContain('"dir:a1.work" or "name:work"');
+    expect(result.selection?.problem).not.toContain('"dir:other"');
+    await expectSuggestionsResolve('firefox', result.selection?.problem, [
+      fakeToken('listed'),
+      fakeToken('relocated'),
+    ]);
+  });
+
+  test('Firefox: a sole match that is unusable ends with the remedy, not a login prompt', async () => {
+    const root = join(appSupport, 'Firefox');
+    const profiles = join(root, 'Profiles');
+    mkdirSync(profiles, { recursive: true });
+    writeFileSync(join(profiles, 'b2.broken'), 'not a directory');
+    writeFileSync(
+      join(root, 'profiles.ini'),
+      '[Profile0]\nName=Broken\nIsRelative=1\nPath=Profiles/b2.broken\n'
+    );
+    const result = await mac({ browser: 'firefox', profile: 'broken' });
+    expect(result.selection?.selectionError).toBe('unusable-profile');
+    const message = noCopilotSessionError(result.checked, result.selection).message;
+    expect(message).toContain('which is not a readable directory.');
+    expect(message).toContain('Make that profile directory readable');
+    expect(message).not.toContain('Please log into');
+  });
+
+  test('a name: miss says the listed names are directories, for dir:', async () => {
+    const chrome = join(appSupport, 'Google/Chrome');
+    plantChromium(chrome, 'Default', fakeToken('a'));
+    writeLocalState(chrome, { Default: { name: 'Person A' } });
+    const result = await mac({ browser: 'chrome', profile: 'name:Nobody' });
+    expect(result.selection?.problem).toContain(
+      'display names are not listed; directories, usable with dir:, are: Default;'
+    );
+    expect(result.selection?.problem).not.toContain('Person A');
   });
 
   test('Firefox: a suffix and the same profile’s own Name= are one match', async () => {
@@ -818,6 +895,10 @@ describe('ambiguous --browser-profile', () => {
         const result = await mac({ browser: 'chrome', profile: TARGET });
         expect(result.candidates).toEqual([]);
         expect(result.selection?.problem).toContain(`"${TARGET}" is ambiguous in Chrome`);
+        await expectSuggestionsResolve('chrome', result.selection?.problem, [
+          fakeToken('c1'),
+          fakeToken('c2'),
+        ]);
       });
     }
 
@@ -844,6 +925,10 @@ describe('ambiguous --browser-profile', () => {
           const result = await mac({ browser: 'firefox', profile: TARGET });
           expect(result.candidates).toEqual([]);
           expect(result.selection?.problem).toContain(`"${TARGET}" is ambiguous in Firefox`);
+          await expectSuggestionsResolve('firefox', result.selection?.problem, [
+            fakeToken('f1'),
+            fakeToken('f2'),
+          ]);
         });
       }
     }

@@ -148,6 +148,10 @@ export interface BrowserSelectionInput {
 /** What {@link BrowserSelectionInput.pathKind} reports for a path. */
 export type PathKind = 'directory' | 'file' | 'missing';
 
+// Every error reads as "missing" here, which suits a startup existence check.
+// `directoryState` in browser-token.ts deliberately differs (EACCES is
+// "unusable", so an unreadable profile still counts toward ambiguity); do not
+// merge the two.
 function statPathKind(path: string): PathKind {
   try {
     return retryInterrupted(() => statSync(path)).isDirectory() ? 'directory' : 'file';

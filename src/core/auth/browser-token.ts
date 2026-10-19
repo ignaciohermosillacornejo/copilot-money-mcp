@@ -409,9 +409,10 @@ export interface SelectionReport {
   problem?: string;
   /**
    * Set when the problem is the selection itself, so logging in cannot help:
-   * `ambiguous` (nothing was searched) or `no-such-profile`.
+   * `ambiguous` (nothing was searched), `no-such-profile`, or
+   * `unusable-profile` (the one match is a file or unreadable; see `notes`).
    */
-  selectionError?: 'ambiguous' | 'no-such-profile';
+  selectionError?: 'ambiguous' | 'no-such-profile' | 'unusable-profile';
   /**
    * Facts about the lookup worth stating whatever happened next: a
    * `profiles.ini` path that is missing or unreadable, display names that
@@ -435,6 +436,10 @@ function listDir(dir: string): Dirent[] | null {
  * What is at `path`, telling "absent" apart from "there but unusable": an
  * unreadable or non-directory profile still names a profile, so it must still
  * count when deciding whether a name is ambiguous.
+ *
+ * Deliberately NOT `statPathKind` in `browser-selection.ts`, which folds every
+ * error into "missing": here an EACCES must stay "unusable", or an unreadable
+ * second profile would turn an ambiguous name into a silent pick.
  */
 function directoryState(path: string): 'directory' | 'missing' | 'unusable' {
   try {
@@ -463,16 +468,21 @@ function joinList(items: string[], conjunction: 'and' | 'or' = 'and'): string {
 
 /** One profile a `--browser-profile` value matched, and how. */
 interface ProfileMatch {
-  /** The profile's directory name, for the `dir:` suggestion. */
-  dir: string;
   /** e.g. `directory "Default"`, `the display name of directory "Profile 1"`. */
   how: string;
+  /**
+   * A `--browser-profile` value that selects exactly this profile, offered in
+   * the refusal: `dir:<directory>` when the directory is one the lookup lists
+   * (so `dir:` can see it), else `name:<Name=>` (a Firefox profile that
+   * `profiles.ini` keeps outside the listed profiles dir).
+   */
+  pick: string;
 }
 
 /**
  * The refusal for a `--browser-profile` that names more than one profile. It
  * names directories, never display names (often a person's real name), and
- * offers the `dir:` form, which always picks exactly one.
+ * offers a prefixed form for each match that selects exactly that one.
  */
 function ambiguousProfileMessage(
   profile: string,
@@ -480,11 +490,11 @@ function ambiguousProfileMessage(
   matches: ProfileMatch[],
   root?: string
 ): string {
-  const choices = sortProfileNames(matches.map((m) => `"dir:${m.dir}"`));
+  const choices = sortProfileNames(matches.map((m) => `"${m.pick}"`));
   return (
     `--browser-profile "${profile}" is ambiguous in ${browser}${root ? ` (${root})` : ''}: ` +
-    `it matches ${joinList(matches.map((m) => m.how))}. Pick one by its directory name with ` +
-    `the dir: prefix: --browser-profile ${joinList(choices, 'or')}.`
+    `it matches ${joinList(matches.map((m) => m.how))}. Pick exactly one with ` +
+    `--browser-profile ${joinList(choices, 'or')}.`
   );
 }
 
@@ -576,6 +586,8 @@ interface ProfilePick {
   available: string[];
   ambiguous?: string;
   notes: string[];
+  /** Every matched profile exists but is unusable (a file, or unreadable). */
+  unusableOnly?: boolean;
 }
 
 /**
@@ -624,8 +636,9 @@ function selectChromiumProfile(
         : namespace === 'any'
           ? dirs.filter((d) => sameName(d, value))
           : [];
+    // Every match here is a listed directory, so `dir:` can always reach it.
     for (const dir of sortProfileNames(byDir)) {
-      matches.set(dir, { dir, how: `directory "${dir}"` });
+      matches.set(dir, { how: `directory "${dir}"`, pick: `dir:${dir}` });
     }
     const byDisplayName =
       namespace === 'dir'
@@ -634,8 +647,9 @@ function selectChromiumProfile(
             .filter(([dir, name]) => sameName(name, value) && dirs.includes(dir))
             .map(([dir]) => dir);
     for (const dir of sortProfileNames(byDisplayName)) {
-      if (!matches.has(dir))
-        matches.set(dir, { dir, how: `the display name of directory "${dir}"` });
+      if (!matches.has(dir)) {
+        matches.set(dir, { how: `the display name of directory "${dir}"`, pick: `dir:${dir}` });
+      }
     }
     if (unavailable && namespace !== 'dir' && matches.size === 0) {
       notes.push(`Display names were unavailable: ${unavailable}.`);
@@ -689,25 +703,30 @@ function selectFirefoxProfile(
   // root -> absolute profile dir -> how it first matched
   const byRoot = new Map<string, Map<string, ProfileMatch>>();
   const existing = new Set<string>();
-  const iniRead = new Set<string>();
+  // Every directory a listing showed, so a profiles.ini match knows whether
+  // `dir:` can reach it.
+  const listedPaths = new Set<string>();
+  // Pass 1: the listed profile directories of every install.
   for (const { root, profilesDir } of installs) {
     const matches = byRoot.get(root) ?? new Map<string, ProfileMatch>();
     byRoot.set(root, matches);
     const entries = listDir(profilesDir);
-    if (entries) {
-      existing.add(root);
-      const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
-      // Profile dirs are `<salt>.<name>`; `Crash Reports` and friends are not.
-      available.push(...dirs.filter((d) => d.includes('.')));
-      for (const dir of dirs) {
-        const path = resolve(profilesDir, dir);
-        if (matchesFirefoxProfileName(dir, profile) && !matches.has(path)) {
-          matches.set(path, { dir, how: `directory "${dir}"` });
-        }
+    if (!entries) continue;
+    existing.add(root);
+    const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+    // Profile dirs are `<salt>.<name>`; `Crash Reports` and friends are not.
+    available.push(...dirs.filter((d) => d.includes('.')));
+    for (const dir of dirs) {
+      const path = resolve(profilesDir, dir);
+      listedPaths.add(path);
+      if (matchesFirefoxProfileName(dir, profile) && !matches.has(path)) {
+        matches.set(path, { how: `directory "${dir}"`, pick: `dir:${dir}` });
       }
     }
-    if (iniRead.has(root)) continue;
-    iniRead.add(root);
+  }
+  // Pass 2: each root's profiles.ini, once.
+  const unusable = new Set<string>();
+  for (const [root, matches] of byRoot) {
     const ini = firefoxIniProfiles(join(root, 'profiles.ini'));
     if (ini.length > 0) existing.add(root);
     if (namespace === 'dir') continue;
@@ -720,11 +739,14 @@ function selectFirefoxProfile(
         notes.push(`${at}, which does not exist.`);
         continue;
       }
-      if (state === 'unusable') notes.push(`${at}, which is not a readable directory.`);
+      if (state === 'unusable') {
+        notes.push(`${at}, which is not a readable directory.`);
+        unusable.add(path);
+      }
       if (!matches.has(path)) {
         matches.set(path, {
-          dir: basename(path),
           how: `the profiles.ini Name= of "${entry.path}"`,
+          pick: listedPaths.has(path) ? `dir:${basename(path)}` : `name:${entry.name}`,
         });
       }
     }
@@ -748,7 +770,8 @@ function selectFirefoxProfile(
     }
     paths.push(...matches.keys());
   }
-  return { paths, existingRoots: existing.size, available, notes };
+  const unusableOnly = paths.length > 0 && paths.every((p) => unusable.has(p));
+  return { paths, existingRoots: existing.size, available, notes, unusableOnly };
 }
 
 /**
@@ -892,13 +915,19 @@ export function resolveBrowserSelection(
     report.selectionError = 'ambiguous';
   } else if (picked.paths.length === 0) {
     // Directory names only: display names are often people's real names, and
-    // this message travels back to the MCP client.
+    // this message travels back to the MCP client. For a `name:` miss that
+    // makes the list one of `dir:` inputs, so it says so.
     const available = sortProfileNames(picked.available);
+    const listing = available.length ? available.join(', ') : 'none';
     report.problem =
-      `No ${browser} profile named "${profile}" was found ` +
-      `(available: ${available.length ? available.join(', ') : 'none'}; ` +
-      `checked: ${roots.join(', ')}).`;
+      parseProfileQuery(profile).namespace === 'name'
+        ? `No ${browser} profile named "${profile}" was found (display names are not listed; ` +
+          `directories, usable with dir:, are: ${listing}; checked: ${roots.join(', ')}).`
+        : `No ${browser} profile named "${profile}" was found ` +
+          `(available: ${listing}; checked: ${roots.join(', ')}).`;
     report.selectionError = 'no-such-profile';
+  } else if (picked.unusableOnly) {
+    report.selectionError = 'unusable-profile';
   }
   return {
     configs: [
@@ -1088,6 +1117,13 @@ export function noCopilotSessionError(checked: string[], selection?: SelectionRe
         `No Copilot Money session found in ${selection.label}.${details} ` +
           `Name an existing profile, or another browser, with ${flags}. ` +
           'Other browsers were not searched.'
+      );
+    }
+    if (selection.selectionError === 'unusable-profile') {
+      return new Error(
+        `No Copilot Money session found in ${selection.label}.${details} ` +
+          `Make that profile directory readable, or name another profile or browser with ` +
+          `${flags}. Other browsers were not searched.`
       );
     }
     return new Error(

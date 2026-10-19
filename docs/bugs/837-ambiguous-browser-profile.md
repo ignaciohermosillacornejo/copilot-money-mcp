@@ -62,8 +62,12 @@ directory and another profile's display name, so the plain directory name was re
 and those profiles could not be selected at all (caught by the automated PR review). The
 fix therefore adds a namespace qualifier: `dir:<name>` matches the exact directory name
 only, which always names one profile, and the refusal offers it (`--browser-profile
-"dir:Default" or "dir:Profile 1"`). `name:` restricts the match to display names. Downstream cleanup in
-the same PR: retried `Local State` / `profiles.ini` reads, clearer not-found errors, a
+"dir:Default" or "dir:Profile 1"`). `name:` restricts the match to display names; a
+Firefox profile that `profiles.ini` keeps outside the listed profiles dir is offered as
+`name:`, since `dir:` cannot see it. The tests check that every value a refusal offers
+selects exactly one profile.
+
+Downstream cleanup in the same PR: retried `Local State` / `profiles.ini` reads, clearer not-found errors, a
 profile-directory hint for `--browser-data-dir`, and validating the selection only when
 live reads or writes are on.
 
