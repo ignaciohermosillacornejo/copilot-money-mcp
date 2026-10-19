@@ -1240,6 +1240,30 @@ describe('a malformed returned row is never cached (#864 review)', () => {
     }
   );
 
+  test.each(['', 'garbage'])(
+    'update_transaction: a response with date %p succeeds, its month is dropped, and the next read is fresh',
+    async (date) => {
+      const { call, read, fetches } = setup({
+        EditTransaction: (vars) => {
+          const v = vars as { id: string; input: EditTransactionInput };
+          return { editTransaction: { transaction: { ...applyEdit(v.id, v.input), date } } };
+        },
+      });
+      await read();
+
+      const result = (await call('update_transaction', CASES.update_transaction!.args)) as {
+        success: boolean;
+      };
+      expect(result.success).toBe(true);
+
+      const after = await read();
+      expect(after._cache_hit).toBe(false);
+      expect(fetches()).toBe(2);
+      // Served from the refetch: the row is present, never silently missing.
+      expect(after.transactions.some((r) => r.transaction_id === TX_UPDATE)).toBe(true);
+    }
+  );
+
   test('create_transaction: a row too malformed to cache still has its routing ids indexed', async () => {
     // The routing ids are independent of the fields the read mappers need, so
     // a follow-up write naming the new id resolves without a network fetch.

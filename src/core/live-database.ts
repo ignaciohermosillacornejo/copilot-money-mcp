@@ -32,7 +32,7 @@ import {
   type TransactionSortInput,
 } from './graphql/queries/transactions.js';
 import { warnReadShapeDrift } from './graphql/read-validation.js';
-import { getMonthRange, monthsCovered } from '../utils/date.js';
+import { getMonthRange, isCalendarDate, isCalendarMonth, monthsCovered } from '../utils/date.js';
 import { pLimit } from '../utils/concurrency.js';
 import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache/index.js';
 import type { AccountNode } from './graphql/queries/accounts.js';
@@ -765,7 +765,8 @@ export class LiveCopilotDatabase {
     const hasRouting =
       typeof node.accountId === 'string' &&
       typeof node.itemId === 'string' &&
-      Boolean(node.accountId && node.itemId);
+      node.accountId !== '' &&
+      node.itemId !== '';
     // Keep the meta index consistent with the invariant "any row this class
     // has seen is indexed", even for a row too malformed to cache below: its
     // routing ids are independent of the fields the read mappers need. Same
@@ -782,7 +783,10 @@ export class LiveCopilotDatabase {
     // mutation-guard: a malformed returned row is never cached
     if (!LiveCopilotDatabase.isCacheableRow(node)) {
       const months = new Set<string>();
-      if (typeof node.date === 'string' && node.date.length >= 7) {
+      // The cached copy's month is dropped too: the row is not stored, so a
+      // write that moved or changed it must not leave that month serving the
+      // pre-write row. A drifted date names no month unless it starts with one.
+      if (typeof node.date === 'string' && isCalendarMonth(node.date.slice(0, 7))) {
         months.add(node.date.slice(0, 7));
       }
       const cached = this.lookupTransactionNodes([node.id]).get(node.id);
@@ -811,22 +815,31 @@ export class LiveCopilotDatabase {
       ...node,
       ...(opts.parentId !== undefined ? { parentId: opts.parentId } : {}),
     };
-    // A drifted empty routing id never overwrites the cached row's real one.
+    // A drifted routing id (empty, or not a string) never overwrites the
+    // cached row's real one.
     if (existing && !hasRouting) {
-      merged.accountId = node.accountId || existing.accountId;
-      merged.itemId = node.itemId || existing.itemId;
+      merged.accountId =
+        typeof node.accountId === 'string' && node.accountId !== ''
+          ? node.accountId
+          : existing.accountId;
+      merged.itemId =
+        typeof node.itemId === 'string' && node.itemId !== '' ? node.itemId : existing.itemId;
     }
     this.transactionsWindowCache.upsert(merged);
   }
 
   /**
-   * Whether a returned row has every field the live read path dereferences:
-   * a date and a name (strings) and a tags array whose entries all carry an
+   * Whether a returned row has every field the live read path dereferences,
+   * in the shape it needs: a real calendar date (YYYY-MM-DD; the window cache
+   * files the row under its first seven characters, and an empty or malformed
+   * date would remove the row from its real month without placing it
+   * anywhere), a string name, and a tags array whose entries all carry an
    * id. Anything less is drift the cache must not store.
    */
   static isCacheableRow(node: { date?: unknown; name?: unknown; tags?: unknown }): boolean {
     return (
       typeof node.date === 'string' &&
+      isCalendarDate(node.date) &&
       typeof node.name === 'string' &&
       returnedTagIds(node.tags) !== undefined
     );

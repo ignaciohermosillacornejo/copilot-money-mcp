@@ -562,6 +562,41 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     expect(wc.entriesForMonth('2024-01')).toHaveLength(0);
   });
 
+  test.each(['', 'garbage', '2024-02-30'])(
+    'an edit returning date %p on a CACHED row drops its month instead of silently removing the row (#864)',
+    (date) => {
+      // The window cache files a row under date.slice(0, 7) and removes it from
+      // every other month first, so a malformed date would take the row out of
+      // its real month and place it nowhere, while the month still read as
+      // fresh. The row is refused instead, and its cached month is dropped.
+      const live = mkLive();
+      const wc = live.getTransactionsWindowCache();
+      wc.ingestMonth('2024-01', [queryRow()], Date.now());
+      wc.ingestMonth('2024-02', [], Date.now());
+
+      live.upsertLiveTransaction(mutationRow({ date }));
+
+      expect(wc.hasMonth('2024-01')).toBe(false);
+      // A date that starts with a real month drops that month too.
+      expect(wc.hasMonth('2024-02')).toBe(date !== '2024-02-30');
+    }
+  );
+
+  test('a non-string routing id never overwrites the cached one (#864)', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [queryRow()], Date.now());
+
+    live.upsertLiveTransaction(
+      mutationRow({ accountId: 123 as unknown as string, itemId: {} as unknown as string })
+    );
+
+    expect(wc.entriesForMonth('2024-01')[0]).toMatchObject({
+      accountId: 'kQ7vN2xR9pL4mW8tY3zB',
+      itemId: 'hT5cJ8wF2nD6sG1qV4xM',
+    });
+  });
+
   test('insert: a row with empty routing ids is not inserted, but still merges if cached', () => {
     // A drifted create/split response (warn-only validation) would otherwise put
     // a row no later write could address into the cache. It is not inserted;
