@@ -698,18 +698,28 @@ def _field_refs_in(
     return errors
 
 
+def read_frontmatter(skill_dir: Path) -> str | None:
+    """The YAML frontmatter body of a skill's SKILL.md, or None if it has none.
+
+    One parser for every check that reads frontmatter, so check 1 and check 6
+    cannot disagree about where it starts and ends.
+    """
+    fm_match = re.match(
+        r"^---\n(.*?)\n---\n", (skill_dir / "SKILL.md").read_text(), re.DOTALL
+    )
+    return fm_match.group(1) if fm_match else None
+
+
 def check_frontmatter(skill_dir: Path) -> list[str]:
     errors: list[str] = []
     skill_md = skill_dir / "SKILL.md"
     if not skill_md.exists():
         errors.append(f"{skill_dir.name}: missing SKILL.md")
         return errors
-    content = skill_md.read_text()
-    fm_match = re.match(r"^---\n(.*?)\n---\n", content, re.DOTALL)
-    if not fm_match:
+    fm = read_frontmatter(skill_dir)
+    if fm is None:
         errors.append(f"{skill_dir.name}: missing YAML frontmatter")
         return errors
-    fm = fm_match.group(1)
     name_match = re.search(r"^name:\s*(.+)$", fm, re.MULTILINE)
     if not name_match:
         errors.append(f"{skill_dir.name}: frontmatter missing `name:`")
@@ -730,29 +740,37 @@ def check_frontmatter(skill_dir: Path) -> list[str]:
 
 # --- Check 6: mode surface (#847) ------------------------------------------
 
-#: A parenthetical that scopes a line to one mode: `(live)`, `(cache only)`,
-#: `(in live mode)`, `(live mode: ...)`.
-MODE_TAG_RE = re.compile(r"\((?:in\s+)?(cache|live)\b[^)]*\)", re.IGNORECASE)
+#: A parenthetical that scopes a line to one mode. Two shapes:
+#:   - it opens with the mode: `(live)`, `(cache only)`, `(in live mode)`,
+#:     `(only in cache mode)`, `(live mode: ...)`;
+#:   - it names "<mode> mode" anywhere: `(this check is cache mode only)`.
+#: `(?!-)` keeps `(live-reads must be on)` from reading as a `live` tag.
+MODE_TAG_RE = re.compile(
+    r"\((?:(?:only\s+)?in\s+)?(cache|live)\b(?!-)[^)]*\)"
+    r"|\([^)]*?\b(cache|live)[ -]mode\b[^)]*\)",
+    re.IGNORECASE,
+)
 #: A backticked `name: value` argument, e.g. `period: "this_month"`.
 ARG_SPAN_RE = re.compile(r"`([a-z_][a-z0-9_]*):\s*[^`]*`")
 
 
 def declared_modes(skill_dir: Path) -> tuple[set[str], list[str]]:
     """The `metadata.modes` a SKILL.md declares, plus any errors."""
-    skill_md = skill_dir / "SKILL.md"
-    fm_match = re.match(r"^---\n(.*?)\n---\n", skill_md.read_text(), re.DOTALL)
+    fm = read_frontmatter(skill_dir)
     hint = (
         f'{skill_dir.name}/SKILL.md: frontmatter must declare the server mode(s) '
         'the skill runs in, as `metadata:` then `  modes: "live, cache"` '
         f"(values: {', '.join(MODES)}). Live is the mode whenever --write is on."
     )
-    if not fm_match:
+    if fm is None:
         return set(), []  # check_frontmatter already reports this
-    meta = re.search(r"^metadata:\s*\n((?:[ \t]+.*\n?)*)", fm_match.group(1) + "\n", re.MULTILINE)
+    meta = re.search(r"^metadata:\s*\n((?:[ \t]+.*\n?)*)", fm + "\n", re.MULTILINE)
     modes_line = meta and re.search(r"^[ \t]+modes:\s*(.+)$", meta.group(1), re.MULTILINE)
     if not modes_line:
         return set(), [hint]
-    values = re.findall(r"[A-Za-z_]+", modes_line.group(1))
+    # Drop a trailing YAML comment (`modes: "live"  # writes`) before reading
+    # values, or its words would be reported as unknown modes.
+    values = re.findall(r"[A-Za-z_]+", modes_line.group(1).split("#", 1)[0])
     unknown = [v for v in values if v not in MODES]
     if unknown or not values:
         return set(), [
@@ -781,7 +799,9 @@ def check_mode_surface(
             ]
             if not tools:
                 continue
-            tags = {m.lower() for m in MODE_TAG_RE.findall(line)}
+            tags = {
+                (a or b).lower() for a, b in MODE_TAG_RE.findall(line)
+            }
             where = _loc(skill_dir, doc, line_no)
             for tool in dict.fromkeys(tools):
                 avail = tool_modes[tool]

@@ -204,7 +204,7 @@ Phase 2 built an in-memory list of all findings. Phase 3 presents a batch from t
 
 5. **Loop back to Phase 3** with the pruned findings list. Present the next batch. Repeat until the list is empty or the user signals they're done.
 
-**Why a mutable list, not a re-pull:** writes go through GraphQL directly to Copilot's servers, but the local LevelDB cache is fed by the desktop app's sync (a few minutes' lag). Re-pulling between batches would surface stale reads that don't yet reflect what was just written. The Phase 2 snapshot is the freshest view we have; pruning items as they're fixed keeps it accurate within the session.
+**Why a mutable list, not a re-pull:** reads and writes both go through Copilot's API, and each write updates the server's in-memory copy of what it changed, so a re-pull would mostly agree. It would still cost a full 6-month fetch per batch, and it would re-run the Phase 2 heuristics over data the user has just reviewed, turning up findings they already declined. The Phase 2 snapshot, pruned as items are fixed or skipped, is the list the user is working through.
 
 ## Phase 5 — Final Sweep + Profile Summary
 
@@ -249,11 +249,11 @@ End with a brief summary:
 - Any items the user deferred or rejected — note them so they can revisit.
 - Suggested next cleanup date based on transaction volume (e.g., "You get ~120 transactions/month — I'd run this again in 2-3 weeks").
 
-**Sync-lag note:** Always close with:
+**Closing note:** Always close with:
 
-> "Your fixes are live in Copilot Money. The local cache will catch up on next sync — usually a few minutes. If you re-run /finance-cleanup right away and your fixes seem missing, that's sync lag; wait a couple minutes or check the app directly."
+> "Your fixes are live in Copilot Money. If the app still shows an old value, refresh it; the change is already saved."
 
-This pre-empts the common confusion when a user re-opens /finance-cleanup right after writing and sees the just-fixed items still flagged.
+This pre-empts the confusion when an open app tab still shows the value from before the fix.
 
 ## Rules
 
@@ -270,5 +270,5 @@ This pre-empts the common confusion when a user re-opens /finance-cleanup right 
 11. **Large datasets go to disk.** MCP tool responses >100KB are saved to temp files instead of returned inline. Use Python via Bash to process these files — do not try to read them into context. Transaction, account and recurring reads return terse rows by default, so a 100-row transaction page measures ~28KB; opting fat fields back in via `fields` can still cross the threshold.
 12. **Income is intentionally uncategorized.** Income transactions (negative amounts) have no category on purpose. Never flag them as uncategorized or try to assign a category.
 13. **`exclude_transfers` defaults to true.** `get_transactions_live` hides internal transfers by default. To analyze transfers (misclassified transfer detection), pass `exclude_transfers: false`.
-14. **Findings list is the session source of truth.** Within a session, the in-memory findings list from Phase 2 is what Phase 3 presents and Phase 4 prunes. Do NOT re-pull from cache after writes — the local cache is stale until the Copilot Money app syncs (a few minutes after each write). Surface only what remains in the pruned list.
+14. **Findings list is the session source of truth.** Within a session, the in-memory findings list from Phase 2 is what Phase 3 presents and Phase 4 prunes. Do NOT re-pull after writes: a re-pull costs a full fetch and re-surfaces findings the user already declined (see Phase 4). Surface only what remains in the pruned list.
 15. **Profile updates are per-batch, not end-of-session.** The user may walk away mid-cleanup; preserve learned state immediately so the next session benefits. Phase 5 is a final-sweep catch-all, not the primary write point.

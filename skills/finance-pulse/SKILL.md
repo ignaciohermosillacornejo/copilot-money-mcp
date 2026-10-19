@@ -35,11 +35,11 @@ Give the user a 30-second financial check-in. One number, a few flags, prospecti
    - Transactions for three windows: `get_transactions_live` (live) / `get_transactions` (cache), each with `exclude_transfers: true` and one of `period: "this_month"`, `period: "last_month"`, `period: "last_90_days"`. Both tools take these arguments.
      - In live mode also pass `fields: ["default", "type", "recurring_id"]` to `get_transactions_live` (live): `type` is how 2.2 keeps REGULAR rows only, and `recurring_id` is what the 2.5 price-drift check groups by. Neither is in the default row.
      - In cache mode no `fields` argument is needed on `get_transactions` (cache): the default row has what this skill computes from it (amounts, category names, merchant names, dates).
-   - The category list (names, which are excluded): `get_categories_live` (live) / `get_categories` (cache). Per-category spending is computed from the transaction rows (2.2, 2.4), not read from this tool, so the figure is the same in both modes.
+   - The category list (names, and which categories are excluded): `get_categories_live` (live) / `get_categories` (cache). Per-category spending is computed from the transaction rows (2.2, 2.4), not read from this tool, so the figure is the same in both modes.
    - Recurring charges, live mode: `get_recurring_live` (live), default rows. These carry `state`, `nextPaymentDate` and `nextPaymentAmount` but no charge history: their `payments` holds only the next payment.
    - Recurring charges, cache mode: `get_recurring_transactions` (cache) with `period: "last_90_days"` and `fields: ["default", "transactions"]`. The `fields` argument is what the cache-mode price-drift check in 2.5 reads: the matched per-charge `transactions` array is not in the default row.
    - This month's unpaid bills, live mode: `get_upcoming_recurrings_live` (live). Needed for the "spent this month" figure in 2.2; see the caveat there about its horizon.
-   - Budgets, live mode: `get_budgets_live` (live), no arguments.
+   - Budgets, live mode: `get_budgets_live` (live) with `months_window: 1`. Only the current month is needed, and the default returns 12 months per budget.
    - Budgets, cache mode: `get_budgets` (cache) with `active_only: true`.
    - Savings goals: `get_goals` with `active_only: true` (both modes).
 

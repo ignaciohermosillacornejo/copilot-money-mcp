@@ -804,6 +804,49 @@ describe('mode surface (#847)', () => {
     );
   });
 
+  test('a trailing YAML comment on the modes line is not read as mode values', async () => {
+    // The shape CONTRIBUTING.md documents (review on #856).
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith('Call `get_transactions`.', 'live"   # writes, so live only; "x'),
+      },
+      ({ code, stderr }) => {
+        expect(stderr).not.toContain('FAIL');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('a tag may put the mode after "only in", or name "<mode> mode" anywhere', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith(
+          'Call `get_accounts_live` (only in live mode).\nCall `get_accounts` (this check is cache mode only).',
+          'live, cache'
+        ),
+      },
+      ({ code, stderr }) => {
+        expect(stderr).not.toContain('FAIL');
+        expect(code).toBe(0);
+      }
+    );
+  });
+
+  test('"(live-reads ...)" is not a live tag', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith('Call `get_accounts_live` (live-reads must be on).', 'live, cache'),
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('`get_accounts_live` is listed only in live mode');
+      }
+    );
+  });
+
   test('a tag for the wrong mode does not excuse the tool', async () => {
     await withRepo(
       { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts` (live).', 'live, cache') },
