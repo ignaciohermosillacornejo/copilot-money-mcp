@@ -743,11 +743,15 @@ def check_frontmatter(skill_dir: Path) -> list[str]:
 #: A parenthetical that scopes a line to one mode. Two shapes:
 #:   - it opens with the mode: `(live)`, `(cache only)`, `(in live mode)`,
 #:     `(only in cache mode)`, `(live mode: ...)`;
-#:   - it names "<mode> mode" anywhere: `(this check is cache mode only)`.
-#: `(?!-)` keeps `(live-reads must be on)` from reading as a `live` tag.
+#:   - later in the parenthetical, SCOPE phrasing only: "<mode> mode only",
+#:     "only in <mode> mode" or "in <mode> mode", e.g.
+#:     `(this check is cache mode only)`, `(skip it in live mode)`.
+#: A bare mention of a mode mid-parenthetical (`(the way cache mode always
+#: did)`) is prose, not a scope, and does not excuse the tool. `(?!-)` keeps
+#: `(live-reads must be on)` from reading as a `live` tag.
 MODE_TAG_RE = re.compile(
     r"\((?:(?:only\s+)?in\s+)?(cache|live)\b(?!-)[^)]*\)"
-    r"|\([^)]*?\b(cache|live)[ -]mode\b[^)]*\)",
+    r"|\([^)]*?(?:\bin\s+(cache|live)[ -]mode\b|\b(cache|live)[ -]mode\s+only\b)[^)]*\)",
     re.IGNORECASE,
 )
 #: A backticked `name: value` argument, e.g. `period: "this_month"`.
@@ -800,7 +804,8 @@ def check_mode_surface(
             if not tools:
                 continue
             tags = {
-                (a or b).lower() for a, b in MODE_TAG_RE.findall(line)
+                next(g for g in groups if g).lower()
+                for groups in MODE_TAG_RE.findall(line)
             }
             where = _loc(skill_dir, doc, line_no)
             for tool in dict.fromkeys(tools):

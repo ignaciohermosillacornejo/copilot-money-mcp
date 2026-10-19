@@ -64,7 +64,7 @@ Free Money = Net Monthly Income
 Use the same computation as `/finance-pulse`. If the profile has these numbers, use them. If not, compute from transaction data using Python via Bash.
 
 **"Spent this month" must match the app.** When you quote what the user has spent this month, in total or for a category, use `/finance-pulse` section 2.2, which is how the Copilot app computes it. Summing every `amount` is wrong, because income rows are negative. In short:
-1. Take this month's rows. Transfers and excluded-category rows are already dropped by default.
+1. Take this month's rows. Transfers and excluded-category rows are already dropped by default. In live mode a row the user excluded individually, in a category that is not excluded, cannot be filtered out (the API has no per-transaction exclusion flag), so the live total can run slightly high.
 2. Keep spending rows only: `type` is `REGULAR` in live mode. In cache mode rows have no type, and skipping uncategorized rows drops income.
 3. Skip uncategorized rows.
 4. Net the amounts within each category, so refunds offset purchases.

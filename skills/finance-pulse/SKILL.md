@@ -116,7 +116,7 @@ If `~/.claude/copilot-money/user-profile.md` has empty Income & Obligations sect
 
 Whenever you report what the user has "spent this month" (Quick Stats, a category total, "how much have I spent"), compute it the way the Copilot app does, so the number matches the one on their screen. Summing every `amount` does not: income rows are negative and net against all spending.
 
-1. Take this month's transaction rows. Transfers and rows in excluded categories are already gone, since `exclude_transfers` and `exclude_excluded` default to true.
+1. Take this month's transaction rows. Transfers and rows in excluded categories are already gone, since `exclude_transfers` and `exclude_excluded` default to true. One gap in live mode: Copilot's API exposes no per-transaction exclusion flag, so a row the user excluded individually, in a category that is not excluded, cannot be filtered out. The live total can therefore run slightly high. Cache mode filters both kinds of exclusion.
 2. Keep spending rows only. Live mode: keep rows whose `type` is `REGULAR`, which drops `INCOME`. Cache mode: rows carry no type, so rely on step 3, which drops income because Copilot leaves income uncategorized (Rule 7).
 3. Skip uncategorized rows (no `category_name`). The app does not count them.
 4. Net per category: sum `amount` within each category, so a refund (negative) offsets a purchase in the same category. The sum over categories is the posted spend.

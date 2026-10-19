@@ -834,6 +834,21 @@ describe('mode surface (#847)', () => {
     );
   });
 
+  test('a parenthetical that merely mentions a mode is not a scope tag', async () => {
+    // Review on #856: "<mode> mode" anywhere in a parenthetical used to count,
+    // so an unconditional instruction passed in a two-mode skill.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith('Call `get_accounts` (the way cache mode always did).', 'live, cache'),
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('`get_accounts` is listed only in cache mode');
+      }
+    );
+  });
+
   test('"(live-reads ...)" is not a live tag', async () => {
     await withRepo(
       {
