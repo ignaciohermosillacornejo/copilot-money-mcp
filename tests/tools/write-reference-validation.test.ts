@@ -41,6 +41,8 @@ const RECURRING_ID = 'Ty4uI7oP1aS4dF7gH0jK';
 const CAT_KNOWN = 'Lz5xC8vB1nM4qW7eR0tY';
 /** Well-formed (passes the id-shape check) but in no category list. */
 const CAT_UNKNOWN = 'Ui9oP2aS5dF8gH1jK4lZ';
+const TAG_IN_LIST = 'Tk4lZ7xC0vB3nM6qW9eR';
+const TAG_UNKNOWN = 'Tu7iO0pA3sD6fG9hJ2kL';
 
 const META_DIR = mkdtempSync(join(tmpdir(), 'write-reference-validation-'));
 afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
@@ -69,7 +71,7 @@ function setup() {
   );
   const client = createMockGraphQLClient({
     ...liveCategoryMocks([CAT_KNOWN]),
-    Tags: { tags: [] },
+    Tags: { tags: [{ id: TAG_IN_LIST, name: 'Trip', colorName: 'BLUE1' }] },
     Transactions: {
       transactions: { edges: [], pageInfo: { endCursor: null, hasNextPage: false } },
     },
@@ -169,7 +171,7 @@ const CATEGORY_EXEMPT: Record<string, string> = {
 
 describe('category_id is validated on every write that stores one (#846)', () => {
   test('every write tool taking a category_id has a case or a stated exemption', () => {
-    const taking = writeToolsTaking('category_id');
+    const taking = writeToolsTaking(/(^|_)category_id$/);
     expect(taking.length).toBeGreaterThan(0);
     const covered = [...Object.keys(CATEGORY_CASES), ...Object.keys(CATEGORY_EXEMPT)].sort();
     expect(covered).toEqual(taking);
@@ -204,6 +206,55 @@ describe('category_id is validated on every write that stores one (#846)', () =>
     );
     expect(mutationsSent()).toEqual(['EditBudget']);
   });
+});
+
+// ── tag ids ─────────────────────────────────────────────────────────────────
+//
+// The same rule for the other reference type: Copilot drops an unknown tag id
+// silently, so every write that takes tag ids validates them first.
+
+/** Args for one write, with `tagId` in its tag-id position. */
+const TAG_CASES: Record<string, (tagId: string) => Record<string, unknown>> = {
+  create_transaction: (tagId) => ({
+    ...CATEGORY_CASES.create_transaction!(CAT_KNOWN),
+    tag_ids: [tagId],
+  }),
+  update_transaction: (tagId) => ({ ...routing, transaction_id: TX_ID, tag_ids: [tagId] }),
+  update_transactions: (tagId) => ({
+    edits: [{ ...routing, transaction_id: TX_ID, tag_ids: [TAG_IN_LIST, tagId] }],
+  }),
+  bulk_edit_transactions: (tagId) => ({
+    rows: [{ ...routing, transaction_id: TX_ID }],
+    add_tag_ids: [tagId],
+  }),
+};
+
+describe('tag ids are validated on every write that takes them (#846)', () => {
+  test('every write tool taking tag ids has a case', () => {
+    expect(Object.keys(TAG_CASES).sort()).toEqual(writeToolsTaking(/(^|_)tag_ids$/));
+  });
+
+  test.each(Object.keys(TAG_CASES))(
+    '%s: an unknown tag id is rejected with nothing sent',
+    async (tool) => {
+      const { call, mutationsSent } = setup();
+      await expect(call(tool, TAG_CASES[tool]!(TAG_UNKNOWN))).rejects.toThrow(
+        `Tag not found: ${TAG_UNKNOWN}`
+      );
+      expect(mutationsSent()).toEqual([]);
+    }
+  );
+
+  test.each(Object.keys(TAG_CASES))(
+    '%s: control — a known tag id reaches the mutation',
+    async (tool) => {
+      const { call, mutationsSent } = setup();
+      await expect(call(tool, TAG_CASES[tool]!(TAG_IN_LIST))).rejects.toThrow(
+        /mutation reached the server/
+      );
+      expect(mutationsSent().length).toBeGreaterThan(0);
+    }
+  );
 });
 
 // ── reference lists cached for a day ─────────────────────────────────────────
@@ -267,6 +318,21 @@ describe('reference lists: a miss on a cached list refetches once (#846)', () =>
     r.categories.push(CAT_UNKNOWN); // created in the app after the list was cached
     await expect(r.edit({ category_id: CAT_UNKNOWN })).rejects.toThrow(/mutation reached/);
     expect(r.fetches.categories).toBe(2);
+  });
+
+  test('two categories created since the list was cached are both accepted back to back', async () => {
+    // A refetch that FINDS the id must not arm the throttle for the next one.
+    const r = referenceSetup();
+    spyOn(Date, 'now').mockReturnValue(Date.now());
+    await expect(r.edit({ category_id: CAT_KNOWN })).rejects.toThrow(/mutation reached/);
+    const second = 'Cs2dF5gH8jK1lZ4xC7vB';
+    r.categories.push(CAT_UNKNOWN, second);
+    await expect(r.edit({ category_id: CAT_UNKNOWN })).rejects.toThrow(/mutation reached/);
+    r.categories.push('Ct3fG6hJ9kL2zX5cV8bN');
+    await expect(r.edit({ category_id: 'Ct3fG6hJ9kL2zX5cV8bN' })).rejects.toThrow(
+      /mutation reached/
+    );
+    expect(r.fetches.categories).toBe(3);
   });
 
   test('a tag created since the list was cached is accepted after one refetch', async () => {

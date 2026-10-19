@@ -58,7 +58,7 @@ function stubLiveDb(graphqlClient: unknown) {
       return out;
     },
     getCategoriesCache: () => ({ ...readThrough, invalidate: () => {} }),
-    getTagsCache: () => readThrough,
+    getTagsCache: () => ({ ...readThrough, invalidate: () => {} }),
     getRecurringCache: () => ({ peek: () => null }),
     resolveRolloversFlag: async () => false,
     getClient: () => graphqlClient,

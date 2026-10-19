@@ -3209,7 +3209,8 @@ export class CopilotMoneyTools {
 
   /** Minimum gap between two miss-driven refetches of one reference list. */
   static readonly REFERENCE_REFETCH_MIN_MS = 30_000;
-  private readonly lastReferenceRefetch = new Map<string, number>();
+  /** Last WASTED refetch per reference cache (keyed by the cache itself). */
+  private readonly lastReferenceRefetch = new WeakMap<object, number>();
 
   /**
    * A live reference list (categories, tags) that holds every id in `ids`
@@ -3217,30 +3218,33 @@ export class CopilotMoneyTools {
    * id created in the app since would be refused; when a CACHED list misses
    * an id it is refetched once before the caller rejects. Two limits keep a
    * caller retrying an id that does not exist from paying a fetch per try:
-   * at most one such refetch per list per REFERENCE_REFETCH_MIN_MS, and a
+   * at most one wasted refetch (one that still misses an id, or fails) per
+   * list per REFERENCE_REFETCH_MIN_MS, so a refetch that finds the new id
+   * never delays the next one; and a
    * refetch that fails returns the rows already held, so the caller still
    * reports the id as not found (the cache, dropped for the refetch, simply
    * loads again on its next read).
    */
   private async referenceRows<T extends { id: string }>(
-    key: string,
     cache: SnapshotCache<T>,
     load: () => Promise<T[]>,
     ids: readonly string[]
   ): Promise<T[]> {
+    const missesAny = (rows: readonly T[]) => ids.some((id) => !rows.some((r) => r.id === id));
     const first = await cache.read(load);
-    const missing = ids.some((id) => !first.rows.some((r) => r.id === id));
-    if (!missing || !first.hit) return first.rows;
+    if (!missesAny(first.rows) || !first.hit) return first.rows;
     const now = Date.now();
-    const last = this.lastReferenceRefetch.get(key);
+    const last = this.lastReferenceRefetch.get(cache);
     if (last !== undefined && now - last < CopilotMoneyTools.REFERENCE_REFETCH_MIN_MS) {
       return first.rows;
     }
-    this.lastReferenceRefetch.set(key, now);
     cache.invalidate();
     try {
-      return (await cache.read(load)).rows;
+      const rows = (await cache.read(load)).rows;
+      if (missesAny(rows)) this.lastReferenceRefetch.set(cache, now);
+      return rows;
     } catch {
+      this.lastReferenceRefetch.set(cache, now);
       return first.rows;
     }
   }
@@ -3266,7 +3270,6 @@ export class CopilotMoneyTools {
     const liveDb = this.liveDb;
     if (liveDb) {
       const rows = await this.referenceRows(
-        'categories',
         liveDb.getCategoriesCache(),
         async () => {
           const rollovers = await liveDb.resolveRolloversFlag();
@@ -3291,7 +3294,6 @@ export class CopilotMoneyTools {
     const liveDb = this.liveDb;
     if (liveDb) {
       const rows = await this.referenceRows(
-        'tags',
         liveDb.getTagsCache(),
         () => fetchTags(liveDb.getClient()),
         tagIds
@@ -5120,10 +5122,20 @@ export class CopilotMoneyTools {
     // A budget on a category that does not exist is a write to nothing the app
     // can show; same single check as every other category reference (#846).
     // Clearing (amount 0) is exempt, so a budget left on a category deleted in
-    // the app can still be cleared.
+    // the app can still be cleared; but then nothing confirms the category, so
+    // the write-through below is skipped rather than synthesizing a cached
+    // budget row for it (the caches catch up on their TTL).
     validateDocId(args.category_id, 'category_id');
+    let categoryKnown = true;
     if (parseFloat(args.amount) !== 0) {
       await this.validateCategoryId(args.category_id);
+    } else {
+      try {
+        await this.validateCategoryId(args.category_id);
+      } catch (e) {
+        if (!(e instanceof Error && e.message.startsWith('Category not found'))) throw e;
+        categoryKnown = false;
+      }
     }
 
     try {
@@ -5132,8 +5144,10 @@ export class CopilotMoneyTools {
         amount: args.amount,
         month: args.month,
       });
-      this.db.patchCachedBudget(args.category_id, parseFloat(args.amount), args.month);
-      this.liveDb?.patchLiveCategoryBudget(args.category_id, parseFloat(args.amount), args.month);
+      if (categoryKnown) {
+        this.db.patchCachedBudget(args.category_id, parseFloat(args.amount), args.month);
+        this.liveDb?.patchLiveCategoryBudget(args.category_id, parseFloat(args.amount), args.month);
+      }
       return {
         success: true,
         category_id: result.categoryId,
