@@ -451,9 +451,8 @@ export const updateTransactionTool = defineTool({
       'category_id, note, tag_ids, type, reviewed, date, or amount — only the fields you ' +
       'pass change. note="" clears the note; tag_ids=[] clears all tags. category_id cannot ' +
       'be combined with type INCOME or INTERNAL_TRANSFER (those clear the category ' +
-      'server-side) — pass the type alone, or REGULAR to keep/set a category. amount, date ' +
-      'and type edits on a known split parent, or when that cannot be checked, are refused ' +
-      '(balance effect unverified). If the ' +
+      'server-side) — pass the type alone, or REGULAR to keep/set a category. ' +
+      'amount/date/type edits of a known split parent (or when unchecked) are refused. If the ' +
       'transaction cannot be resolved locally (outside the resolution window), also pass ' +
       'account_id and item_id from a live read. To edit MANY transactions use ' +
       'update_transactions (an array of these same edits in one call); for bulk review-only ' +

@@ -623,6 +623,19 @@ function mutableEditKeys(edit: TransactionEdit): string[] {
 }
 
 /**
+ * A local cache patch: never the split fields, which CopilotMoneyTools'
+ * split-evidence index (#836) assumes no patch rewrites in place. Typed so a
+ * builder that tried would not compile. Not `Omit<Transaction, ...>`: the
+ * model is a passthrough schema with an index signature, and Omit over one
+ * keeps only the index signature, so every key (the split fields included)
+ * would type as `unknown` and still be assignable.
+ */
+type LocalTransactionPatch = Partial<Transaction> & {
+  parent_transaction_id?: never;
+  children_transaction_ids?: never;
+};
+
+/**
  * Map MCP fields → EditTransaction input shape. Keyed by presence so an
  * explicit `note: ""` clears the note and `tag_ids: []` clears all tags.
  */
@@ -692,8 +705,8 @@ function serverCategory(
 export function buildEditCachePatch(
   edit: TransactionEdit,
   server: { type?: unknown; categoryId?: unknown; tags?: unknown }
-): Partial<Transaction> {
-  const patch: Partial<Transaction> = {};
+): LocalTransactionPatch {
+  const patch: LocalTransactionPatch = {};
   if ('name' in edit && edit.name !== undefined) patch.name = edit.name.trim();
   if ('category_id' in edit && edit.category_id !== undefined) patch.category_id = edit.category_id;
   if ('note' in edit && edit.note !== undefined) patch.user_note = edit.note;
@@ -743,8 +756,8 @@ export function buildBulkEditCachePatch(
     remove_tag_ids?: string[];
   },
   tx: { type?: unknown; categoryId?: unknown; tags?: unknown }
-): Partial<Transaction> {
-  const patch: Partial<Transaction> = {};
+): LocalTransactionPatch {
+  const patch: LocalTransactionPatch = {};
   if (edit.category_id !== undefined) patch.category_id = edit.category_id;
   if (edit.reviewed !== undefined) patch.user_reviewed = edit.reviewed;
   if (edit.type === 'INCOME' || edit.type === 'INTERNAL_TRANSFER') patch.category_id = '';
@@ -3851,6 +3864,10 @@ export class CopilotMoneyTools {
     // The check runs first: the window omits a split parent that still has
     // children, so resolution would answer "not found" and recommend a
     // routing bypass the check then refuses (#836).
+    // Pure argument checks before any I/O: a malformed routing id must not
+    // pay the window load, or be reported as a failed load.
+    if (args.account_id !== undefined) validateDocId(args.account_id, 'account_id');
+    if (args.item_id !== undefined) validateDocId(args.item_id, 'item_id');
     const loadWindow = this.sharedWindowLoad();
     await this.refuseSplitParentBalanceEdit(args, 'update_transaction', loadWindow);
     const [route] = await this.resolveEditRoutes(
@@ -3990,9 +4007,17 @@ export class CopilotMoneyTools {
       seen.add(edit.transaction_id);
     });
 
-    // --- Phase 2: routing resolution, batched (one windowed fetch) ---
-    // One window load serves resolution and the split-parent check below (#836).
+    // --- Phase 2: split parents (#836) — an amount/date/type edit of one
+    // refuses the whole batch, before any write, and before routing
+    // resolution: the window omits a parent that still has children, so
+    // resolving first would answer "not found" and recommend the bypass this
+    // check then refuses. One window load serves every edit and resolution.
     const loadWindow = this.sharedWindowLoad();
+    for (const [i, edit] of edits.entries()) {
+      await this.refuseSplitParentBalanceEdit(edit, label(i), loadWindow);
+    }
+
+    // --- Phase 3: routing resolution, batched (one windowed fetch) ---
     const routes = await this.resolveEditRoutes(
       edits,
       label,
@@ -4000,17 +4025,12 @@ export class CopilotMoneyTools {
       loadWindow
     );
 
-    // --- Phase 3: per-field validation for every edit, still before any write ---
+    // --- Phase 4: per-field validation for every edit, still before any write ---
     for (const [i, edit] of edits.entries()) {
       await this.validateEditFields(edit, label(i));
     }
-    // Split parents (#836): an amount/date/type edit of one refuses the whole
-    // batch, before any write. One window load serves every edit checked.
-    for (const [i, edit] of edits.entries()) {
-      await this.refuseSplitParentBalanceEdit(edit, label(i), loadWindow);
-    }
 
-    // --- Phase 4: write ---
+    // --- Phase 5: write ---
     // Keyed by the caller's index, not push order: the pool runs 5 wide, so
     // completion order is nondeterministic and `results[]` would come back in
     // a different order for identical input. Sorted back into input order
@@ -4445,8 +4465,9 @@ export class CopilotMoneyTools {
    *
    * Callers: delete_transaction, the amount/date/type edits of
    * update_transaction(s), add_transaction_to_recurring, create_recurring,
-   * split_transaction and bulk_edit_transactions with a type. Each pays the local-cache read above,
-   * which can decode (worst case the decode timeout), and the window load.
+   * split_transaction and bulk_edit_transactions with a type. Each pays the
+   * local-cache read above, which can decode (worst case the decode
+   * timeout), and the window load.
    *
    * `parentOfTarget`: a window row for `id`, when present, decides it over
    * local rows, which may be stale. `windowChecked` is absent when no window
@@ -5397,25 +5418,21 @@ export class CopilotMoneyTools {
     }
 
     const loadWindow = this.sharedWindowLoad();
-    const entries = await this.resolveBulkTargets(
-      args,
-      'edit out-of-window transactions',
-      loadWindow
-    );
-    const seen = new Set<string>();
-    for (const entry of entries) {
-      if (seen.has(entry.id)) {
-        throw new Error(`bulk_edit_transactions: duplicate transaction_id ${entry.id}`);
-      }
-      seen.add(entry.id);
-    }
-
     // Split parents (#836): a type change on one has the same unverified
     // balance effect as update_transaction's, so it is refused the same way,
     // before anything is sent. Category, tag and reviewed changes are not
-    // checked (no balance effect). One window load serves every target.
+    // checked (no balance effect). One window load serves every target and
+    // resolution. Checked on the requested ids BEFORE resolution, which would
+    // otherwise answer "not found" for a parent the window omits.
     if (type !== undefined) {
-      for (const entry of entries) {
+      const requested =
+        (args.rows !== undefined
+          ? args.rows.map((r) => r?.transaction_id)
+          : args.transaction_ids) ?? [];
+      for (const id of Array.isArray(requested) ? requested : []) {
+        if (typeof id !== 'string') continue; // resolveBulkTargets reports it
+        validateDocId(id, 'transaction_id');
+        const entry = { id };
         const evidence = await this.splitParentEvidence(entry.id, loadWindow);
         // mutation-guard: bulk_edit_transactions does not retype a split parent
         if (evidence.isParent) {
@@ -5429,6 +5446,19 @@ export class CopilotMoneyTools {
         }
         CopilotMoneyTools.refuseUncheckedSplitTarget(evidence, entry.id, 'bulk_edit_transactions');
       }
+    }
+
+    const entries = await this.resolveBulkTargets(
+      args,
+      'edit out-of-window transactions',
+      loadWindow
+    );
+    const seen = new Set<string>();
+    for (const entry of entries) {
+      if (seen.has(entry.id)) {
+        throw new Error(`bulk_edit_transactions: duplicate transaction_id ${entry.id}`);
+      }
+      seen.add(entry.id);
     }
 
     const input: BulkEditTransactionInput = {};
@@ -5871,6 +5901,9 @@ export class CopilotMoneyTools {
         'create_recurring: account_id and item_id must be passed together (both from a live read) to bypass local resolution'
       );
     }
+    // Pure argument checks before any I/O (see update_transaction).
+    if (args.account_id !== undefined) validateDocId(args.account_id, 'account_id');
+    if (args.item_id !== undefined) validateDocId(args.item_id, 'item_id');
     const loadWindow = this.sharedWindowLoad();
     // Split parents (#836): a recurring seeded from one would count the
     // parent's amount on top of its children's, and derive its expected

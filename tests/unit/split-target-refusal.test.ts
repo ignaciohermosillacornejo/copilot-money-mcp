@@ -595,3 +595,38 @@ describe('create_recurring and update_transaction: split check before routing re
     expect(sent('CreateRecurring')).toHaveLength(0);
   });
 });
+
+describe('the batch tools check splits before routing resolution too (#836)', () => {
+  test('update_transactions and bulk_edit_transactions without routing ids name the split', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.updateTransactions({ edits: [{ transaction_id: PARENT_ID, amount: 150 }] })
+    ).rejects.toThrow(/is a split parent/);
+    await expect(
+      tools.bulkEditTransactions({ transaction_ids: [PARENT_ID], type: 'INCOME' })
+    ).rejects.toThrow(/is a split parent/);
+    expect(sent('EditTransaction')).toHaveLength(0);
+    expect(sent('BulkEditTransactions')).toHaveLength(0);
+  });
+
+  test('create_recurring without routing ids is refused when the window cannot be loaded', async () => {
+    const { tools, sent } = setup({ Transactions: new Error('synthetic network failure') });
+    await expect(
+      tools.createRecurring({ transaction_id: PLAIN_ID, frequency: 'MONTHLY' })
+    ).rejects.toThrow(/could not check/);
+    expect(sent('CreateRecurring')).toHaveLength(0);
+  });
+
+  test('a malformed routing id is rejected before any window load', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.updateTransaction({
+        transaction_id: PLAIN_ID,
+        account_id: 'not an id!',
+        item_id: ITEM_ID,
+        amount: 5,
+      })
+    ).rejects.toThrow(/Invalid account_id/);
+    expect(sent('Transactions')).toHaveLength(0);
+  });
+});
