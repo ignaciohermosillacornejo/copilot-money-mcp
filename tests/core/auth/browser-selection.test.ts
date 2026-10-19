@@ -827,14 +827,14 @@ describe('ambiguous --browser-profile', () => {
     writeLocalState(chrome, { Default: { name: 'Person A' } });
     const result = await mac({ browser: 'chrome', profile: 'name:Nobody' });
     expect(result.selection?.problem).toContain(
-      'display names are not listed; profile directories include: Default, each usable as "dir:<directory>";'
+      'display names are not listed; profile directories include: Default; select one with "dir:<directory>";'
     );
     expect(result.selection?.problem).not.toContain('Person A');
 
     // dir: misses list the same thing, in the same terms.
     const dirMiss = await mac({ browser: 'chrome', profile: 'dir:Nobody' });
     expect(dirMiss.selection?.problem).toContain(
-      '(profile directories include: Default, each usable as "dir:<directory>";'
+      '(profile directories include: Default; select one with "dir:<directory>";'
     );
   });
 
@@ -847,10 +847,23 @@ describe('ambiguous --browser-profile', () => {
     );
     const result = await mac({ browser: 'firefox', profile: 'name:Nope' });
     expect(result.selection?.problem).toContain(
-      'profiles.ini names are not listed; profile directories include: abc.default-release, ' +
-        'each usable as "dir:<directory>";'
+      'profiles.ini names are not listed; profile directories include: abc.default-release; ' +
+        'select one with "dir:<directory>";'
     );
     expect(result.selection?.problem).not.toContain('display names');
+
+    // With nothing to list, there is nothing to select with dir: either.
+    const empty = join(home, 'empty-ff');
+    mkdirSync(empty, { recursive: true });
+    writeFileSync(join(empty, 'profiles.ini'), '[Profile0]\nName=Gone\nIsRelative=1\nPath=gone\n');
+    const none = await extractRefreshTokenCandidates(undefined, {
+      platform: 'darwin',
+      home,
+      env: {},
+      selection: { browser: 'firefox', profile: 'dir:x', dataDir: empty },
+    });
+    expect(none.selection?.problem).toContain('(no profile directories were found;');
+    expect(none.selection?.problem).not.toContain('dir:<directory>');
     expect(result.selection?.problem).not.toContain('Someone');
   });
 
@@ -1383,13 +1396,11 @@ describe('--browser-data-dir', () => {
       // "dir:a1.work" would itself be ambiguous, so it must not be offered.
       expect(problem).not.toContain('"dir:a1.work"');
       // Either order: the pair's order is a collation detail.
-      const pairOf = (x: string, y: string): string =>
-        `No --browser-profile value tells "${x}" and "${y}" apart.`;
-      expect(
-        problem.includes(pairOf(flat, nested)) || problem.includes(pairOf(nested, flat))
-          ? 'found'
-          : problem
-      ).toBe('found');
+      const esc = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const either = `(?:${esc(flat)}|${esc(nested)})`;
+      expect(problem).toMatch(
+        new RegExp(`No --browser-profile value tells "${either}" and "${either}" apart\\.`)
+      );
       expect(problem).toContain(
         'Select one by dropping --browser-profile and pointing --browser-data-dir at one of ' +
           'those paths.'

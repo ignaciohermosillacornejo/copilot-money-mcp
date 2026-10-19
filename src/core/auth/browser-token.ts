@@ -977,7 +977,9 @@ export function resolveBrowserSelection(
       namespace === 'any'
         ? `available: ${listing}`
         : `${namespace === 'name' ? `${names} are not listed; ` : ''}` +
-          `profile directories include: ${listing}, each usable as "dir:<directory>"`;
+          (available.length
+            ? `profile directories include: ${listing}; select one with "dir:<directory>"`
+            : 'no profile directories were found');
     report.problem =
       `No ${browser} profile named "${profile}" was found ` +
       `(${listed}; checked: ${roots.join(', ')}).`;
