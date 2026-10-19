@@ -10,9 +10,11 @@
 import { describe, test, expect, beforeEach } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
+import type { TransactionType } from '../../src/core/graphql/transactions.js';
 import {
   createMockGraphQLClient,
   bulkEditEcho,
+  bulkServerTransaction,
   serverTransaction,
 } from '../helpers/mock-graphql.js';
 
@@ -352,5 +354,92 @@ describe('optimistic cache patching — recurrings', () => {
     const recs = (db as any)._recurring as Array<{ recurring_id: string }>;
 
     expect(recs.find((r) => r.recurring_id === 'r1')).toBeUndefined();
+  });
+});
+
+describe('update_transaction local patch follows the server row (#864 review)', () => {
+  let db: CopilotDatabase;
+
+  beforeEach(() => {
+    db = new CopilotDatabase('/fake');
+    (db as any)._allCollectionsLoaded = true;
+    (db as any)._cacheLoadedAt = Date.now();
+    (db as any)._transactions = [
+      {
+        transaction_id: 'txn1',
+        amount: 50,
+        date: '2026-04-01',
+        name: 'Coffee',
+        category_id: 'cat_food',
+        account_id: 'acc1',
+        item_id: 'item1',
+      },
+    ];
+    (db as any)._userCategories = [
+      { category_id: 'cat_req', name: 'Requested' },
+      { category_id: 'cat_srv', name: 'Server' },
+    ];
+    (db as any)._tags = [];
+  });
+
+  const editReturning = (fields: Parameters<typeof serverTransaction>[0]) =>
+    createMockGraphQLClient({
+      EditTransaction: { editTransaction: { transaction: serverTransaction(fields) } },
+    });
+  const local = () => ((db as any)._transactions as Array<Record<string, unknown>>)[0]!;
+
+  test("the server's category wins over the requested one", async () => {
+    const tools = new CopilotMoneyTools(db, editReturning({ id: 'txn1', categoryId: 'cat_srv' }));
+    await tools.updateTransaction({ transaction_id: 'txn1', category_id: 'cat_req' });
+    expect(local().category_id).toBe('cat_srv');
+  });
+
+  test("a type-only edit also takes the server's category", async () => {
+    // The `|| type` half of the condition: the request implies no category
+    // change for REGULAR, the response says otherwise.
+    const tools = new CopilotMoneyTools(
+      db,
+      editReturning({ id: 'txn1', type: 'REGULAR', categoryId: 'cat_srv' })
+    );
+    await tools.updateTransaction({ transaction_id: 'txn1', type: 'REGULAR' });
+    expect(local().category_id).toBe('cat_srv');
+  });
+
+  test("bulk_edit_transactions: a type-only edit also takes the server's category", async () => {
+    const client = createMockGraphQLClient({
+      BulkEditTransactions: {
+        bulkEditTransactions: {
+          updated: [
+            bulkServerTransaction({
+              id: 'txn1',
+              accountId: 'acc1',
+              itemId: 'item1',
+              type: 'REGULAR',
+              categoryId: 'cat_srv',
+            }),
+          ],
+          failed: [],
+        },
+      },
+    });
+    const tools = new CopilotMoneyTools(db, client);
+    await tools.bulkEditTransactions({
+      rows: [{ transaction_id: 'txn1', account_id: 'acc1', item_id: 'item1' }],
+      type: 'REGULAR',
+    });
+    expect(local().category_id).toBe('cat_srv');
+  });
+
+  test('a drifted type spelling falls back to the requested type for the flags', async () => {
+    const tools = new CopilotMoneyTools(
+      db,
+      editReturning({
+        id: 'txn1',
+        type: 'income' as unknown as TransactionType,
+        categoryId: '',
+      })
+    );
+    await tools.updateTransaction({ transaction_id: 'txn1', type: 'INCOME' });
+    expect(local()).toMatchObject({ income: true, internal_transfer: false });
   });
 });

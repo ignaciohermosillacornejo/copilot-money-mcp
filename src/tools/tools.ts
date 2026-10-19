@@ -628,7 +628,7 @@ function buildEditInput(edit: TransactionEdit): EditTransactionInput {
  * booleans `internal_transfer` and `income` (#864 review). Patched together so
  * a retype clears the old flag as well as setting the new one.
  */
-function typeFlagsPatch(type: string): Pick<Transaction, 'internal_transfer' | 'income'> {
+function typeFlagsPatch(type: TransactionType): Pick<Transaction, 'internal_transfer' | 'income'> {
   return { internal_transfer: type === 'INTERNAL_TRANSFER', income: type === 'INCOME' };
 }
 
@@ -661,12 +661,15 @@ function serverCategory(
  * in-memory cache so a subsequent read returns the new value without needing
  * refresh_database + re-decode.
  *
- * `type` has two local counterparts, `internal_transfer` and `income`, which
- * the decoder derives from Copilot's type (the model's `transaction_type` is
- * Plaid's), so both are patched (typeFlagsPatch), from `serverType`, the type
- * on the row the server returned, when given. The other effect patched is
- * INCOME/INTERNAL_TRANSFER clearing the category server-side (verified live),
- * so a follow-up read doesn't show a stale category.
+ * `server` is the row the server returned. When the edit set a type or a
+ * category, both follow that row (#864 review):
+ *  - the type's two local counterparts, `internal_transfer` and `income`
+ *    (the decoder derives them from Copilot's type; the model's
+ *    `transaction_type` is Plaid's), via typeFlagsPatch, from the returned
+ *    type when it is a known value, else the requested one;
+ *  - the category, from the returned `categoryId` when it is a string
+ *    (serverCategory), else the request-derived value, which includes the
+ *    INCOME/INTERNAL_TRANSFER clear (verified live).
  */
 function buildEditCachePatch(
   edit: TransactionEdit,
@@ -684,7 +687,11 @@ function buildEditCachePatch(
     patch.category_id = '';
   }
   // Category and type both follow the server's returned row when it carries
-  // them (#864 review): one provenance for the whole patch.
+  // them (#864 review): one provenance for the whole patch. This deliberately
+  // prefers the response over the verified INCOME/INTERNAL_TRANSFER clear: if
+  // a response ever kept the category on such a row, the local cache agrees
+  // with the live cache (which stores that same row) rather than with the
+  // inference.
   if (edit.category_id !== undefined || edit.type !== undefined) {
     const category = serverCategory(server, patch.category_id);
     if (category !== undefined) patch.category_id = category;
@@ -4412,6 +4419,8 @@ export class CopilotMoneyTools {
       const linkedType = knownTransactionType(tx.type);
       this.db.patchCachedTransaction(transaction_id, {
         recurring_id: tx.recurringId ?? recurring_id,
+        // Same rule as serverCategory, but with no fallback: a missing
+        // category leaves the cached one alone.
         ...(typeof tx.categoryId === 'string' ? { category_id: tx.categoryId } : {}),
         // Linking is not known to change the type, but the returned row says
         // what it is, so the type-derived flags follow it like the category.
