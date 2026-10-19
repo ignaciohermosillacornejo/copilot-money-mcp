@@ -994,34 +994,55 @@ describe('a throw drops the destination month too (#832)', () => {
       limit: 10,
     }) as Promise<{ _cache_hit: boolean }>;
 
-  test.each([
-    ['update_transaction', { ...routing, transaction_id: TX_UPDATE, date: '2025-02-10' }],
-    [
-      'update_transactions',
-      { edits: [{ ...routing, transaction_id: TX_BATCH_1, date: '2025-02-10' }] },
-    ],
-    [
-      'split_transaction',
-      {
-        ...routing,
-        transaction_id: TX_SPLIT_PARENT,
-        splits: [
-          { name: 'Part A', date: '2025-02-10', amount: 60, category_id: CAT_OLD },
-          { name: 'Part B', date: '2025-02-11', amount: 40, category_id: CAT_NEW },
-        ],
-      },
-    ],
-  ] as const)('%s: the month the request moved rows into is refetched', async (toolName, args) => {
-    const { call, read } = setup({
-      [MUTATION_OP[toolName]!]: new Error('synthetic transport timeout'),
-    });
-    await seedBoth(read, call);
-    expect((await readOther(call))._cache_hit).toBe(true);
+  /**
+   * Every transaction write that can place a row in another month: exactly
+   * the ones whose input schema carries a `date` (top level or in an array's
+   * items). Derived, so a new date-taking write must join.
+   */
+  const DESTINATION_CASES: Record<string, Record<string, unknown>> = {
+    create_transaction: { ...CASES.create_transaction!.args, date: '2025-02-10' },
+    update_transaction: { ...routing, transaction_id: TX_UPDATE, date: '2025-02-10' },
+    update_transactions: {
+      edits: [{ ...routing, transaction_id: TX_BATCH_1, date: '2025-02-10' }],
+    },
+    split_transaction: {
+      ...routing,
+      transaction_id: TX_SPLIT_PARENT,
+      splits: [
+        { name: 'Part A', date: '2025-02-10', amount: 60, category_id: CAT_OLD },
+        { name: 'Part B', date: '2025-02-11', amount: 40, category_id: CAT_NEW },
+      ],
+    },
+  };
 
-    await expect(call(toolName, args as Record<string, unknown>)).rejects.toThrow(
-      /synthetic transport timeout/
+  test('every date-taking transaction write tool has a destination case', () => {
+    const takesDate = (schema: unknown): boolean => {
+      if (!schema || typeof schema !== 'object') return false;
+      const sc = schema as { properties?: Record<string, unknown>; items?: unknown };
+      if (sc.properties && 'date' in sc.properties) return true;
+      return Object.values(sc.properties ?? {}).some(takesDate) || takesDate(sc.items);
+    };
+    const dateTools = transactionWriteToolNames().filter((name) =>
+      takesDate(TOOL_REGISTRY.get(name)!.schema.inputSchema)
     );
-
-    expect((await readOther(call))._cache_hit).toBe(false);
+    expect(Object.keys(DESTINATION_CASES).sort()).toEqual(dateTools);
   });
+
+  test.each(Object.keys(DESTINATION_CASES))(
+    '%s: the month the request moved rows into is refetched',
+    async (toolName) => {
+      const args = DESTINATION_CASES[toolName]!;
+      const { call, read } = setup({
+        [MUTATION_OP[toolName]!]: new Error('synthetic transport timeout'),
+      });
+      await seedBoth(read, call);
+      expect((await readOther(call))._cache_hit).toBe(true);
+
+      await expect(call(toolName, args as Record<string, unknown>)).rejects.toThrow(
+        /synthetic transport timeout/
+      );
+
+      expect((await readOther(call))._cache_hit).toBe(false);
+    }
+  );
 });
