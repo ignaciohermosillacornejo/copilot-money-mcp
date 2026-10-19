@@ -27,9 +27,11 @@ Add a row to the right section with the next free ID. A good case names:
    case ran, say which sources passed and mark the rest SKIP with its reason,
    e.g. `PASS (cache, live); web SKIP (not read)`; the same applies to a
    sub-check not repeated: `PASS (total); description gap SKIP (not re-checked, #N)`.
-   A run that does not repeat a case leaves its cell alone, except that a FAIL
-   or SKIP gets `; not re-run <date>` appended, so a recorded FAIL is never
-   overwritten by a SKIP and a plain PASS never accretes stamps. A side
+   A run that does not repeat a case leaves its cell alone, except that a
+   result other than a plain PASS (a FAIL, a dated SKIP, or a partial result)
+   gets `; not re-run <date>`, replacing any earlier such stamp. So a recorded
+   FAIL is never overwritten by a SKIP, a plain PASS never gets a stamp, and a
+   case never run stays `not run`. A side
    observation goes in the same parentheses after the verdict:
    `PASS (live, web; finding: …, #N)`.
 
@@ -106,7 +108,7 @@ need it.
 |---|---|---|---|---|
 | INV-01 | [P2] Position detail | live `get_holdings_live` row vs web holding detail (shares, value, average cost, total return) | Equal; return % may differ in the last rounding digit | 2026-10-14 PASS (rounding note #825) |
 | INV-02 | [P1] Holdings sum vs investment balance | Sum `institution_value` vs `get_investment_balance_live.current` | Equal unless a position includes unvested stock-plan shares; then documented | 2026-10-18 PASS (finding: unvested shares, Copilot's data, #825) |
-| INV-03 | [P2] Cache vs live holdings | cache `getHoldings` vs live | Same securities and quantities; prices differ by cache age; cash ticker `CUR:USD` vs `USD` (#825) | 2026-10-14 PASS (finding: known ticker diff) |
+| INV-03 | [P2] Cache vs live holdings | cache `getHoldings` vs live | Same securities and quantities; prices differ by cache age; cash ticker `CUR:USD` vs `USD` (#825) | 2026-10-14 PASS (finding: known ticker diff, #825) |
 | INV-04 | [P1] Hidden account that holds something | Hide an investment account in the web (user approval required each run); `refresh_cache`; holdings default vs `include_hidden: true`; investment balance vs web; unhide | Holdings exclude it by default and include it on request; investment balance (live and web) still includes it | 2026-10-18 PASS; description gap SKIP (not re-checked, #825) |
 | INV-05 | [P2] Allocation | `get_investment_allocation_live` vs web allocation; sum vs `get_investment_balance_live.current`; then scoped to one account and unscoped again | Percentages sum to 100 ± 0.1; amounts equal the web; the second unscoped call equals the first, not the scoped one | not run |
 | INV-06 | [P2] Aggregated holdings | `get_aggregated_holdings_live` per security vs the sum of `get_holdings_live` rows, with and without `include_hidden` | Equal to one of the two sums; record which, and flag a description gap if unstated | not run |
