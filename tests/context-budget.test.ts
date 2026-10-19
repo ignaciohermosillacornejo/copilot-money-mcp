@@ -534,8 +534,9 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 //
 // UNMOVED by #864 (+258: create_transaction +100 and update_transaction +102
 // for the manual-account balance-reset rule, add_transaction_to_recurring +56
-// for its category side effect). Measured 83_705 with #864 on top of #860
-// (~0.7%), within the 84_280 in force: the rule's delete_transaction and
+// for its category side effect). Re-measured after rebasing onto main with
+// #859 merged: main 83_447 (#859 moved no schema), 83_705 with #864 on top
+// (~0.7% headroom), within the 84_280 in force: the rule's delete_transaction and
 // amount halves went to docs/tools-by-mode.md rather than into a schema.
 const SCHEMA_TOTAL_BUDGET = 84_280;
 
