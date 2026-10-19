@@ -862,17 +862,18 @@ describe('a transaction write that throws leaves the next read to the server (#8
 //
 // On a manual account Copilot recomputes the balance from its transactions, so
 // a transaction write can move it while get_accounts_live keeps serving the
-// snapshot (1-hour TTL); net worth, the monthly spend series and upcoming
-// recurrings go stale the same way. Every transaction write drops each
+// snapshot (1-hour TTL); the other snapshots that hold transaction-derived
+// figures go stale the same way. Every transaction write drops each
 // snapshot LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS names, on
 // success and on a throw alike; same derived tool key set.
 
 type SnapshotKey = (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number];
 
 /**
- * How to warm and inspect each named snapshot, typed per cache so a getter
- * returning the wrong cache, or a key added to the list without an entry
- * here, fails to compile.
+ * How to warm and inspect each named snapshot. A key added to the list
+ * without an entry here fails to compile; a probe pointed at the wrong cache
+ * usually does too, through the loader's element type, though not between
+ * the two recurring snapshots, whose node types are aliases.
  */
 const SNAPSHOT_PROBES: Record<
   SnapshotKey,

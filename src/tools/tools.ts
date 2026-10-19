@@ -701,8 +701,9 @@ export class CopilotMoneyTools {
    * whether it did. So the live months holding `ids` (and any `months` named
    * outright, for a row the cache cannot find by id) are dropped, and the next
    * read asks the server instead of serving the pre-write row from the cold
-   * tier for up to a week. The accounts snapshot goes too, since the write may
-   * have moved a balance. A GraphQL validation error cannot have written
+   * tier for up to a week. The snapshots in
+   * LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS go too, since the write
+   * may have moved what they hold. A GraphQL validation error cannot have written
    * anything, so there this costs one refetch for nothing; the catch cannot
    * tell the two apart without guessing, so it accepts the cost.
    */
@@ -726,7 +727,7 @@ export class CopilotMoneyTools {
 
   /**
    * After a transaction write the server ACCEPTED: drop the live snapshots it
-   * can have made stale (balances, net worth, spend, upcoming recurrings;
+   * can have made stale (LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS;
    * #825). The window cache is handled by each write's own write-through.
    */
   private afterTransactionWrite(): void {

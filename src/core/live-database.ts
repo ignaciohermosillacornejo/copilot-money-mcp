@@ -795,7 +795,8 @@ export class LiveCopilotDatabase {
    * Each would keep serving the pre-write figures until its TTL. Every other
    * refresh_cache scope is listed, with its reason, in
    * NOT_TRANSACTION_DERIVED_SNAPSHOTS; a test requires each scope to be in
-   * exactly one of the two lists, so a new cache must be classified.
+   * exactly one of the two lists, so a new scope must be classified (a cache
+   * that piggybacks on an existing scope is not caught).
    */
   static readonly TRANSACTION_DERIVED_SNAPSHOTS = [
     'accounts',
@@ -819,7 +820,11 @@ export class LiveCopilotDatabase {
     aggregated_holdings: 'priced from market data',
     investment_balance: 'priced from market data',
     investment_prices: 'market data',
-    balance_history: "daily history held by its own tool; today's point lags until its TTL",
+    // NOT a claim that it is unaffected: on a manual account today's point
+    // moves with a write. Its cache lives on LiveBalanceHistoryTools, which
+    // the write path holds no handle on, so it cannot be dropped from here
+    // yet (follow-up issue #870); until then it lags up to its 1-hour TTL.
+    balance_history: 'transaction-affected but unreachable from the write path; see #870',
   };
 
   /**
