@@ -4,7 +4,7 @@ title: get_recurring_live returned category_name null on every row until another
 class: path-divergence
 status: fixed
 detected: live-probe  # release parity re-run 2026-10-18, a cold call before any categories read
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/860
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/848
 date: 2026-10-18
 ---
@@ -35,9 +35,11 @@ cold), so it pinned the defect as intended.
 
 ## The fix
 
-`peekCategoryNameMap` became `loadCategoryNameMap`, which loads categories on a cold cache
-with the same rollovers-aware fetch as every other consumer. Both recurring tools use it, and
-their descriptions no longer ask callers to warm the cache.
+`peekCategoryNameMap` became `loadCategoryNameMapOrWarn`, which loads categories on a cold cache
+through `readCategories()`, the one rollovers-aware categories read every live reader now shares.
+Both recurring tools use it, in parallel with their own fetch. A failed categories read degrades
+to `category_name: null` with a `_category_warning` rather than failing the tool. Their
+descriptions no longer ask callers to warm the cache.
 
 ## Detector
 

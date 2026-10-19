@@ -14,6 +14,11 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import { LiveTransactionsTools } from '../../src/tools/live/transactions.js';
 import { tickerMatches } from '../../src/utils/ticker.js';
+import {
+  applyFieldAliases,
+  CACHE_TRANSACTION_FIELD_ALIASES,
+  LIVE_TRANSACTION_FIELD_ALIASES,
+} from '../../src/tools/field-selection.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
 
@@ -107,6 +112,15 @@ describe('note field aliases (#825)', () => {
     }
   );
 
+  test('both spellings together name one field, once (#860 review)', () => {
+    expect(
+      applyFieldAliases(['user_note', 'user_notes', 'date'], CACHE_TRANSACTION_FIELD_ALIASES)
+    ).toEqual(['user_note', 'date']);
+    expect(applyFieldAliases(['user_notes', 'user_note'], LIVE_TRANSACTION_FIELD_ALIASES)).toEqual([
+      'user_notes',
+    ]);
+  });
+
   test('a real typo still warns in both modes', async () => {
     const cache = await cacheTools().getTransactions({ ...RANGE, fields: ['user_nots'] });
     const live = await (await liveTools({})).getTransactions({ ...RANGE, fields: ['user_nots'] });
@@ -123,15 +137,19 @@ describe('live category_id normalisation (#825)', () => {
   });
 });
 
-describe('tickerMatches (#825)', () => {
+describe('tickerMatches (#825, narrowed in the #860 review)', () => {
   test.each([
-    ['USD', 'CUR:USD', true],
-    ['CUR:USD', 'usd', true],
-    ['cur:usd', 'CUR:USD', true],
-    ['AAPL', 'aapl', true],
-    ['USD', 'EUR', false],
-    [null, 'USD', false],
-  ] as const)('%p vs %p -> %p', (row, filter, expected) => {
-    expect(tickerMatches(row, filter)).toBe(expected);
+    ['USD', 'CUR:USD', true, true],
+    ['CUR:USD', 'usd', true, true],
+    ['cur:usd', 'CUR:USD', true, true],
+    ['AAPL', 'aapl', false, true],
+    ['USD', 'EUR', true, false],
+    [null, 'USD', true, false],
+    // A security (not cash) tickered USD: the bare spelling matches it, the
+    // currency-prefixed one does not.
+    ['USD', 'USD', false, true],
+    ['USD', 'CUR:USD', false, false],
+  ] as const)('%p vs %p (cash: %p) -> %p', (row, filter, isCash, expected) => {
+    expect(tickerMatches(row, filter, isCash)).toBe(expected);
   });
 });

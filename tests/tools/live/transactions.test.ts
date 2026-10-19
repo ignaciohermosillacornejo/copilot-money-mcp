@@ -7,6 +7,10 @@ import {
 } from '../../../src/tools/live/transactions.js';
 import { getTransactionsTool } from '../../../src/tools/registry/transactions.js';
 import { TRANSACTION_KNOWN_FIELDS } from '../../../src/tools/tools.js';
+import {
+  CACHE_TRANSACTION_FIELD_ALIASES,
+  LIVE_TRANSACTION_FIELD_ALIASES,
+} from '../../../src/tools/field-selection.js';
 import { getTransactionsLiveTool } from '../../../src/tools/registry/live.js';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
 import type { GraphQLClient } from '../../../src/core/graphql/client.js';
@@ -1188,11 +1192,16 @@ describe('get_transactions_live fields param — parity with get_transactions', 
     expect(everyField.size).toBeGreaterThan(20);
     expect(named.length).toBeGreaterThan(5);
 
-    const modeOnly = named.filter(
-      (n) => TRANSACTION_KNOWN_FIELDS.has(n) !== LIVE_TRANSACTION_KNOWN_FIELDS.has(n)
-    );
+    // A name a mode ACCEPTS counts as that mode's, even when it is an alias the
+    // mode rewrites to its own spelling (#825: user_note / user_notes), since
+    // a caller requesting it gets the field, not a _field_warning.
+    const acceptedByCache = (n: string) =>
+      TRANSACTION_KNOWN_FIELDS.has(n) || Object.hasOwn(CACHE_TRANSACTION_FIELD_ALIASES, n);
+    const acceptedByLive = (n: string) =>
+      LIVE_TRANSACTION_KNOWN_FIELDS.has(n) || Object.hasOwn(LIVE_TRANSACTION_FIELD_ALIASES, n);
+    const modeOnly = named.filter((n) => acceptedByCache(n) !== acceptedByLive(n));
     expect(
-      modeOnly.map((n) => `${n} (only in ${TRANSACTION_KNOWN_FIELDS.has(n) ? 'cache' : 'live'})`),
+      modeOnly.map((n) => `${n} (only in ${acceptedByCache(n) ? 'cache' : 'live'})`),
       `The fields param is shared verbatim by get_transactions and get_transactions_live ` +
         `(see TRANSACTION_FIELDS_PARAM_SCHEMA), so a name only one mode has is advertised to ` +
         `the other mode's callers as requestable and answers with a _field_warning instead. ` +

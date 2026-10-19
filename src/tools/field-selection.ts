@@ -126,8 +126,9 @@ export const TRANSACTION_FIELDS_PARAM_SCHEMA = {
     'excluded, internal_transfer). Anything else is requestable by name alongside the ' +
     'preset: fields: ["default", "tag_ids"], or "all" / "*" for the whole row. THIS ' +
     "TOOL's own description names what its rows drop — the two modes drop different " +
-    'things, because a live row is not a cache document. Unknown names are omitted and ' +
-    'reported via _field_warning.',
+    'things, because a live row is not a cache document. The note is user_note in cache ' +
+    'mode and user_notes live; either spelling works in either mode, and each mode returns ' +
+    'its own. Unknown names are omitted and reported via _field_warning.',
 } as const;
 
 /**
@@ -458,17 +459,25 @@ export const LIVE_TRANSACTION_FIELD_ALIASES: Readonly<Record<string, string>> = 
   user_note: 'user_notes',
 };
 
-/** Rewrite aliased names in a `fields` list to the mode's own names. */
+/**
+ * Rewrite aliased names in a `fields` list to the mode's own names. A
+ * non-array (a host that skipped schema validation) is returned unchanged on
+ * purpose, for expandFieldSelection's own guard to reject with its usual
+ * message; the signature is narrower than that runtime case.
+ */
 export function applyFieldAliases(
   fields: string[] | undefined,
   aliases: Readonly<Record<string, string>>
 ): string[] | undefined {
   if (!Array.isArray(fields)) return fields;
-  return fields.map((f) =>
+  const mapped = fields.map((f) =>
     typeof f === 'string' && Object.prototype.hasOwnProperty.call(aliases, f)
       ? (aliases[f] ?? f)
       : f
   );
+  // Both spellings in one list (["user_note", "user_notes"]) name one field:
+  // keep the first occurrence, so the rewrite cannot introduce a duplicate.
+  return mapped.filter((f, i) => mapped.indexOf(f) === i);
 }
 
 /** Options for {@link projectRows}. */

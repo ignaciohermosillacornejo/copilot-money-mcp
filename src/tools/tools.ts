@@ -16,7 +16,7 @@ import {
 import { READ_TOOL_DEFS, WRITE_TOOL_DEFS } from './registry/index.js';
 import { normalizeMerchantName } from '../utils/merchant.js';
 import { resolveCategoryFilter } from './category-filter.js';
-import { tickerMatches } from '../utils/ticker.js';
+import { isCashSecurityType, tickerMatches } from '../utils/ticker.js';
 import {
   DEFAULT_TRANSACTION_FIELDS,
   DEFAULT_INVESTMENT_PRICE_FIELDS,
@@ -821,7 +821,8 @@ export class CopilotMoneyTools {
    *
    * @param transactions - Raw cache documents
    * @returns The same rows MINUS the internal fields (INTERNAL_TRANSACTION_FIELDS:
-   *   `income`), plus category_name, normalized_merchant, excluded
+   *   `income`), plus category_name, normalized_merchant, excluded,
+   *   internal_transfer (defaulted to false, #825)
    */
   private async enrichCacheTransactions(transactions: Transaction[]): Promise<
     Array<
@@ -859,8 +860,9 @@ export class CopilotMoneyTools {
         // applies, so the field agrees with its own tool's filtering, and
         // matches the live surface for every row live can observe. The
         // residual gap is the per-transaction flag itself, which GraphQL
-        // exposes nowhere — that half is why the ledger entry stays
-        // `unverified`.
+        // exposes nowhere. That half was unverified until the 2026-10-18 parity
+        // run observed it on a real row (#848 item 5); the ledger entry is now
+        // verified-once.
         excluded:
           txn.excluded === true ||
           (txn.category_id ? excludedCategoryIds.has(txn.category_id) : false),
@@ -2848,7 +2850,8 @@ export class CopilotMoneyTools {
     if (ticker_symbol) {
       tickerSecurityIds = new Set<string>();
       for (const [id, sec] of securityMap) {
-        if (tickerMatches(sec.ticker_symbol, ticker_symbol)) {
+        const isCash = sec.is_cash_equivalent === true || isCashSecurityType(sec.type);
+        if (tickerMatches(sec.ticker_symbol, ticker_symbol, isCash)) {
           tickerSecurityIds.add(id);
         }
       }

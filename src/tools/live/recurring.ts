@@ -115,6 +115,8 @@ export interface GetRecurringLiveResult {
   _cache_hit: boolean;
   // Requested `fields` names that matched nothing (typos), when any.
   _field_warning?: string;
+  // Set when the categories read failed; category_name is then null throughout.
+  _category_warning?: string;
 }
 
 export class LiveRecurringTools {
@@ -123,13 +125,21 @@ export class LiveRecurringTools {
   async getRecurring(args: GetRecurringLiveArgs): Promise<GetRecurringLiveResult> {
     const cache = this.live.getRecurringCache();
     const startedAt = Date.now();
-    const {
-      rows: cached,
-      fetched_at,
-      hit,
-    } = await cache.read(() => fetchRecurrings(this.live.getClient()));
-
-    const categoryNameById = await this.live.loadCategoryNameMap();
+    // The rows and the category names are independent reads, so a cold call
+    // pays the slower of the two, not their sum. Latency logged below is the
+    // rows read alone, as before. A categories failure degrades to
+    // category_name null plus `_category_warning` instead of failing the tool.
+    let rowsLatencyMs = 0;
+    const [{ rows: cached, fetched_at, hit }, categories] = await Promise.all([
+      cache
+        .read(() => fetchRecurrings(this.live.getClient()))
+        .then((r) => {
+          rowsLatencyMs = Date.now() - startedAt;
+          return r;
+        }),
+      this.live.loadCategoryNameMapOrWarn(),
+    ]);
+    const categoryNameById = categories.names;
 
     const rows: GetRecurringLiveRow[] = cached
       .map((r) => ({
@@ -141,7 +151,7 @@ export class LiveRecurringTools {
     this.live.logReadCall({
       op: 'Recurrings',
       pages: hit ? 0 : 1,
-      latencyMs: Date.now() - startedAt,
+      latencyMs: rowsLatencyMs,
       rows: rows.length,
       cache_hit: hit,
     });
@@ -163,6 +173,7 @@ export class LiveRecurringTools {
       _cache_newest_fetched_at: fetchedAtIso,
       _cache_hit: hit,
       ...(warning && { _field_warning: warning }),
+      ...(categories.warning && { _category_warning: categories.warning }),
     };
   }
 }
@@ -176,7 +187,8 @@ export function createLiveRecurringToolSchema(): ToolSchema {
       "NOTE: pattern-based detection from transactions is NOT included — only Copilot's " +
       'native subscription tracking. Run without --live-reads if you need pattern detection. ' +
       'Each row carries a `category_name` resolved from the categories list (loaded on ' +
-      'first use); `null` only when the row has no category or its category was deleted. ' +
+      'first use); `null` when the row has no category or its category was deleted, and on ' +
+      'every row if the categories read fails, which `_category_warning` then reports. ' +
       'Default rows are terse: id, name, state, frequency, nextPaymentAmount, ' +
       'nextPaymentDate, categoryId, category_name, emoji. That excludes `rule` (the ' +
       'server-side matcher config) and `payments` (only the NEXT scheduled payment, not a ' +

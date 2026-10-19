@@ -37,7 +37,7 @@ import { fetchAccounts } from '../../core/graphql/queries/accounts.js';
 import { isVisibleAccountNode } from '../../models/account.js';
 import { computeTotalReturnPercent, roundAmount } from '../../utils/round.js';
 import { clampMaxRows, clampOffset } from '../../utils/pagination.js';
-import { tickerMatches } from '../../utils/ticker.js';
+import { isCashSecurityType, tickerMatches } from '../../utils/ticker.js';
 import type { ToolSchema } from '../tools.js';
 
 const DEFAULT_LIMIT = 100;
@@ -100,7 +100,7 @@ function projectHolding(h: HoldingNode): GetHoldingsLiveEntry {
     quantity: h.quantity,
     institution_price: h.security.currentPrice,
     institution_value: institutionValue,
-    is_cash_equivalent: h.security.type === 'CASH',
+    is_cash_equivalent: isCashSecurityType(h.security.type),
   };
 
   if (h.metrics) {
@@ -240,7 +240,11 @@ export class LiveHoldingsTools {
     const filtered = cached.filter((h) => {
       if (hiddenAccountIds?.has(h.accountId)) return false;
       if (args.account_id && h.accountId !== args.account_id) return false;
-      if (tickerFilter && !tickerMatches(h.security.symbol, tickerFilter)) return false;
+      if (
+        tickerFilter &&
+        !tickerMatches(h.security.symbol, tickerFilter, isCashSecurityType(h.security.type))
+      )
+        return false;
       return true;
     });
 
@@ -330,7 +334,8 @@ export function createLiveHoldingsToolSchema(): ToolSchema {
           type: 'string',
           description:
             "Filter — case-insensitive match on the security's ticker symbol. The cash sleeve " +
-            'is USD here and CUR:USD in cache mode; either spelling matches it in both modes.',
+            'is USD here and CUR:USD in cache mode; either spelling matches it in both modes ' +
+            '(CUR:USD matches only cash; a bare USD also matches a security tickered USD).',
         },
         include_hidden: {
           type: 'boolean',

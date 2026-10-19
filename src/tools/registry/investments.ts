@@ -127,7 +127,10 @@ export const getHoldingsTool = defineTool({
         },
         ticker_symbol: {
           type: 'string',
-          description: 'Filter by ticker symbol (e.g., "AAPL", "SCHX")',
+          description:
+            'Filter by ticker symbol, case-insensitive (e.g., "AAPL", "SCHX"). The cash sleeve ' +
+            'is CUR:USD here and USD in live mode; either spelling matches it in both modes ' +
+            '(CUR:USD matches only cash; a bare USD also matches a security tickered USD).',
         },
         include_history: {
           type: 'boolean',

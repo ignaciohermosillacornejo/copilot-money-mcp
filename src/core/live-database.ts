@@ -20,7 +20,7 @@
  */
 
 import { defaultPersistenceDir } from './persistence/dir.js';
-import type { GraphQLClient } from './graphql/client.js';
+import { GraphQLError, type GraphQLClient } from './graphql/client.js';
 import type { CopilotDatabase } from './database.js';
 import { TransactionMetaStore } from './persistence/transaction-meta-store.js';
 import {
@@ -554,10 +554,12 @@ export class LiveCopilotDatabase {
    * passing `rollovers: true` when budgeting is off would warm the cache
    * with rollover effects the user can't see anywhere in the product.
    *
-   * Used by every consumer of categoriesCache (LiveCategoriesTools,
-   * LiveBudgetsTools, LiveTransactionsTools.getCategoryNameMap) so the
+   * Used by readCategories(), the one rollovers-aware categories read every
+   * live reader goes through (LiveCategoriesTools, LiveBudgetsTools,
+   * LiveTransactionsTools.getCategoryIndex, loadCategoryNameMapOrWarn), so the
    * cached payload is consistent regardless of which tool warms the cache
-   * first.
+   * first. The write-side category validation in tools.ts still carries its
+   * own copy of the closure.
    */
   async resolveRolloversFlag(): Promise<boolean> {
     const { rows } = await this.userCache.read(() =>
@@ -580,17 +582,47 @@ export class LiveCopilotDatabase {
    * of a cold call and a real name on the next one, so the same question
    * answered differently depending on which tool had run first in the
    * session. get_transactions_live always loaded; now all three do.
+   *
+   * For a tool whose own payload does not depend on categories (the recurring
+   * tools), a failed categories read must not fail the tool: on error this
+   * returns an empty map and a caller-facing warning, so rows come back with
+   * `category_name: null`, as before #848, but said out loud. The read is still
+   * attempted on every call, so the cache warms as soon as the categories query
+   * succeeds (#860 review).
    */
-  async loadCategoryNameMap(): Promise<Map<string, string>> {
-    const { rows } = await this.categoriesCache.read(async () => {
+  async loadCategoryNameMapOrWarn(): Promise<{ names: Map<string, string>; warning?: string }> {
+    try {
+      const { rows } = await this.readCategories();
+      return { names: categoryNameMap(rows) };
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : String(e);
+      // An expired or foreign session is not fixed by retrying: say so, using
+      // the classified code rather than the message text (#860 review).
+      const remedy =
+        e instanceof GraphQLError && e.code === 'AUTH_FAILED'
+          ? 'Your Copilot session is no longer valid: sign in to app.copilot.money again; a ' +
+            'retry alone will not bring the names back.'
+          : 'Retry to get names.';
+      return {
+        names: new Map(),
+        warning:
+          `Category names are unavailable (the categories read failed: ${reason}), so ` +
+          `category_name is null on every row. The other fields are unaffected. ${remedy}`,
+      };
+    }
+  }
+
+  /**
+   * Read the categories cache, fetching it on a cold or expired cache with the
+   * user's rollovers flag (audit finding C6). The single closure every live
+   * reader shares, so no reader can warm the cache with a different payload
+   * (#860 review: four hand-copied closures).
+   */
+  readCategories(): ReturnType<SnapshotCache<CategoryNode>['read']> {
+    return this.categoriesCache.read(async () => {
       const rollovers = await this.resolveRolloversFlag();
       return fetchCategories(this.graphql, { rollovers });
     });
-    const map = new Map<string, string>();
-    for (const cat of rows) {
-      if (cat.id) map.set(cat.id, cat.name);
-    }
-    return map;
   }
 
   getTransactionsWindowCache(): TransactionWindowCache<TransactionNode> {
@@ -920,4 +952,18 @@ export async function preflightLiveAuth(client: GraphQLClient): Promise<void> {
     filter: null,
     sort: buildTransactionSort(),
   });
+}
+
+/**
+ * Category id -> name, the one join every live row enrichment uses. A category
+ * with an empty name is left out, so `category_name` is absent/null rather
+ * than "" — the same answer from get_transactions_live and the recurring tools
+ * (#860 review: the two joins guarded on different fields).
+ */
+export function categoryNameMap(rows: readonly CategoryNode[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const cat of rows) {
+    if (cat.id && cat.name) map.set(cat.id, cat.name);
+  }
+  return map;
 }

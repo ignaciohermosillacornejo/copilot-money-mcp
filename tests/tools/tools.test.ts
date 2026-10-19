@@ -1192,8 +1192,9 @@ describe('CopilotMoneyTools', () => {
     test('the raw per-transaction flag still forces excluded:true on its own', async () => {
       // The other half of the union: a row whose category is NOT excluded but
       // that carries the raw flag. Live cannot see this one at all (GraphQL
-      // exposes no per-transaction exclusion), which is why the ledger entry
-      // for the synthesis stays `unverified`.
+      // exposes no per-transaction exclusion). The 2026-10-18 parity run
+      // observed exactly that on a real row (#848 item 5), so the ledger entry
+      // for the synthesis is now verified-once.
       (db as any)._userCategories = [{ category_id: 'groceries', name: 'Groceries', order: 0 }];
       (db as any)._transactions = [
         {
@@ -3103,7 +3104,10 @@ const mockSecurities: Security[] = [
   },
   {
     security_id: 'sec_usd',
-    ticker_symbol: 'USD',
+    // The cache spells the cash sleeve CUR:USD (live: USD). Kept in the
+    // production spelling so the USD / CUR:USD filter test exercises the
+    // cash branch of tickerMatches (#860 review).
+    ticker_symbol: 'CUR:USD',
     name: 'United States Dollar',
     type: 'cash',
     current_price: 1.0,
@@ -3754,7 +3758,7 @@ describe('getHoldings', () => {
 
   test('omits average_cost and total_return when cost_basis is null', async () => {
     const result = await tools.getHoldings({});
-    const usd = result.holdings.find((h) => h.ticker_symbol === 'USD');
+    const usd = result.holdings.find((h) => h.ticker_symbol === 'CUR:USD');
     expect(usd).toBeDefined();
     expect(usd!.cost_basis).toBeUndefined();
     expect(usd!.average_cost).toBeUndefined();
@@ -3828,8 +3832,8 @@ describe('getHoldings', () => {
     expect(result.holdings[0].total_return_percent).toBeUndefined();
   });
 
-  // #825: live mode spells the cash sleeve USD and the cache CUR:USD (this
-  // fixture uses USD); either spelling must select it in either mode.
+  // #825: live mode spells the cash sleeve USD and the cache CUR:USD (as
+  // fixture now does); either spelling must select it in either mode.
   test('ticker_symbol CUR:USD and USD select the same cash holding', async () => {
     const plain = await tools.getHoldings({ ticker_symbol: 'USD' });
     const prefixed = await tools.getHoldings({ ticker_symbol: 'cur:usd' });
@@ -3837,6 +3841,7 @@ describe('getHoldings', () => {
     expect(prefixed.holdings.map((h) => h.ticker_symbol)).toEqual(
       plain.holdings.map((h) => h.ticker_symbol)
     );
+    expect(plain.holdings.map((h) => h.ticker_symbol)).toContain('CUR:USD');
   });
 
   test('ticker_symbol filter is case-insensitive', async () => {

@@ -1,6 +1,6 @@
 import { describe, expect, test, mock } from 'bun:test';
 import { LiveCopilotDatabase } from '../../../src/core/live-database.js';
-import type { GraphQLClient } from '../../../src/core/graphql/client.js';
+import { GraphQLError, type GraphQLClient } from '../../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../../src/core/database.js';
 import type { UpcomingRecurringNode } from '../../../src/core/graphql/queries/upcoming-recurrings.js';
 import type { CategoryNode } from '../../../src/core/graphql/queries/categories.js';
@@ -361,5 +361,68 @@ describe('createLiveUpcomingRecurringsToolSchema', () => {
     expect(schema.inputSchema.properties?.fields).toBeDefined();
     expect(schema.description).toContain('rule');
     expect(schema.description).toContain('payments');
+  });
+});
+
+describe('LiveUpcomingRecurringsTools category names: failure and round trips (#860 review)', () => {
+  test('a failed categories read degrades to category_name null with a warning', async () => {
+    // One categorized row, so the degraded result has a category_name to null.
+    const { live, client } = mkLiveReturning(
+      [
+        mkUpcoming({
+          id: 'Rw8kQ3nT6mV2xL9pB4sD',
+          name: 'Cellphone Plan',
+          categoryId: 'Kc4vN8qT2mW6rL9xP3sB',
+        }),
+      ],
+      [mkCat({ id: 'Kc4vN8qT2mW6rL9xP3sB', name: 'Utilities', parentId: null })]
+    );
+    const own = client.query.getMockImplementation() as (op: string) => Promise<unknown>;
+    client.query.mockImplementation((operation: string) =>
+      operation === 'Categories' ? Promise.reject(new Error('upstream 502')) : own(operation)
+    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const tools = new LiveUpcomingRecurringsTools(live);
+
+    const result = await tools.getUpcomingRecurrings({});
+
+    expect(result._category_warning).toContain('upstream 502');
+    expect(result._category_warning).toContain('category_name is null');
+    expect(result._category_warning).toContain('Retry to get names');
+    expect(result.upcoming.map((r) => r.category_name)).toEqual([null]);
+    // The next call tries again, so a recovered categories query warms the cache.
+    client.query.mockImplementation(own);
+    const again = await tools.getUpcomingRecurrings({});
+    expect(again._category_warning).toBeUndefined();
+    expect(again.upcoming.map((r) => r.category_name)).toEqual(['Utilities']);
+  });
+
+  test('an expired session says to sign in again, not to retry', async () => {
+    const { live, client } = mkLiveReturning([]);
+    const own = client.query.getMockImplementation() as (op: string) => Promise<unknown>;
+    client.query.mockImplementation((operation: string) =>
+      operation === 'Categories'
+        ? Promise.reject(new GraphQLError('AUTH_FAILED', 'token rejected', 'Categories'))
+        : own(operation)
+    );
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const result = await new LiveUpcomingRecurringsTools(live).getUpcomingRecurrings({});
+    expect(result._category_warning).toContain('sign in to app.copilot.money again');
+    expect(result._category_warning).not.toContain('Retry to get names');
+  });
+
+  test('a warm call makes no round trip at all, categories included', async () => {
+    const { live, client } = mkLiveReturning([]);
+    const { LiveUpcomingRecurringsTools } =
+      await import('../../../src/tools/live/upcoming-recurrings.js');
+    const tools = new LiveUpcomingRecurringsTools(live);
+
+    await tools.getUpcomingRecurrings({});
+    const callsAfterCold = client.query.mock.calls.length;
+    await tools.getUpcomingRecurrings({});
+
+    expect(client.query.mock.calls.length).toBe(callsAfterCold);
   });
 });

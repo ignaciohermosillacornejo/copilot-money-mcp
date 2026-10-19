@@ -9,12 +9,11 @@
  * the cache-backed get_transactions tool returns today.
  */
 
-import type { LiveCopilotDatabase } from '../../core/live-database.js';
+import { categoryNameMap, type LiveCopilotDatabase } from '../../core/live-database.js';
 import type {
   ReadTransactionType,
   TransactionNode,
 } from '../../core/graphql/queries/transactions.js';
-import { fetchCategories } from '../../core/graphql/queries/categories.js';
 import { fetchTags } from '../../core/graphql/queries/tags.js';
 import type { ToolSchema, TransactionTypeFilter } from '../tools.js';
 import {
@@ -204,7 +203,7 @@ const ENRICHED_FIELD_MAPPERS: {
   // GraphQL sends "" for an uncategorized income or transfer row; cache mode
   // has no category there at all. Normalised to null so "no category" has
   // one spelling (#825).
-  category_id: (n) => (n.categoryId ? n.categoryId : null),
+  category_id: (n) => n.categoryId || null,
   category_name: (n, cats) => (n.categoryId ? cats.names.get(n.categoryId) : undefined),
   recurring_id: (n) => n.recurringId,
   parent_transaction_id: (n) => n.parentId,
@@ -271,17 +270,11 @@ export class LiveTransactionsTools {
    * is structural, not a copied expression.
    */
   private async getCategoryIndex(): Promise<CategoryIndex> {
-    const { rows } = await this.live.getCategoriesCache().read(async () => {
-      // Same closure as LiveCategoriesTools — see resolveRolloversFlag()
-      // and audit finding C6.
-      const rollovers = await this.live.resolveRolloversFlag();
-      return fetchCategories(this.live.getClient(), { rollovers });
-    });
-    const names = new Map<string, string>();
+    const { rows } = await this.live.readCategories();
+    const names = categoryNameMap(rows);
     const excludedIds = new Set<string>();
     const nodes: CategoryFilterNode[] = [];
     for (const c of rows) {
-      if (c.name) names.set(c.id, c.name);
       if (c.isExcluded === true) excludedIds.add(c.id);
       nodes.push({ id: c.id, parentId: c.parentId ?? null, name: c.name });
     }

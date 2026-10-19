@@ -88,4 +88,4 @@ Where the two modes return different values for the same thing on the same trans
 | Category of an uncategorized income or transfer row | Absent, or `""` where the document still carried an old category (#824) | `null` (the API sends `""`; normalised) |
 | `internal_transfer` on a default row | Always present, `false` unless the document marks a transfer | Always present (`type === "INTERNAL_TRANSFER"`) |
 | `excluded` on a row the user excluded individually | `true`, and dropped by `exclude_excluded` | `false`, and returned: the API does not expose the per-transaction flag. Category-level exclusion agrees in both modes |
-| Cash holding ticker | `CUR:USD` | `USD`. A `ticker_symbol` filter of either spelling matches the cash sleeve in both modes |
+| Cash holding ticker | `CUR:USD` | `USD`. A `ticker_symbol` filter of either spelling matches the cash sleeve in both modes. `CUR:USD` matches only cash; a bare `USD` also matches a security tickered `USD` |

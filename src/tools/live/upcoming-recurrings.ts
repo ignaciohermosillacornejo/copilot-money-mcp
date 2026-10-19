@@ -108,6 +108,8 @@ export interface GetUpcomingRecurringsLiveResult {
   _cache_hit: boolean;
   // Requested `fields` names that matched nothing (typos), when any.
   _field_warning?: string;
+  // Set when the categories read failed; category_name is then null throughout.
+  _category_warning?: string;
 }
 
 export class LiveUpcomingRecurringsTools {
@@ -118,13 +120,21 @@ export class LiveUpcomingRecurringsTools {
   ): Promise<GetUpcomingRecurringsLiveResult> {
     const cache = this.live.getUpcomingRecurringsCache();
     const startedAt = Date.now();
-    const {
-      rows: cached,
-      fetched_at,
-      hit,
-    } = await cache.read(() => fetchUpcomingRecurrings(this.live.getClient()));
-
-    const categoryNameById = await this.live.loadCategoryNameMap();
+    // The rows and the category names are independent reads, so a cold call
+    // pays the slower of the two, not their sum. Latency logged below is the
+    // rows read alone, as before. A categories failure degrades to
+    // category_name null plus `_category_warning` instead of failing the tool.
+    let rowsLatencyMs = 0;
+    const [{ rows: cached, fetched_at, hit }, categories] = await Promise.all([
+      cache
+        .read(() => fetchUpcomingRecurrings(this.live.getClient()))
+        .then((r) => {
+          rowsLatencyMs = Date.now() - startedAt;
+          return r;
+        }),
+      this.live.loadCategoryNameMapOrWarn(),
+    ]);
+    const categoryNameById = categories.names;
 
     const rows: GetUpcomingRecurringsLiveRow[] = cached
       .map((r) => ({
@@ -142,7 +152,7 @@ export class LiveUpcomingRecurringsTools {
     this.live.logReadCall({
       op: 'UpcomingRecurrings',
       pages: hit ? 0 : 1,
-      latencyMs: Date.now() - startedAt,
+      latencyMs: rowsLatencyMs,
       rows: rows.length,
       cache_hit: hit,
     });
@@ -164,6 +174,7 @@ export class LiveUpcomingRecurringsTools {
       _cache_newest_fetched_at: fetchedAtIso,
       _cache_hit: hit,
       ...(warning && { _field_warning: warning }),
+      ...(categories.warning && { _category_warning: categories.warning }),
     };
   }
 }
@@ -181,7 +192,8 @@ export function createLiveUpcomingRecurringsToolSchema(): ToolSchema {
       'full set of configured/historical recurrings; use this tool when the user ' +
       'asks "what\'s coming up" or "what bills am I about to pay". ' +
       'Each row carries a `category_name` resolved from the categories list (loaded on ' +
-      'first use); `null` only when the row has no category or its category was deleted. ' +
+      'first use); `null` when the row has no category or its category was deleted, and on ' +
+      'every row if the categories read fails, which `_category_warning` then reports. ' +
       'Default rows are terse: id, name, state, frequency, nextPaymentAmount, ' +
       'nextPaymentDate, categoryId, category_name, emoji. That excludes `rule` (the ' +
       'server-side matcher config) and `payments` (only the NEXT scheduled payment, not a ' +

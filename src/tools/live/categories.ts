@@ -21,11 +21,7 @@
  */
 
 import type { LiveCopilotDatabase } from '../../core/live-database.js';
-import {
-  fetchCategories,
-  type CategoryIcon,
-  type CategoryBudget,
-} from '../../core/graphql/queries/categories.js';
+import type { CategoryIcon, CategoryBudget } from '../../core/graphql/queries/categories.js';
 import type { ToolSchema } from '../tools.js';
 import {
   DEFAULT_CATEGORY_LIVE_FIELDS,
@@ -145,20 +141,8 @@ export class LiveCategoriesTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
   async getCategories(args: GetCategoriesLiveArgs): Promise<GetCategoriesLiveResult> {
-    const cache = this.live.getCategoriesCache();
     const startedAt = Date.now();
-    const {
-      rows: cached,
-      fetched_at,
-      hit,
-    } = await cache.read(async () => {
-      // Mirror the web app's per-user rollover-handling behavior: read the
-      // user's actual `budgetingConfig.rolloversConfig.isEnabled` (cached
-      // 24h on userCache) and forward it to the Categories query. See
-      // audit finding C6.
-      const rollovers = await this.live.resolveRolloversFlag();
-      return fetchCategories(this.live.getClient(), { rollovers });
-    });
+    const { rows: cached, fetched_at, hit } = await this.live.readCategories(); // rollovers-aware, audit finding C6
 
     let rows = cached;
     if (args.excluded_only === true) {
