@@ -874,7 +874,9 @@ export class CopilotMoneyTools {
       throw new Error(
         `${label}: could not check whether transaction ${id} is a split transaction (the ` +
           `live transaction window failed to load). This write's effect on a split is ` +
-          `unverified and could move the balance twice, so nothing was sent. Retry.`
+          `unverified and could move the balance twice, so nothing was sent. Retry; if the ` +
+          `load keeps failing, run refresh_cache, or lower COPILOT_WRITE_RESOLVE_WINDOW_MONTHS ` +
+          `to shrink it.`
       );
     }
   }
@@ -4388,8 +4390,7 @@ export class CopilotMoneyTools {
    *      a minute apart, failed attempts included; worst case the decode
    *      timeout (see deleteTransaction).
    *      An unreadable or timed-out cache adds nothing for that call rather
-   *      than blocking every delete; what earlier decodes named still
-   *      refuses.
+   *      than blocking the write; what earlier decodes named still refuses.
    *
    * Live mode (liveDb present — the shipped CLI always runs writes this way,
    * since --write implies --live-reads) adds, before the local cache (free)
@@ -4478,7 +4479,7 @@ export class CopilotMoneyTools {
       // Rows already in memory only, in live mode or after a failed decode:
       // the decode above loaded them when it ran, and neither a second full
       // read (the per-collection fallback) nor a retried decode is worth
-      // paying on a delete.
+      // paying on a write's split check.
       rows =
         this.liveDb || !readable
           ? (this.db.peekLoadedTransactions() ?? [])
@@ -4489,22 +4490,47 @@ export class CopilotMoneyTools {
     return this.splitEvidenceInRows(id, rows);
   }
 
-  /** The row half of localSplitEvidence (#822). */
+  /**
+   * One-pass index of a row array's split facts, cached per array (#836
+   * review): a batch checking N ids against tens of thousands of local rows
+   * would otherwise scan them N times on the event loop. Rebuilt when the
+   * array changes length (an in-place delete); field patches never touch the
+   * parent/children fields it reads.
+   */
+  private readonly splitRowIndexes = new WeakMap<
+    readonly Transaction[],
+    { length: number; parents: Set<string>; parentOf: Map<string, string | null> }
+  >();
+
+  private splitRowIndex(rows: readonly Transaction[]): {
+    parents: Set<string>;
+    parentOf: Map<string, string | null>;
+  } {
+    const cached = this.splitRowIndexes.get(rows);
+    if (cached && cached.length === rows.length) return cached;
+    const parents = new Set<string>();
+    const parentOf = new Map<string, string | null>();
+    for (const t of rows) {
+      if (t.parent_transaction_id) parents.add(t.parent_transaction_id);
+      if ((t.children_transaction_ids?.length ?? 0) > 0) parents.add(t.transaction_id);
+      // First row for an id wins, as the scan this replaces did.
+      if (!parentOf.has(t.transaction_id) || parentOf.get(t.transaction_id) === null) {
+        parentOf.set(t.transaction_id, t.parent_transaction_id || null);
+      }
+    }
+    const index = { length: rows.length, parents, parentOf };
+    this.splitRowIndexes.set(rows, index);
+    return index;
+  }
+
+  /** The row half of localSplitEvidence (#822): same predicate, via the index. */
   private splitEvidenceInRows(
     id: string,
     rows: readonly Transaction[]
   ): { isParent: boolean; parentOfTarget: string | null } {
-    let parentOfTarget: string | null = null;
-    for (const t of rows) {
-      if (t.parent_transaction_id === id) return { isParent: true, parentOfTarget: null };
-      if (t.transaction_id === id) {
-        if ((t.children_transaction_ids?.length ?? 0) > 0) {
-          return { isParent: true, parentOfTarget: null };
-        }
-        parentOfTarget ??= t.parent_transaction_id || null;
-      }
-    }
-    return { isParent: false, parentOfTarget };
+    const { parents, parentOf } = this.splitRowIndex(rows);
+    if (parents.has(id)) return { isParent: true, parentOfTarget: null };
+    return { isParent: false, parentOfTarget: parentOf.get(id) ?? null };
   }
 
   /**
@@ -4524,6 +4550,11 @@ export class CopilotMoneyTools {
    *
    * Side effect: the server also sets the row's category to the recurring's
    * category (ledger: Mutation.addTransactionToRecurring:setsCategory).
+   *
+   * Split parents (#836): a known split parent is refused before sending, as
+   * is any target when the split check cannot load the write-resolve window
+   * (refuseUncheckedSplitTarget). The check pays what delete's does: the
+   * local-cache split evidence and one window load.
    *
    * Cache: unlike create_transaction (where there is nothing to patch) and
    * unlike delete_transaction (which evicts the row), here the transaction

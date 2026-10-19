@@ -430,3 +430,34 @@ describe('resolution and the split check share one window load (#836)', () => {
     expect(sent('EditTransaction')).toHaveLength(1);
   });
 });
+
+describe('cache-only mode: no window to check, so nothing is refused for it (#836)', () => {
+  // windowChecked is a tri-state; only `false` (a FAILED load) refuses. With no
+  // live layer there is no window at all, and an ordinary row must still write.
+  test('an amount edit without a live layer still writes', async () => {
+    const client = createMockGraphQLClient(MUTATIONS);
+    const db = new CopilotDatabase('/nonexistent');
+    (db as any).dbPath = '/fake';
+    (db as any)._transactions = [
+      { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
+    ];
+    db._markLoadedForTesting();
+    const tools = new CopilotMoneyTools(db, client);
+    await tools.updateTransaction({ transaction_id: PLAIN_ID, ...routing, amount: 30 });
+    expect(client._calls.filter((c) => c.op === 'EditTransaction')).toHaveLength(1);
+  });
+
+  test('a cache-only split parent (local children) is still refused', async () => {
+    const client = createMockGraphQLClient(MUTATIONS);
+    const db = new CopilotDatabase('/nonexistent');
+    (db as any).dbPath = '/fake';
+    (db as any)._transactions = [
+      { transaction_id: CHILD_1, parent_transaction_id: PARENT_ID, amount: 60 },
+    ];
+    db._markLoadedForTesting();
+    const tools = new CopilotMoneyTools(db, client);
+    await expect(
+      tools.updateTransaction({ transaction_id: PARENT_ID, ...routing, amount: 150 })
+    ).rejects.toThrow(UNVERIFIED);
+  });
+});

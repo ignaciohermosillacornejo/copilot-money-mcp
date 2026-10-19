@@ -813,7 +813,7 @@ const EDIT_OF_UNCACHED_ROW: Record<
 /** Write tools that are not edits of an existing row: they create, or remove. */
 const NOT_EDITS = ['create_transaction', 'split_transaction', 'delete_transaction'];
 
-describe('an edit of an uncached row never inserts it (split parents)', () => {
+describe('an edit of an uncached row never inserts it (rows the query omits, like split parents)', () => {
   test('every editing transaction write tool has a case', () => {
     const editTools = transactionWriteToolNames().filter((name) => !NOT_EDITS.includes(name));
     expect(editTools.length).toBeGreaterThan(0);

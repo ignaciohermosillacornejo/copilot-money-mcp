@@ -1267,6 +1267,19 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'balance effect). Never probed.',
   },
   {
+    surface: 'Mutation.editTransaction:splitChildAmount',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      "UNKNOWN: what changing a split CHILD's amount does once the children no longer sum " +
+      'to the parent: whether the server rebalances, rejects, or keeps an inconsistent split, ' +
+      'and what the account balance does. The #836 refusals recommend editing the children ' +
+      'instead; that remedy rests on this and is NOT refused. Settle it in the same ' +
+      'round-trip as `Mutation.splitTransaction:resplit` (a throwaway split on a manual ' +
+      'account, balance read before and after).',
+  },
+  {
     surface: 'Mutation.addTransactionToRecurring:splitParent',
     kind: 'operation',
     oracle: null,
