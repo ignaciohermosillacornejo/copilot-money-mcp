@@ -4038,7 +4038,10 @@ export class CopilotMoneyTools {
       // Map the GraphQL camelCase Transaction fields back to the project's
       // local snake_case Transaction shape. Only fields Copilot actually
       // populates on create are included; the rest arrive on the next
-      // refresh_database cycle.
+      // refresh_database cycle. Every field comes from the response except
+      // tag_ids when the response carries no usable tags array: then it is
+      // the requested list, the best guess a create has. (A link or a split
+      // asked for no tags, so their mappings leave it unset instead.)
       const transaction: Transaction = {
         transaction_id: tx.id,
         amount: tx.amount,
@@ -4945,6 +4948,10 @@ export class CopilotMoneyTools {
     // rejected sibling must not leave the caches claiming a landed row never
     // changed.
     onLanded(result.updated);
+    // Rows the response does not account for (silently skipped by the server,
+    // or a drifted response read as empty) have an unknown outcome: drop
+    // their live months so the next read asks the server (#864 review).
+    if (result.skipped.length > 0) this.liveDb?.invalidateLiveTransactionMonths(result.skipped);
     // A type change can move a manual account's balance (#825).
     this.afterTransactionWrite();
     if (result.failed.length > 0) {

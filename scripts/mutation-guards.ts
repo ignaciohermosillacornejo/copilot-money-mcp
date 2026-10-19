@@ -489,6 +489,29 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/core/live-database.test.ts',
   },
   {
+    name: 'a malformed returned row is never cached',
+    file: 'src/core/live-database.ts',
+    invariant:
+      'Mutation responses are validated warn-only, so a drifted row can reach the live cache ' +
+      'without a field the read path dereferences (a tags array, a name, a date). Every live ' +
+      'read runs the tag mapper on every row of a month, so one stored row with no tags makes ' +
+      'each later read of that month throw until the TTL expires. Such a row must not be ' +
+      'stored; its months are dropped so the next read refetches (#864 review).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: a malformed returned row is never cached\n' +
+        '    if (!LiveCopilotDatabase.isCacheableRow(node)) {',
+      with:
+        '    // mutation-guard: a malformed returned row is never cached\n' +
+        '    if (!LiveCopilotDatabase.isCacheableRow(node) && false) {',
+    },
+    expectFailingTests: [
+      'a response without tags succeeds, leaves the month uncached, and the next read refetches',
+    ],
+    expectFails: 'tests/tools/live-write-coherence.test.ts',
+  },
+  {
     name: 'delete_transaction refuses a split parent',
     file: 'src/tools/tools.ts',
     invariant:

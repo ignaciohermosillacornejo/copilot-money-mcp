@@ -1186,3 +1186,76 @@ describe('a throw drops the destination month too (#832)', () => {
     }
   );
 });
+
+// ── A malformed returned row is never cached (#864 review) ─────────────────
+//
+// Mutation responses are validated warn-only, so a drifted one reaches the
+// write path. The write must still report success, but its row must not be
+// stored: every live read runs the tag mapper on every row of a month, so one
+// stored row with no tags array would make each later read of that month
+// throw. The month is dropped instead, and the next read refetches.
+
+/** A deep copy of a mutation response with every `tags` key removed. */
+function withoutTagKeys(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(withoutTagKeys);
+  if (v !== null && typeof v === 'object' && !(v instanceof Error)) {
+    return Object.fromEntries(
+      Object.entries(v)
+        .filter(([k]) => k !== 'tags')
+        .map(([k, x]) => [k, withoutTagKeys(x)])
+    );
+  }
+  return v;
+}
+
+const stripTags = (mocks: MockResponsesByOp): MockResponsesByOp =>
+  Object.fromEntries(
+    Object.entries(mocks).map(([op, m]) => [
+      op,
+      typeof m === 'function'
+        ? (vars: unknown) => withoutTagKeys((m as (v: unknown) => unknown)(vars))
+        : withoutTagKeys(m),
+    ])
+  ) as MockResponsesByOp;
+
+describe('a malformed returned row is never cached (#864 review)', () => {
+  test.each([
+    'create_transaction',
+    'update_transaction',
+    'update_transactions',
+    'add_transaction_to_recurring',
+    'split_transaction',
+  ])(
+    '%s: a response without tags succeeds, leaves the month uncached, and the next read refetches',
+    async (toolName) => {
+      const c = CASES[toolName]!;
+      const { call, read, fetches } = setup(stripTags(c.mocks));
+      await read();
+
+      await call(toolName, c.args);
+
+      const after = await read();
+      expect(after._cache_hit).toBe(false);
+      expect(fetches()).toBe(2);
+    }
+  );
+
+  test.each(['review_transactions', 'bulk_edit_transactions'])(
+    '%s: a response whose updated/failed are not arrays is reported, not thrown on, and the month is refetched',
+    async (tool) => {
+      const { call, read, fetches } = setup({
+        BulkEditTransactions: { bulkEditTransactions: { updated: null, failed: null } as never },
+      });
+      await read();
+
+      const rows = [TX_BULK_1, TX_BULK_2].map((id) => ({ ...routing, transaction_id: id }));
+      await expect(
+        call(tool, tool === 'review_transactions' ? { rows } : { rows, category_id: CAT_NEW })
+      ).rejects.toThrow(/did not apply/);
+
+      const after = await read();
+      expect(after._cache_hit).toBe(false);
+      expect(fetches()).toBe(2);
+    }
+  );
+});

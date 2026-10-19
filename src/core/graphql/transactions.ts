@@ -240,10 +240,18 @@ export async function bulkEditTransactions(
     // mutation-guard: bulk filter carries only ids
     filter: { ids: args.ids.map(({ id, accountId, itemId }) => ({ id, accountId, itemId })) },
   });
-  const { updated, failed } = data.bulkEditTransactions;
+  // The batch has committed by now. Response validation is warn-only, so a
+  // drifted `updated` or `failed` that is not an array is read as empty rather
+  // than thrown on: its rows then surface as `skipped`, whose live months the
+  // tool layer drops (#864 review).
+  const response = data.bulkEditTransactions as Partial<
+    BulkEditTransactionsResponse['bulkEditTransactions']
+  > | null;
+  const updated = Array.isArray(response?.updated) ? response.updated : [];
+  const failed = Array.isArray(response?.failed) ? response.failed : [];
   const accountedFor = new Set<string>([
-    ...updated.map((t) => t.id),
-    ...failed.map((f) => f.transaction?.id).filter((id): id is string => id !== undefined),
+    ...updated.map((t) => t?.id).filter((id): id is string => typeof id === 'string'),
+    ...failed.map((f) => f?.transaction?.id).filter((id): id is string => typeof id === 'string'),
   ]);
   return {
     updated,
@@ -377,16 +385,21 @@ export async function splitTransaction(
 
 /**
  * The tag ids on a row the server returned, or undefined when it carries no
- * `tags` array. Response validation is warn-only, so a drifted response must
- * not throw a TypeError out of a write the server has already applied (#864
- * review); callers fall back to what they asked for, or leave the cache alone.
+ * `tags` array or any entry has no string id. All or nothing: a partly
+ * drifted list is not shortened into a list that looks authoritative.
+ * Response validation is warn-only, so a drifted response must not throw a
+ * TypeError out of a write the server has already applied (#864 review);
+ * callers fall back to what they asked for, or leave the cache alone.
  */
 export function returnedTagIds(tags: unknown): string[] | undefined {
   if (!Array.isArray(tags)) return undefined;
-  return tags.flatMap((t: unknown) => {
+  const ids: string[] = [];
+  for (const t of tags as unknown[]) {
     const id = (t as { id?: unknown } | null)?.id;
-    return typeof id === 'string' ? [id] : [];
-  });
+    if (typeof id !== 'string') return undefined;
+    ids.push(id);
+  }
+  return ids;
 }
 
 export async function editTransaction(
@@ -408,7 +421,9 @@ export async function editTransaction(
   if ('categoryId' in args.input) changed.categoryId = tx.categoryId;
   if ('userNotes' in args.input) changed.userNotes = tx.userNotes;
   if ('isReviewed' in args.input) changed.isReviewed = tx.isReviewed;
-  if ('tagIds' in args.input) changed.tagIds = returnedTagIds(tx.tags) ?? args.input.tagIds;
+  // Callers read only which keys `changed` has; the value is informational,
+  // and the guard keeps a drifted response from throwing after the write.
+  if ('tagIds' in args.input) changed.tagIds = returnedTagIds(tx.tags);
   if ('type' in args.input) changed.type = tx.type;
   if ('date' in args.input) changed.date = tx.date;
   if ('amount' in args.input) changed.amount = tx.amount;

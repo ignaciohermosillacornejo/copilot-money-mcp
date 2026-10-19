@@ -472,7 +472,10 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
   test('(g) split recorded even when mapping a drifted response throws', async () => {
     // Response validation is warn-only, so a drifted response reaches the
     // local mapping; a non-array `splitTransactions` makes it throw after the
-    // server has split. (A missing `tags` array no longer throws: #864.)
+    // server has split. (A missing `tags` array no longer throws: #864.) This
+    // throws one statement after the parent's mapping; no test now makes the
+    // parent's own mapping throw, which sits on the same recorded-and-evicted
+    // path.
     const client = createMockGraphQLClient({
       SplitTransaction: {
         splitTransaction: {

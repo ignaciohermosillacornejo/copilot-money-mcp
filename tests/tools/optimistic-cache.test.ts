@@ -470,6 +470,17 @@ describe('update_transaction local patch follows the server row (#864 review)', 
     expect(local().tag_ids).toEqual(['tag_req']);
   });
 
+  test('a partly drifted tag list is not taken as authoritative; the request is cached', async () => {
+    // One entry with no id: the list is unusable as a whole, rather than
+    // shortened into one that would overwrite the cached tags.
+    const tools = new CopilotMoneyTools(
+      db,
+      editReturning({ id: 'txn1', tags: [{ id: 'tag_srv' }, {} as { id: string }] })
+    );
+    await tools.updateTransaction({ transaction_id: 'txn1', tag_ids: ['tag_req'] });
+    expect(local().tag_ids).toEqual(['tag_req']);
+  });
+
   test('bulk_edit_transactions: a response without tags leaves the cached list alone', async () => {
     local().tag_ids = ['tag_srv'];
     const client = createMockGraphQLClient({

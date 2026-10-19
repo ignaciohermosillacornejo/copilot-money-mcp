@@ -48,7 +48,7 @@ import type { TopMoverNode } from './graphql/queries/top-movers.js';
 import type { AggregatedHoldingNode } from './graphql/queries/aggregated-holdings.js';
 import type { InvestmentBalanceNode } from './graphql/queries/investment-balance.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
-import type { CreatedTransaction } from './graphql/transactions.js';
+import { returnedTagIds, type CreatedTransaction } from './graphql/transactions.js';
 import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/durations.js';
 
 export interface LiveDatabaseOptions {
@@ -759,9 +759,25 @@ export class LiveCopilotDatabase {
     node: CreatedTransaction & { parentId?: string | null },
     opts: { insert?: boolean; parentId?: string | null } = {}
   ): void {
-    // Response validation is warn-only: a drifted row with no id or date
-    // cannot be placed, and must not be inserted as a phantom.
-    if (!node.id || !node.date) return;
+    // Response validation is warn-only: a drifted row with no id cannot be
+    // placed, and must not be inserted as a phantom.
+    if (!node.id) return;
+    // A row missing a field the read mappers dereference (date, name, a tags
+    // array of ids) would make every later read of its month throw. It is
+    // never stored: the month it would land in, and the month its cached copy
+    // sits in, are dropped so the next read refetches (#864 review).
+    // mutation-guard: a malformed returned row is never cached
+    if (!LiveCopilotDatabase.isCacheableRow(node)) {
+      const months = new Set<string>();
+      if (typeof node.date === 'string' && node.date.length >= 7) {
+        months.add(node.date.slice(0, 7));
+      }
+      const cached = this.lookupTransactionNodes([node.id]).get(node.id);
+      if (cached) months.add(cached.date.slice(0, 7));
+      const stale = [...months].filter((m) => this.transactionsWindowCache.hasMonth(m));
+      if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
+      return;
+    }
     const hasRouting = Boolean(node.accountId && node.itemId);
     // Keep the meta index consistent with the invariant "any row this class
     // has seen is indexed". Same empty-routing-id guard as every other feed
@@ -796,6 +812,19 @@ export class LiveCopilotDatabase {
       merged.itemId = node.itemId || existing.itemId;
     }
     this.transactionsWindowCache.upsert(merged);
+  }
+
+  /**
+   * Whether a returned row has every field the live read path dereferences:
+   * a date and a name (strings) and a tags array whose entries all carry an
+   * id. Anything less is drift the cache must not store.
+   */
+  static isCacheableRow(node: { date?: unknown; name?: unknown; tags?: unknown }): boolean {
+    return (
+      typeof node.date === 'string' &&
+      typeof node.name === 'string' &&
+      returnedTagIds(node.tags) !== undefined
+    );
   }
 
   /** Remove a cached transaction by id. No-op if not found. */
