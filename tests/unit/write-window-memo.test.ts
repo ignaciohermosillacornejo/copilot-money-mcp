@@ -231,10 +231,12 @@ describe('a burst of deletes shares one window load (#838)', () => {
 });
 
 describe('the memo chokepoint cannot be bypassed (#838)', () => {
-  test('patchLiveTransactionDelete is called in src/tools only inside evictLiveTransaction', () => {
+  test('patchLiveTransactionDelete is called in src only inside evictLiveTransaction', () => {
     // A removal that skipped the chokepoint would leave the memo serving the
-    // row. Scan the tool sources for direct calls.
-    const root = join(__dirname, '../../src/tools');
+    // row. Scan every source file for direct calls (the definition itself has
+    // no leading dot, so it does not match). Comment lines are skipped so prose
+    // naming the method does not count as a call.
+    const root = join(__dirname, '../../src');
     const files: string[] = [];
     const walk = (dir: string): void => {
       for (const e of readdirSync(dir, { withFileTypes: true })) {
@@ -244,17 +246,28 @@ describe('the memo chokepoint cannot be bypassed (#838)', () => {
       }
     };
     walk(root);
+    // Any class-member start at two-space indent, whatever its modifiers.
+    const MEMBER_START =
+      /\n {2}(?:(?:private|protected|public|static|readonly|async|get|set) +)*[\w$]+\s*[(<]/g;
     const calls: string[] = [];
+    let declarationsFound = 0;
     for (const f of files) {
       const src = readFileSync(f, 'utf8');
+      if (src.includes('private evictLiveTransaction(')) declarationsFound += 1;
       for (const m of src.matchAll(/\.patchLiveTransactionDelete\(/g)) {
+        const lineStart = src.lastIndexOf('\n', m.index) + 1;
+        const line = src.slice(lineStart, m.index).trim();
+        if (line.startsWith('//') || line.startsWith('*')) continue;
         const before = src.slice(0, m.index);
-        const owner = before.lastIndexOf('private evictLiveTransaction(');
-        const nextMethodStart = before.lastIndexOf('\n  private ');
-        const inChokepoint = owner !== -1 && nextMethodStart <= owner;
+        let enclosing = -1;
+        for (const ms of before.matchAll(MEMBER_START)) enclosing = ms.index!;
+        const owner = before.lastIndexOf('\n  private evictLiveTransaction(');
+        const inChokepoint = owner !== -1 && enclosing === owner;
         calls.push(`${f.slice(root.length)}:${inChokepoint ? 'chokepoint' : 'BYPASS'}`);
       }
     }
-    expect(calls).toEqual(['/tools.ts:chokepoint']);
+    // A rename of the helper should say so, not report a bypass.
+    expect(declarationsFound).toBe(1);
+    expect(calls).toEqual(['/tools/tools.ts:chokepoint']);
   });
 });

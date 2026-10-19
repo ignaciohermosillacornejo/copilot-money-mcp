@@ -967,7 +967,10 @@ export class CopilotMoneyTools {
    * The one way a write removes a row from the live window cache: it also
    * keeps the memoized window (#838) from serving that row, so the invariant
    * "the memo never serves a row this server removed" holds at every removal
-   * site rather than by a different reason at each.
+   * site rather than by a different reason at each. A test fails any direct
+   * patchLiveTransactionDelete call elsewhere in src. Convention one level
+   * down: the window cache's own delete() is public too, and nothing gates a
+   * write path reaching it directly.
    */
   private evictLiveTransaction(id: string): void {
     this.liveDb?.patchLiveTransactionDelete(id);
