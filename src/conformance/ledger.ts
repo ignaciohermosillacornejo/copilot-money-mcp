@@ -1080,7 +1080,9 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     evidence:
       'Per-node Zod validation at fetchTransactionsPage (warn-and-skip, #512): ' +
       'invalid nodes are dropped from rows and all cache/index feeds, counted, and ' +
-      'surfaced via _dropped_invalid_rows + a deduped stderr warning.',
+      'surfaced via _dropped_invalid_rows + a deduped stderr warning. The same schema ' +
+      '(minus parentId, isoCurrencyCode and the routing ids, see mutationRowSchema) gates ' +
+      'which mutation-returned rows the live window cache may store (#864).',
   },
   // ----- Synthesized transaction row fields (#604) ---------------------------
   // Not fields Copilot returns: fields this repo INVENTS on live rows so both

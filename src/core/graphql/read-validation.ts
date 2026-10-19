@@ -62,6 +62,31 @@ const transactionNodeSchema = z.looseObject({
 });
 
 /**
+ * The same definition, for a row a MUTATION returned, before the live cache
+ * stores it (#864). Mutation responses are validated warn-only, so this is
+ * the one check between a drifted mutation row and the cache the read path
+ * protects with the schema above: one definition of a usable row for both
+ * paths, so a field the reads require is required here without a second
+ * list to keep in sync. Omitted, and why:
+ *  - parentId, isoCurrencyCode: the mutation fragment does not select them
+ *    (see CreatedTransaction); upsertLiveTransaction defaults both.
+ *  - accountId, itemId: routing drift has its own handling there (an empty
+ *    or non-string id never overwrites a cached one, and a row without them
+ *    is never inserted), which a refusal here would pre-empt.
+ */
+const mutationRowSchema = transactionNodeSchema.omit({
+  parentId: true,
+  isoCurrencyCode: true,
+  accountId: true,
+  itemId: true,
+});
+
+/** Whether a mutation's returned transaction row passes {@link mutationRowSchema}. */
+export function isUsableMutationTransactionRow(node: unknown): boolean {
+  return mutationRowSchema.safeParse(node).success;
+}
+
+/**
  * Return the page with invalid nodes removed. Valid nodes are returned as
  * the ORIGINAL objects (validation only — no transformation). Each removal
  * invokes onInvalidNode with the node id (when readable) and the failed

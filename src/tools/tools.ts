@@ -3737,7 +3737,9 @@ export class CopilotMoneyTools {
       }
       // Live cache: patch from the server's returned row, not the local patch
       // (#821 — the snake_case patch never matched the camelCase node).
-      this.liveDb?.upsertLiveTransaction(result.transaction);
+      this.liveDb?.upsertLiveTransaction(result.transaction, {
+        refusalMonths: CopilotMoneyTools.monthOf(args.date),
+      });
       this.afterTransactionWrite();
 
       return {
@@ -3893,7 +3895,9 @@ export class CopilotMoneyTools {
         if (Object.keys(patch).length > 0) {
           this.db.patchCachedTransaction(route.id, patch);
         }
-        this.liveDb?.upsertLiveTransaction(result.transaction);
+        this.liveDb?.upsertLiveTransaction(result.transaction, {
+          refusalMonths: CopilotMoneyTools.monthOf(edit.date),
+        });
         this.afterTransactionWrite();
       }
     );
@@ -4066,7 +4070,10 @@ export class CopilotMoneyTools {
       // resolves without a network fetch; the empty-routing-id guard (#518)
       // lives inside upsertLiveTransaction.
       // mutation-guard: create_transaction writes through to the live cache
-      this.liveDb?.upsertLiveTransaction(tx, { insert: true });
+      this.liveDb?.upsertLiveTransaction(tx, {
+        insert: true,
+        refusalMonths: CopilotMoneyTools.monthOf(args.date),
+      });
       this.afterTransactionWrite();
 
       return {
@@ -4671,7 +4678,7 @@ export class CopilotMoneyTools {
       this.afterTransactionWrite();
 
       try {
-        return this.finishSplit(result);
+        return this.finishSplit(result, touchedMonths);
       } catch (e) {
         this.liveDb?.invalidateLiveMonthKeys(touchedMonths);
         throw e;
@@ -4698,10 +4705,13 @@ export class CopilotMoneyTools {
    * through. Separate so a throw here (a drifted response) can be caught and
    * the touched months dropped from the live cache.
    */
-  private finishSplit(result: {
-    parentTransaction: CreatedTransaction;
-    splitTransactions: CreatedTransaction[];
-  }): {
+  private finishSplit(
+    result: {
+      parentTransaction: CreatedTransaction;
+      splitTransactions: CreatedTransaction[];
+    },
+    touchedMonths: readonly string[]
+  ): {
     success: true;
     parent_transaction_id: string;
     child_transaction_ids: string[];
@@ -4748,7 +4758,13 @@ export class CopilotMoneyTools {
     // that is what a Transactions read reports for a split child. Each
     // upsert also feeds the meta index for that child.
     for (const child of result.splitTransactions) {
-      this.liveDb?.upsertLiveTransaction(child, { insert: true, parentId: parentTx.id });
+      // A refused (malformed) child drops every month the split touched: its
+      // own returned date cannot be trusted to name its destination.
+      this.liveDb?.upsertLiveTransaction(child, {
+        insert: true,
+        parentId: parentTx.id,
+        refusalMonths: touchedMonths,
+      });
     }
 
     return {

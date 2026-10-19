@@ -431,7 +431,10 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'remove',
       find: wholeLines(
         '      // mutation-guard: create_transaction writes through to the live cache',
-        '      this.liveDb?.upsertLiveTransaction(tx, { insert: true });'
+        '      this.liveDb?.upsertLiveTransaction(tx, {',
+        '        insert: true,',
+        '        refusalMonths: CopilotMoneyTools.monthOf(args.date),',
+        '      });'
       ),
     },
     // The table key, which is the `%s` half of the test.each title — the only

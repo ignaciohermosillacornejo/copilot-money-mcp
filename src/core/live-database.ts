@@ -31,7 +31,7 @@ import {
   type TransactionNode,
   type TransactionSortInput,
 } from './graphql/queries/transactions.js';
-import { warnReadShapeDrift } from './graphql/read-validation.js';
+import { isUsableMutationTransactionRow, warnReadShapeDrift } from './graphql/read-validation.js';
 import { getMonthRange, isCalendarDate, isCalendarMonth, monthsCovered } from '../utils/date.js';
 import { pLimit } from '../utils/concurrency.js';
 import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache/index.js';
@@ -48,7 +48,7 @@ import type { TopMoverNode } from './graphql/queries/top-movers.js';
 import type { AggregatedHoldingNode } from './graphql/queries/aggregated-holdings.js';
 import type { InvestmentBalanceNode } from './graphql/queries/investment-balance.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
-import { returnedTagIds, type CreatedTransaction } from './graphql/transactions.js';
+import type { CreatedTransaction } from './graphql/transactions.js';
 import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/durations.js';
 
 export interface LiveDatabaseOptions {
@@ -757,7 +757,16 @@ export class LiveCopilotDatabase {
    */
   upsertLiveTransaction(
     node: CreatedTransaction & { parentId?: string | null },
-    opts: { insert?: boolean; parentId?: string | null } = {}
+    opts: {
+      insert?: boolean;
+      parentId?: string | null;
+      /**
+       * Months (YYYY-MM) the request moved the row into. If the returned row
+       * is refused as malformed, these are dropped too: the response's own
+       * date cannot be trusted to name the destination.
+       */
+      refusalMonths?: readonly string[];
+    } = {}
   ): void {
     // Response validation is warn-only: a drifted row with no id cannot be
     // placed, and must not be inserted as a phantom.
@@ -791,6 +800,7 @@ export class LiveCopilotDatabase {
       }
       const cached = this.lookupTransactionNodes([node.id]).get(node.id);
       if (cached) months.add(cached.date.slice(0, 7));
+      for (const m of opts.refusalMonths ?? []) if (isCalendarMonth(m)) months.add(m);
       const stale = [...months].filter((m) => this.transactionsWindowCache.hasMonth(m));
       if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
       return;
@@ -829,19 +839,19 @@ export class LiveCopilotDatabase {
   }
 
   /**
-   * Whether a returned row has every field the live read path dereferences,
-   * in the shape it needs: a real calendar date (YYYY-MM-DD; the window cache
-   * files the row under its first seven characters, and an empty or malformed
-   * date would remove the row from its real month without placing it
-   * anywhere), a string name, and a tags array whose entries all carry an
-   * id. Anything less is drift the cache must not store.
+   * Whether a returned row is one the live cache may store: it passes the read
+   * path's own definition of a usable Transactions node
+   * (isUsableMutationTransactionRow, from read-validation's
+   * transactionNodeSchema), so every field the reads require is required
+   * here, and its date is a real calendar day. The window cache files a row
+   * under its date's first seven characters, and an empty or malformed date
+   * would remove the row from its real month without placing it anywhere.
    */
-  static isCacheableRow(node: { date?: unknown; name?: unknown; tags?: unknown }): boolean {
+  static isCacheableRow(node: { date?: unknown }): boolean {
     return (
+      isUsableMutationTransactionRow(node) &&
       typeof node.date === 'string' &&
-      isCalendarDate(node.date) &&
-      typeof node.name === 'string' &&
-      returnedTagIds(node.tags) !== undefined
+      isCalendarDate(node.date)
     );
   }
 

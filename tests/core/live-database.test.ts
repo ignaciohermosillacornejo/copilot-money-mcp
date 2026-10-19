@@ -582,6 +582,28 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     }
   );
 
+  test.each([
+    ['no name', { name: undefined }],
+    ['a null amount', { amount: null }],
+    ['a tag without an id', { tags: [{}] }],
+    ['no tags array', { tags: undefined }],
+    ['no type', { type: undefined }],
+  ])(
+    'an edit returning %s on a CACHED row is refused by the read-path schema and drops its month (#864)',
+    (_label, drift) => {
+      // isCacheableRow is the read path's own definition of a usable row
+      // (read-validation's transactionNodeSchema), so every field the reads
+      // require is required here, without a second list.
+      const live = mkLive();
+      const wc = live.getTransactionsWindowCache();
+      wc.ingestMonth('2024-01', [queryRow()], Date.now());
+
+      live.upsertLiveTransaction(mutationRow(drift as unknown as Partial<CreatedTransaction>));
+
+      expect(wc.hasMonth('2024-01')).toBe(false);
+    }
+  );
+
   test('a non-string routing id never overwrites the cached one (#864)', () => {
     const live = mkLive();
     const wc = live.getTransactionsWindowCache();

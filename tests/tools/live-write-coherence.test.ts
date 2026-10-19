@@ -1264,6 +1264,35 @@ describe('a malformed returned row is never cached (#864 review)', () => {
     }
   );
 
+  test('update_transaction: a date move whose response is refused drops the destination month too', async () => {
+    // The row leaves March for February; the response drifts to an empty date,
+    // so it names neither. February must not keep serving a month that should
+    // now hold the row.
+    const { call, read, fetches } = setup({
+      EditTransaction: (vars) => {
+        const v = vars as { id: string; input: EditTransactionInput };
+        return { editTransaction: { transaction: { ...applyEdit(v.id, v.input), date: '' } } };
+      },
+    });
+    await read();
+    await call('get_transactions_live', {
+      start_date: OTHER_COLD_MONTH.start,
+      end_date: OTHER_COLD_MONTH.end,
+      limit: 10,
+    });
+    expect(fetches()).toBe(2);
+
+    await call('update_transaction', { ...routing, transaction_id: TX_UPDATE, date: '2025-02-10' });
+
+    const other = (await call('get_transactions_live', {
+      start_date: OTHER_COLD_MONTH.start,
+      end_date: OTHER_COLD_MONTH.end,
+      limit: 10,
+    })) as { _cache_hit: boolean };
+    expect(other._cache_hit).toBe(false);
+    expect((await read())._cache_hit).toBe(false);
+  });
+
   test('create_transaction: a row too malformed to cache still has its routing ids indexed', async () => {
     // The routing ids are independent of the fields the read mappers need, so
     // a follow-up write naming the new id resolves without a network fetch.
