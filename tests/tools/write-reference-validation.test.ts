@@ -338,7 +338,10 @@ describe('reference lists: a miss on a cached list refetches once (#846)', () =>
     const r = referenceSetup();
     spyOn(Date, 'now').mockReturnValue(Date.now());
     await expect(r.edit({ category_id: CAT_KNOWN })).rejects.toThrow(/mutation reached/);
-    await r.tools.setBudget({ category_id: 'Dd4fG7hJ0kL3zX6cV9bN', amount: '0' }).catch(() => {});
+    // The clear reaches the mutation (unmocked here, so it throws there).
+    await expect(
+      r.tools.setBudget({ category_id: 'Dd4fG7hJ0kL3zX6cV9bN', amount: '0' })
+    ).rejects.toThrow(/No mock response for operation: EditBudget/);
     expect(r.fetches.categories).toBe(1);
     // A category created in the app right after is still accepted.
     r.categories.push(CAT_UNKNOWN);

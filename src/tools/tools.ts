@@ -3275,9 +3275,13 @@ export class CopilotMoneyTools {
 
   /**
    * Whether `categoryId` is a known category: the lookup validateCategoryId
-   * throws on. `refetch: false` answers from what is already held (a cold or
-   * stale live list counts as unknown) and never fetches or arms the refetch
-   * throttle, for callers that need knowledge, not verification.
+   * throws on. `refetch: false` answers from what is already held and never
+   * makes a network round trip or arms the refetch throttle, for callers that
+   * need knowledge, not verification. A cold live list counts as unknown; an
+   * expired one is still read as it stands (peek ignores the TTL), which the
+   * one caller, set_budget's clear, accepts: its write-through patch is the
+   * only consequence. In degraded mode it reads the local cache, which can
+   * load LevelDB.
    */
   private async categoryExists(
     categoryId: string,
@@ -4862,9 +4866,12 @@ export class CopilotMoneyTools {
       for (const tagId of tagIds) validateDocId(tagId, 'tag_id');
       // The server silently drops unknown tag ids rather than erroring, so an
       // unvalidated typo would report success having applied nothing. That
-      // holds for remove_tag_ids too, so removal is validated as well: unlike
-      // clearing a budget, removing a tag the app deleted has nothing to clean
-      // up (a deleted tag is no longer in the tag list rows are read against).
+      // holds for remove_tag_ids too, so removal is validated as well. Whether
+      // removing a tag the app deleted is ever needed depends on whether
+      // Copilot strips a deleted tag from its transactions, which is
+      // unverified (ledger: Mutation.deleteTag:cascadesToTransactions); if it
+      // does not, the remove direction should get an exemption like
+      // set_budget's clear.
       await this.validateTagIds(tagIds);
     }
     // Adding and removing the same tag in one call has no defined resolution

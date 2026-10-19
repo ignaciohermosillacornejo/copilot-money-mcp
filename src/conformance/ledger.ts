@@ -467,6 +467,18 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   responseShape('createTransaction'),
   appliesSurface('createTransaction'),
   {
+    surface: 'Mutation.deleteTag:cascadesToTransactions',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'UNKNOWN (#855 review): whether deleting a tag strips it from the transactions that ' +
+      'carry it. Transaction rows report tag ids off the row itself, not against the tag ' +
+      'list, so if the server keeps a deleted id on its rows, removing it would need ' +
+      "bulk_edit_transactions' remove_tag_ids to accept an id the tag list no longer has. " +
+      'Today removal is validated like addition. Never probed.',
+  },
+  {
     surface: 'Mutation.createTransaction:no-referential-validation',
     kind: 'operation',
     oracle: null,
