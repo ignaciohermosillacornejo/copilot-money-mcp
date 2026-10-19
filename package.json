@@ -105,14 +105,14 @@
   "devDependencies": {
     "@anthropic-ai/mcpb": "^2.1.2",
     "@eslint/js": "^10.0.1",
-    "@types/bun": "^1.4.2",
+    "@types/bun": "^1.4.3",
     "@types/node": "^26.6.5",
     "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.0.0",
     "globals": "^17.13.0",
     "graphql": "^17.0.2",
     "husky": "^9.1.7",
-    "prettier": "^3.9.9",
+    "prettier": "^3.9.10",
     "typescript": "^6.0.2",
     "typescript-eslint": "^8.71.1"
   }
