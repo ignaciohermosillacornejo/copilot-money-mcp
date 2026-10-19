@@ -522,19 +522,64 @@ describe('createTransaction', () => {
     await expect(tools.createTransaction(validArgs)).rejects.toThrow(/Resource id/);
   });
 
-  test('accepts INCOME and INTERNAL_TRANSFER as valid types', async () => {
+  // INCOME / INTERNAL_TRANSFER have no category (#825): category_id is
+  // omitted, and the non-null input field carries an empty id.
+  const { category_id: _omitted, ...uncategorizedArgs } = validArgs;
+
+  test('accepts INCOME and INTERNAL_TRANSFER without a category_id', async () => {
     const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
     tools = new CopilotMoneyTools(mockDb, client);
 
     await expect(
-      tools.createTransaction({ ...validArgs, type: 'INCOME', amount: -1000 })
+      tools.createTransaction({ ...uncategorizedArgs, type: 'INCOME', amount: -1000 })
     ).resolves.toMatchObject({ success: true });
     await expect(
-      tools.createTransaction({ ...validArgs, type: 'INTERNAL_TRANSFER' })
+      tools.createTransaction({ ...uncategorizedArgs, type: 'INTERNAL_TRANSFER' })
     ).resolves.toMatchObject({ success: true });
 
-    expect((client._calls[0].variables as any).input.type).toBe('INCOME');
-    expect((client._calls[1].variables as any).input.type).toBe('INTERNAL_TRANSFER');
+    expect((client._calls[0].variables as any).input).toMatchObject({
+      type: 'INCOME',
+      categoryId: '',
+    });
+    expect((client._calls[1].variables as any).input).toMatchObject({
+      type: 'INTERNAL_TRANSFER',
+      categoryId: '',
+    });
+  });
+
+  test.each(['INCOME', 'INTERNAL_TRANSFER'] as const)(
+    'rejects a category_id with type %s, as update_transaction does (nothing sent)',
+    async (type) => {
+      const client = createMockGraphQLClient({
+        CreateTransaction: { createTransaction: createdTx },
+      });
+      tools = new CopilotMoneyTools(mockDb, client);
+
+      await expect(tools.createTransaction({ ...validArgs, type })).rejects.toThrow(
+        `category_id cannot be combined with type ${type}`
+      );
+      expect(client._calls).toHaveLength(0);
+    }
+  );
+
+  test('category_id "" with INCOME gets the rule, not a format error (nothing sent)', async () => {
+    const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.createTransaction({ ...uncategorizedArgs, category_id: '', type: 'INCOME' })
+    ).rejects.toThrow('category_id cannot be combined with type INCOME');
+    expect(client._calls).toHaveLength(0);
+  });
+
+  test('requires a category_id for REGULAR (nothing sent)', async () => {
+    const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
+    tools = new CopilotMoneyTools(mockDb, client);
+
+    await expect(
+      tools.createTransaction({ ...uncategorizedArgs, type: 'REGULAR' })
+    ).rejects.toThrow('category_id is required for type REGULAR');
+    expect(client._calls).toHaveLength(0);
   });
 
   test('sets internal_transfer=true on returned transaction when type is INTERNAL_TRANSFER', async () => {
@@ -542,7 +587,10 @@ describe('createTransaction', () => {
     const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: serverTx } });
     tools = new CopilotMoneyTools(mockDb, client);
 
-    const result = await tools.createTransaction({ ...validArgs, type: 'INTERNAL_TRANSFER' });
+    const result = await tools.createTransaction({
+      ...uncategorizedArgs,
+      type: 'INTERNAL_TRANSFER',
+    });
     expect(result.transaction.internal_transfer).toBe(true);
   });
 

@@ -67,13 +67,14 @@ describe('createWriteToolSchemas', () => {
     expect(createTxn!.annotations?.destructiveHint).toBe(false);
     expect(createTxn!.annotations?.idempotentHint).toBe(false);
     expect(createTxn!.inputSchema.additionalProperties).toBe(false);
+    // category_id is conditional (#825): required for REGULAR, refused for
+    // INCOME/INTERNAL_TRANSFER — enforced at runtime, so not schema-required.
     expect(createTxn!.inputSchema.required).toEqual([
       'account_id',
       'item_id',
       'name',
       'date',
       'amount',
-      'category_id',
       'type',
     ]);
     expect(createTxn!.inputSchema.properties.type.enum).toEqual([

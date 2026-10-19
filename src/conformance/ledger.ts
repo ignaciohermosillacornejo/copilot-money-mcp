@@ -479,6 +479,19 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'a category id runs validateCategoryId first (tests/tools/write-reference-validation.test.ts).',
   },
   {
+    surface: 'Mutation.createTransaction:emptyCategoryForIncome',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'live probe 2026-10-19, #857/#869: create_transaction makes category_id optional for ' +
+      'INCOME / INTERNAL_TRANSFER (#825) and sends `categoryId: ""` then, because ' +
+      'CreateTransactionInput.categoryId is `ID!`. On a manual test account (synthetic rows, ' +
+      'deleted right after, balance unchanged) createTransaction with `categoryId: ""` ' +
+      'succeeded for both INCOME and INTERNAL_TRANSFER, and the returned row carried ' +
+      '`categoryId: ""` and the requested type. Nothing re-checks it.',
+  },
+  {
     surface: 'Mutation.splitTransaction:no-referential-validation',
     kind: 'operation',
     oracle: null,

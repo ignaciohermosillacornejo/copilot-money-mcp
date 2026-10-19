@@ -206,10 +206,11 @@ export const createTransactionTool = defineTool({
     name: 'create_transaction',
     description:
       'Create a brand-new manual transaction on an existing account. Requires ' +
-      'account_id, item_id, name, date, amount, category_id, and type; optional ' +
-      'tag_ids, note, and recurring_id. Formats, sign convention, and ID sources ' +
-      'are documented per parameter. Returns the newly-created transaction. On a manual ' +
-      "account, a row dated before the account's last balance reset does not move its balance.",
+      'account_id, item_id, name, date, amount, and type; category_id required for ' +
+      'REGULAR, omit for INCOME/INTERNAL_TRANSFER. Optional tag_ids, note, and ' +
+      'recurring_id. Formats, sign convention, and ID sources are documented per ' +
+      'parameter. Returns the newly-created transaction. On a manual account, a row ' +
+      "dated before the account's last balance reset does not move its balance.",
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -238,7 +239,7 @@ export const createTransactionTool = defineTool({
         },
         category_id: {
           type: 'string',
-          description: 'Category ID to assign (from get_categories)',
+          description: 'Category ID (from get_categories); required for REGULAR.',
         },
         type: {
           type: 'string',
@@ -261,7 +262,7 @@ export const createTransactionTool = defineTool({
             'Optional. Link this new transaction to an existing recurring series (from get_recurring_transactions).',
         },
       },
-      required: ['account_id', 'item_id', 'name', 'date', 'amount', 'category_id', 'type'],
+      required: ['account_id', 'item_id', 'name', 'date', 'amount', 'type'],
     },
     annotations: {
       readOnlyHint: false,

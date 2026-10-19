@@ -3944,8 +3944,12 @@ export class CopilotMoneyTools {
   /**
    * Create a brand-new manual transaction on an existing account.
    *
-   * Seven required inputs, no optionals — scope is intentionally tight for
-   * the first pass. The server assigns the ID; on success we return the
+   * category_id is required for REGULAR and refused for INCOME /
+   * INTERNAL_TRANSFER: an edit to those types clears the category, and a
+   * create with one stores it but hides it (ledger:
+   * FirestoreTransaction.type:clearsCategory), so a category sent with them
+   * is lost without a word. Same rule as update_transaction, worded for a
+   * create (#825). The server assigns the ID; on success we return the
    * full newly-created Transaction in the local snake_case shape so callers
    * can immediately read it without a refresh_database round-trip.
    *
@@ -3961,7 +3965,8 @@ export class CopilotMoneyTools {
     name: string;
     date: string;
     amount: number;
-    category_id: string;
+    /** Required for REGULAR; must be omitted for INCOME / INTERNAL_TRANSFER. */
+    category_id?: string;
     type: TransactionType;
     tag_ids?: string[];
     note?: string;
@@ -3978,7 +3983,6 @@ export class CopilotMoneyTools {
     // but methods are callable directly from tests/code).
     validateDocId(account_id, 'account_id');
     validateDocId(item_id, 'item_id');
-    validateDocId(category_id, 'category_id');
 
     const trimmedName = typeof name === 'string' ? name.trim() : '';
     if (!trimmedName) {
@@ -4006,7 +4010,30 @@ export class CopilotMoneyTools {
       throw new Error(`type must be one of: ${TRANSACTION_TYPES.join(', ')}. Got: ${type}`);
     }
 
+    // INCOME / INTERNAL_TRANSFER have no category in Copilot: an edit to those
+    // types clears it (verified), and a create with one stores it but hides it
+    // (GraphQL and the web show none; FirestoreTransaction.type:clearsCategory).
+    // Either way a category_id sent with them is lost without a word, so the
+    // pair is refused, as update_transaction and bulk_edit_transactions refuse
+    // it (#825). REGULAR still needs one. Runs before the id's shape check, so
+    // `category_id: ""` with INCOME gets this rule rather than a format error.
+    if (type === 'INCOME' || type === 'INTERNAL_TRANSFER') {
+      if (category_id !== undefined) {
+        throw new Error(
+          `create_transaction: category_id cannot be combined with type ${type} — Copilot ` +
+            `clears the category for INCOME/INTERNAL_TRANSFER transactions. Omit category_id ` +
+            `for these types, or use type REGULAR to set a category.`
+        );
+      }
+    } else if (category_id === undefined) {
+      throw new Error(
+        `create_transaction: category_id is required for type ${type} — only INCOME and ` +
+          `INTERNAL_TRANSFER transactions are created without a category.`
+      );
+    }
+
     // Shape checks first: they are local, the existence checks below may fetch.
+    if (category_id !== undefined) validateDocId(category_id, 'category_id');
     for (const tagId of args.tag_ids ?? []) {
       validateDocId(tagId, 'tag_id');
     }
@@ -4017,7 +4044,7 @@ export class CopilotMoneyTools {
     // Reference validation (runs BEFORE any write for atomicity). Copilot
     // stores an unknown category id verbatim (#846), so this is the only guard.
     // mutation-guard: create_transaction validates its category id
-    await this.validateCategoryId(category_id);
+    if (category_id !== undefined) await this.validateCategoryId(category_id);
     if (args.tag_ids !== undefined) {
       await this.validateTagIds(args.tag_ids);
     }
@@ -4026,7 +4053,11 @@ export class CopilotMoneyTools {
       name: trimmedName,
       date,
       amount,
-      categoryId: category_id,
+      // CreateTransactionInput.categoryId is non-null (ID!), so a type without a
+      // category sends an empty id, which ends in the state the app shows for
+      // these types anyway (ledger: Mutation.createTransaction:emptyCategoryForIncome,
+      // verified once by a live probe).
+      categoryId: category_id ?? '',
       type,
     };
     if (args.tag_ids !== undefined) input.tagIds = args.tag_ids;

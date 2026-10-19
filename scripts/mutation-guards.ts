@@ -376,7 +376,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'remove',
       find: wholeLines(
         '    // mutation-guard: create_transaction validates its category id',
-        '    await this.validateCategoryId(category_id);'
+        '    if (category_id !== undefined) await this.validateCategoryId(category_id);'
       ),
     },
     expectFailingTests: ['an unknown category id is rejected with nothing sent'],
