@@ -1202,7 +1202,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'observation, not a contract.',
   },
   {
-    surface: 'UnpaidUpcomingRecurring.nextPaymentDate:horizonAbout14Days',
+    surface: 'UnpaidUpcomingRecurrings:horizonAbout14Days',
     kind: 'response-shape',
     oracle: null,
     class: 'unverified',

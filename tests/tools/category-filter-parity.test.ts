@@ -195,6 +195,14 @@ describe('category filter parity across modes (#845)', () => {
   );
 });
 
+describe('cache mode with no date bounds (#858 review)', () => {
+  test('the error names the corpus it actually searched: the whole cache', async () => {
+    await expect(
+      cacheTools().getTransactions({ category: 'not-a-category', limit: 500 })
+    ).rejects.toThrow(/no transaction in the cache carries it/);
+  });
+});
+
 describe('resolveCategoryFilter', () => {
   test('walks more than one level and survives a parent cycle in bad data', () => {
     const nodes = [

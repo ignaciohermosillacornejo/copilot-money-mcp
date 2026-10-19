@@ -59,7 +59,9 @@ cache in cache mode, so an out-of-window orphan id was a silent zero there and a
 `tests/tools/category-filter-parity.test.ts` drives both tools over one fixture: a parent with
 two children, a top-level category, an orphan id, and opaque ids. It requires the same ids
 from both modes, children included for a parent. It also requires a name, a substring, a case
-variant or a typo to be rejected in both modes, with the mode's own hint. The test is per
+variant or a typo to be rejected in both modes, with the mode's own hint. Siblings: `transaction_type: "hsa_eligible"` matched Plaid-taxonomy slugs as substrings of
+the opaque category id in cache mode, the same defect, and used a different word list in live
+mode; #854 replaces both with one shared rule over the category NAME (#843). The test is per
 filter, not a sweep: other filters that take an id (`account_id`) still return zero rows for
 an unknown value.
 

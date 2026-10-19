@@ -30,6 +30,12 @@ export interface ResolveCategoryFilterOptions {
    */
   listTool: string;
   /**
+   * Describes the corpus `knownElsewhere` was judged against, for the error:
+   * "in the date range" (the default) or, for a cache-mode call with no date
+   * bounds, "in the cache".
+   */
+  corpus?: 'in the cache' | 'in the date range';
+  /**
    * True when `value` is missing from `categories` but a transaction in the
    * queried date range carries it (an orphaned id). Both modes compute it over
    * that same corpus, the rows the call fetched for its window. Such a value is
@@ -57,7 +63,7 @@ export function resolveCategoryFilter(
         ? ` '${value}' is a category NAME; its id is ${byName.map((c) => `'${c.id}'`).join(' or ')}.`
         : '';
     throw new Error(
-      `Category '${value}' matches no category id, and no transaction in the date range ` +
+      `Category '${value}' matches no category id, and no transaction ${opts.corpus ?? 'in the date range'} ` +
         `carries it. The filter takes a category id, not a name: pass an id from ` +
         `${opts.listTool}.${suggestion}`
     );

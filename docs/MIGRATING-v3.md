@@ -1,8 +1,12 @@
 # Migrating to v3.0.0
 
-v3 is a **response-shape release**. No tool was renamed, no tool was removed, no
-filter changed meaning, and nothing about writes changed. What changed is how
-much each read tool hands back when you don't ask for anything in particular.
+v3 is a **response-shape release**. No tool was renamed, no tool was removed, and
+nothing about writes changed. What changed is how much each read tool hands back
+when you don't ask for anything in particular.
+
+One filter did change meaning: the transactions `category` filter takes an exact
+category id (a parent includes its children), and a name or substring that used
+to match now returns an error — see the table below.
 
 If you are reading this because something broke, skip to
 [Did something break?](#did-something-break).
@@ -53,6 +57,7 @@ live rows do not carry identical field sets.
 | A field you read is suddenly `undefined`, no error | That tool is terse by default and the field is not in its preset | Add it: `fields: ["default", "<the field>"]` |
 | `` `compact` was removed in v3.0.0 `` | `compact` is gone from `get_transactions` and `get_transactions_live` | Passing `true`? Drop the argument. Passing `false`? Use `fields: ["all"]` |
 | `` `include_logos` was removed in v3.0.0 `` | `include_logos` is gone from `get_accounts` | `fields: ["default", "logo", "logo_content_type"]` |
+| `` Category 'x' matches no category id `` | `category` on `get_transactions` / `get_transactions_live` is an exact id now, never a name or a substring of one | Pass the id from `get_categories` / `get_categories_live`; a parent id already includes its children's rows |
 | `fields: []` used to return full rows, now returns the terse row | An empty selection now means the same as omitting `fields` | Use `fields: ["all"]` |
 | `_field_warning` names a field you know exists | The name exists on the *other* mode, or is misspelled | Check the tables below for the mode you are running |
 | `__typename` keys are gone from live responses | They are stripped from every response now | Nothing to do in almost every case. The one place it disambiguated anything was the icon union, and `{unicode}` vs `{id, src}` already tells those apart |

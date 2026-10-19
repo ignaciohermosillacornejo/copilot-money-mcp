@@ -758,6 +758,13 @@ export class CopilotMoneyTools {
    * cache mode and throw in live mode (#858 review). A Plaid-taxonomy id with
    * no row in range is rejected for the same reason: accepting it returned a
    * silent zero.
+   *
+   * Cache mode allows a call with no date bounds (live mode does not); then
+   * the corpus is the whole cache and the error says so. The corpus read
+   * applies the date bounds and the main query's 50k cap but not its
+   * merchant/account/amount filters, so above 50k rows in range the two can
+   * truncate differently — unreachable in practice. It is a second in-memory
+   * pass over the transactions, on the miss path only.
    */
   private async resolveCacheCategoryFilter(
     category: string,
@@ -775,7 +782,11 @@ export class CopilotMoneyTools {
       (await this.db.getTransactions({ startDate, endDate, limit: 50000 })).some(
         (t) => t.category_id === category
       );
-    return resolveCategoryFilter(category, nodes, { listTool: 'get_categories', knownElsewhere });
+    return resolveCategoryFilter(category, nodes, {
+      listTool: 'get_categories',
+      knownElsewhere,
+      ...(startDate === undefined && endDate === undefined ? { corpus: 'in the cache' } : {}),
+    });
   }
 
   /**
