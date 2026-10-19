@@ -233,9 +233,9 @@ describe('a burst of deletes shares one window load (#838)', () => {
 describe('the memo chokepoint cannot be bypassed (#838)', () => {
   test('patchLiveTransactionDelete is called in src only inside evictLiveTransaction', () => {
     // A removal that skipped the chokepoint would leave the memo serving the
-    // row. Scan every source file for direct calls (the definition itself has
-    // no leading dot, so it does not match). Comment lines are skipped so prose
-    // naming the method does not count as a call.
+    // row. Scan every source file for direct calls. The definition has no
+    // leading dot, and neither does a prose mention, so neither matches; a
+    // comment that did spell the call would fail loudly here, which is safe.
     const root = join(__dirname, '../../src');
     const files: string[] = [];
     const walk = (dir: string): void => {
@@ -246,28 +246,25 @@ describe('the memo chokepoint cannot be bypassed (#838)', () => {
       }
     };
     walk(root);
-    // Any class-member start at two-space indent, whatever its modifiers.
-    const MEMBER_START =
-      /\n {2}(?:(?:private|protected|public|static|readonly|async|get|set) +)*[\w$]+\s*[(<]/g;
     const calls: string[] = [];
     let declarationsFound = 0;
     for (const f of files) {
       const src = readFileSync(f, 'utf8');
       if (src.includes('private evictLiveTransaction(')) declarationsFound += 1;
       for (const m of src.matchAll(/\.patchLiveTransactionDelete\(/g)) {
-        const lineStart = src.lastIndexOf('\n', m.index) + 1;
-        const line = src.slice(lineStart, m.index).trim();
-        if (line.startsWith('//') || line.startsWith('*')) continue;
         const before = src.slice(0, m.index);
-        let enclosing = -1;
-        for (const ms of before.matchAll(MEMBER_START)) enclosing = ms.index!;
+        // Form-independent: a call inside evictLiveTransaction's body has no
+        // two-space-indented block close between the declaration and itself;
+        // a call in any later member has evict's own closing brace there, and
+        // a call before it, or in another file, has no declaration at all.
         const owner = before.lastIndexOf('\n  private evictLiveTransaction(');
-        const inChokepoint = owner !== -1 && enclosing === owner;
+        const inChokepoint = owner !== -1 && !before.slice(owner).includes('\n  }');
         calls.push(`${f.slice(root.length)}:${inChokepoint ? 'chokepoint' : 'BYPASS'}`);
       }
     }
     // A rename of the helper should say so, not report a bypass.
     expect(declarationsFound).toBe(1);
-    expect(calls).toEqual(['/tools/tools.ts:chokepoint']);
+    // Sorted, so the assertion does not depend on readdir order.
+    expect(calls.sort()).toEqual(['/tools/tools.ts:chokepoint']);
   });
 });
