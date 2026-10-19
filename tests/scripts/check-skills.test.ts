@@ -897,6 +897,20 @@ describe('mode surface (#847)', () => {
     );
   });
 
+  test('"(live-mode-reads ...)" is not a live tag either', async () => {
+    // Admitting "-mode" must not re-admit a longer hyphenated word built on it.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith('Call `get_accounts_live` (live-mode-reads must be on).', 'live, cache'),
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('`get_accounts_live` is listed only in live mode');
+      }
+    );
+  });
+
   test('a tag for the wrong mode does not excuse the tool', async () => {
     await withRepo(
       { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts` (live).', 'live, cache') },

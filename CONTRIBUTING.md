@@ -65,6 +65,19 @@ list filter), and a `` `name: value` `` argument no tool on that line takes
 (#847). A skill that runs in both modes names both variants on the line, each
 tagged with its mode: `` `get_accounts_live` (live) / `get_accounts` (cache) ``.
 
+Accepted tag forms (a parenthetical on the same line, case-insensitive):
+
+- `(live)` / `(cache)`, including longer forms that open with the mode, such
+  as `(cache only)` or `(live mode: ...)`
+- `(live-mode)` / `(cache-mode)`
+- `(only in live mode)` / `(in cache mode)`
+- `(… in cache mode)`: "in <mode> mode" later in the parenthetical
+- `(… cache mode only)`: "<mode> mode only" later in the parenthetical
+
+A mode named any other way is prose, not a tag: `(the way cache mode always
+did)`, `(live-reads must be on)`. Each parenthetical yields at most one tag, so
+use one parenthetical per variant rather than `(live or cache)`.
+
 #### Writes-enabled bundle (local-only)
 
 `bun run pack:mcpb:write` produces `copilot-money-mcp-write.mcpb`, a variant
