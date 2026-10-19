@@ -108,6 +108,14 @@ function stubLiveDb(overrides: {
     return out;
   };
   const liveDb = {
+    // split_transaction validates child categories first (#846).
+    getCategoriesCache: () => ({
+      read: async () => ({
+        rows: ['catA', 'catB', 'catC'].map((id) => ({ id })),
+        fetched_at: 0,
+        hit: false,
+      }),
+    }),
     lookupTransactionNodes,
     lookupTransactionMeta: () => new Map(),
     getTransactions,

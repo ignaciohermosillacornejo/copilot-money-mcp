@@ -3,7 +3,41 @@
  */
 
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test';
-import { parsePeriod, getMonthRange, monthsCovered, monthAge } from '../../src/utils/date.js';
+import {
+  parsePeriod,
+  getMonthRange,
+  monthsCovered,
+  monthAge,
+  isCalendarDate,
+  isCalendarMonth,
+} from '../../src/utils/date.js';
+
+describe('isCalendarDate / isCalendarMonth (#825)', () => {
+  test.each(['2026-02-28', '2028-02-29', '2000-02-29', '2026-12-31', '2026-01-01'])(
+    '%s is a real date',
+    (d) => expect(isCalendarDate(d)).toBe(true)
+  );
+  test.each([
+    '2026-02-29', // not a leap year
+    '1900-02-29', // century, not a leap year
+    '2026-02-30',
+    '2026-04-31',
+    '2026-13-01',
+    '2026-00-10',
+    '2026-01-00',
+    '2026-1-01',
+    '20260101',
+    '',
+  ])('%s is not', (d) => expect(isCalendarDate(d)).toBe(false));
+
+  test('months', () => {
+    expect(isCalendarMonth('2026-01')).toBe(true);
+    expect(isCalendarMonth('2026-12')).toBe(true);
+    expect(isCalendarMonth('2026-00')).toBe(false);
+    expect(isCalendarMonth('2026-13')).toBe(false);
+    expect(isCalendarMonth('2026-1')).toBe(false);
+  });
+});
 
 // Mock Date for testing time-dependent functions
 let originalDate: typeof Date;

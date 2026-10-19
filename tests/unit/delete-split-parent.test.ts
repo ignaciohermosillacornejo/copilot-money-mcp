@@ -26,7 +26,11 @@ import { SplitParentStore } from '../../src/core/persistence/split-parent-store.
 import { createTestDb } from '../helpers/test-db.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
 import type { CreatedTransaction } from '../../src/core/graphql/transactions.js';
-import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import {
+  createMockGraphQLClient,
+  liveCategoryMocks,
+  localCategories,
+} from '../helpers/mock-graphql.js';
 
 // Firestore-shaped opaque ids (never id-equals-name fixtures).
 const ACCOUNT_ID = 'Vq3nR8kT2pX6wL9mZ4yB';
@@ -47,7 +51,8 @@ function makeDb(transactions: unknown[] = []): CopilotDatabase {
   const db = new CopilotDatabase('/nonexistent');
   (db as any).dbPath = '/fake';
   (db as any)._transactions = transactions;
-  (db as any)._userCategories = [];
+  // split_transaction validates its children's categories (#846).
+  (db as any)._userCategories = localCategories([CAT_A, CAT_B]);
   (db as any)._tags = [];
   db._markLoadedForTesting();
   return db;
@@ -109,6 +114,8 @@ function serverTx(id: string, amount: number, categoryId: string): CreatedTransa
 }
 
 const SPLIT_MOCK = {
+  // Live-mode source for split_transaction's category check (#846).
+  ...liveCategoryMocks([CAT_A, CAT_B]),
   SplitTransaction: {
     splitTransaction: {
       parentTransaction: serverTx(PARENT_ID, 100, ''),
@@ -506,6 +513,7 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
     const drifted = { ...serverTx(PARENT_ID, 100, ''), tags: null };
     const client = createMockGraphQLClient({
       ...WINDOW(),
+      ...liveCategoryMocks([CAT_A, CAT_B]),
       SplitTransaction: {
         splitTransaction: {
           parentTransaction: drifted as unknown as CreatedTransaction,

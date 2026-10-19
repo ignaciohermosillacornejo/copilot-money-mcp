@@ -230,6 +230,7 @@
     "tests/tools/unit-coverage-gaps.test.ts",
     "tests/tools/write-tools-phase3.test.ts",
     "tests/tools/write-tools.test.ts",
+    "tests/tools/write-reference-validation.test.ts",
     "tests/unit/delete-split-parent.test.ts",
     "tests/unit/reference-validation.test.ts",
     "tests/unit/resolve-transaction-meta.test.ts",

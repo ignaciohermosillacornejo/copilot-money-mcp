@@ -366,6 +366,42 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/tools/bulk-edit-transactions.test.ts',
   },
   {
+    name: 'create_transaction validates its category id',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'CreateTransaction stores an unknown categoryId verbatim (parity run 2026-10-18, ' +
+      '#846): the new row points at no category and the web shows none. The client-side ' +
+      'check is the only guard, as it is for bulk edits.',
+    mutation: {
+      kind: 'remove',
+      find: wholeLines(
+        '    // mutation-guard: create_transaction validates its category id',
+        '    await this.validateCategoryId(category_id);'
+      ),
+    },
+    expectFailingTests: ['an unknown category id is rejected with nothing sent'],
+    expectFails: 'tests/tools/write-reference-validation.test.ts',
+  },
+  {
+    name: 'split_transaction validates child category ids',
+    file: 'src/tools/tools.ts',
+    invariant:
+      "SplitTransactionInput.categoryId goes through the same server path as a created row's " +
+      '(#846), so an unknown id would leave a split child pointing at no category. Every ' +
+      "child's id is checked before the split is sent.",
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: split_transaction validates child category ids\n' +
+        '    for (const categoryId of new Set(splits.map((s) => s.category_id))) {',
+      with:
+        '    // mutation-guard: split_transaction validates child category ids\n' +
+        '    for (const categoryId of new Set<string>([])) {',
+    },
+    expectFailingTests: ['an unknown category id is rejected with nothing sent'],
+    expectFails: 'tests/tools/write-reference-validation.test.ts',
+  },
+  {
     name: 'create_transaction writes through to the live cache',
     file: 'src/tools/tools.ts',
     invariant:

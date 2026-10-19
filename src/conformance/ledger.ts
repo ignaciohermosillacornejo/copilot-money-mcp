@@ -466,6 +466,30 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('CreateTransactionInput.recurringId', ['create_transaction.recurring_id']),
   responseShape('createTransaction'),
   appliesSurface('createTransaction'),
+  {
+    surface: 'Mutation.createTransaction:no-referential-validation',
+    kind: 'operation',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'Release parity run 2026-10-18 (row ERR-09, #846): createTransaction with a well-formed ' +
+      'but made-up 20-character categoryId returned success, and a live read returned that ' +
+      'categoryId on the new row; the web showed no category. Same behaviour as ' +
+      '`Mutation.bulkEditTransactions:no-referential-validation`, so every write that stores ' +
+      'a category id runs validateCategoryId first (tests/tools/write-reference-validation.test.ts).',
+  },
+  {
+    surface: 'Mutation.splitTransaction:no-referential-validation',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'Inferred, not observed (#846): a split child is created through the same ' +
+      'TransactionFields path as createTransaction, which stores an unknown categoryId ' +
+      'verbatim, so the child is assumed to as well. No probe has sent a split with an ' +
+      'unknown id. The client-side check makes the question moot for this server; a probe ' +
+      'would only tell whether the server ever rejects it itself.',
+  },
 
   // update_transaction (one edit) and update_transactions (many, per-row
   // heterogeneous) are two arities over the SAME mutation — neither adds an

@@ -9,7 +9,11 @@ import { describe, test, expect, mock, beforeEach, afterEach, afterAll } from 'b
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
-import { createMockGraphQLClient, bulkEditEcho } from '../helpers/mock-graphql.js';
+import {
+  createMockGraphQLClient,
+  bulkEditEcho,
+  liveCategoryMocks,
+} from '../helpers/mock-graphql.js';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -308,6 +312,8 @@ describe('createRecurring uses resolveTransactionMeta', () => {
 describe('createTransaction feeds the meta index', () => {
   test('created id becomes resolvable without a fetch', async () => {
     const client = createMockGraphQLClient({
+      // create_transaction validates its category against the live list (#846).
+      ...liveCategoryMocks(['c1']),
       CreateTransaction: {
         createTransaction: {
           id: 'tNew',

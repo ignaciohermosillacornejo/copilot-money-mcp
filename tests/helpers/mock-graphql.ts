@@ -259,3 +259,39 @@ export function bulkEditEcho(vars: unknown): GraphQLOperationResponses['BulkEdit
     },
   };
 }
+
+/**
+ * Category reference data for write tests (#846): every write that assigns a
+ * category validates the id first, so a fixture that writes one must also
+ * hold it. `liveCategoryMocks` is the live-mode source (the Categories query
+ * plus the User query its rollovers flag reads); `localCategories` is the
+ * degraded-mode one, assigned to a CopilotDatabase's `_userCategories`.
+ */
+export function liveCategoryMocks(ids: readonly string[]): {
+  Categories: CategoriesResponse;
+  User: UserResponse;
+} {
+  return {
+    Categories: {
+      categories: ids.map((id) => ({
+        id,
+        name: `Category ${id}`,
+        parentId: null,
+        templateId: null,
+        colorName: 'ORANGE2',
+        isExcluded: false,
+        isRolloverDisabled: false,
+        canBeDeleted: true,
+        icon: { __typename: 'EmojiUnicode' as const, unicode: '🛒' },
+        budget: null,
+      })),
+    },
+    User: { user: { id: 'vW2jX8nO5kL0sP7qV1tW', budgetingConfig: null } },
+  };
+}
+
+export function localCategories(
+  ids: readonly string[]
+): Array<{ category_id: string; name: string; excluded: boolean }> {
+  return ids.map((id) => ({ category_id: id, name: `Category ${id}`, excluded: false }));
+}

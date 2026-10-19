@@ -10,7 +10,11 @@
 import { describe, test, expect, beforeEach, afterAll } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
-import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
+import {
+  createMockGraphQLClient,
+  liveCategoryMocks,
+  localCategories,
+} from '../helpers/mock-graphql.js';
 import type {
   CreatedTransaction,
   CreateTransactionResponse,
@@ -139,6 +143,8 @@ describe('set_budget', () => {
   beforeEach(() => {
     mockDb = new CopilotDatabase('/nonexistent');
     (mockDb as any).dbPath = '/fake';
+    // Every category a write assigns is validated first (#846).
+    (mockDb as any)._userCategories = localCategories(['cat1']);
     (mockDb as any)._allCollectionsLoaded = true;
   });
 
@@ -386,6 +392,8 @@ describe('createTransaction', () => {
   beforeEach(() => {
     mockDb = new CopilotDatabase('/nonexistent');
     (mockDb as any).dbPath = '/fake';
+    // Every category a write assigns is validated first (#846).
+    (mockDb as any)._userCategories = localCategories(['cat1']);
     (mockDb as any)._allCollectionsLoaded = true;
   });
 
@@ -643,7 +651,10 @@ describe('createTransaction', () => {
   // assert the observable result — the id resolves — not which internal
   // method was called.
   test('response routing ids feed the live meta index', async () => {
-    const client = createMockGraphQLClient({ CreateTransaction: { createTransaction: createdTx } });
+    const client = createMockGraphQLClient({
+      ...liveCategoryMocks(['cat1']),
+      CreateTransaction: { createTransaction: createdTx },
+    });
     const liveDb = new LiveCopilotDatabase(client, mockDb, { metaStore: isolatedMetaStore() });
     tools = new CopilotMoneyTools(mockDb, client, liveDb);
 
@@ -660,6 +671,7 @@ describe('createTransaction', () => {
     // strips), so a drifted CreateTransaction response reaches this feed
     // as-is. Same guard as the split_transaction feed.
     const client = createMockGraphQLClient({
+      ...liveCategoryMocks(['cat1']),
       CreateTransaction: { createTransaction: { ...createdTx, accountId: '' } },
     });
     const liveDb = new LiveCopilotDatabase(client, mockDb, { metaStore: isolatedMetaStore() });
@@ -673,6 +685,7 @@ describe('createTransaction', () => {
   test('drifted response with empty itemId is not fed to the index (#518)', async () => {
     // Symmetric case: the guard must check both routing ids.
     const client = createMockGraphQLClient({
+      ...liveCategoryMocks(['cat1']),
       CreateTransaction: { createTransaction: { ...createdTx, itemId: '' } },
     });
     const liveDb = new LiveCopilotDatabase(client, mockDb, { metaStore: isolatedMetaStore() });
@@ -1176,6 +1189,13 @@ describe('splitTransaction', () => {
         category_id: 'cat-food',
       },
     ];
+    // Every category a write assigns is validated first (#846).
+    (mockDb as any)._userCategories = localCategories([
+      'cat-lodging',
+      'cat-car-rental',
+      'cat-food',
+      'cat-travel',
+    ]);
     (mockDb as any)._allCollectionsLoaded = true;
   });
 

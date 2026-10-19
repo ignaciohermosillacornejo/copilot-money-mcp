@@ -72,7 +72,7 @@ a class yet.
 |---|---|---|
 | `external-api-drift` | An assumption about Copilot's API — an enum value, an input field, an operation signature — was wrong when written, or became wrong. | conformance ledger + Tier-1 smokes (`bun run smoke`); see [`CONFORMANCE_ARCHITECTURE.md`](../CONFORMANCE_ARCHITECTURE.md) |
 | `wire-type-drift` | The API or the cache holds a value the schema cannot represent — a number where a string was expected, a null where non-null was assumed, an IEEE-754 `NaN`/`±Infinity` where JSON has no such value. | runtime warn-mode validation on all read shapes; non-finite leaves are stripped at the decode boundary instead of costing the document (#659), and `smoke:cache` reports any that exist in the real cache |
-| `referential-integrity-gap` | A write accepts ids without existence checks, producing silent no-ops or dangling references. | none — client-side validation on bulk writes only. No full entry yet; instance in [`MINOR.md`](MINOR.md) (#213), and Copilot's own `bulkEditTransactions` has the same gap server-side |
+| `referential-integrity-gap` | A write accepts ids without existence checks, producing silent no-ops or dangling references. | partial (mutation-verified) — `tests/tools/write-reference-validation.test.ts` derives every write tool taking a `category_id` and requires the shared check on each (#846); recurring ids are still unchecked. Instance in [`MINOR.md`](MINOR.md) (#213); Copilot's own `bulkEditTransactions` and `createTransaction` have the same gap server-side |
 | `ambiguous-candidate-selection` | Committing to one candidate from a noisy source before the only authority that can validate it runs, with no fallback; the benign rejection is then misreported as a system error. | `tests/core/auth/candidate-ordering.test.ts` (mutation-verified in every direction it asserts): no single candidate may end the search for a valid one behind it — whatever its position in the list or its failure mode (#722) |
 
 ### Computing the answer
@@ -216,6 +216,12 @@ record near-misses.
 | #302 | [Null vested_* fields in holdings made Zod throw, silently dropping whole accounts](302-null-vested-fields-drop-accounts.md) | `dogfooding` | 2026-04-18 |
 | #537 | [Read-query interfaces systematically declared the wrong wire types (string amounts that are numbers, non-null prices that are null)](537-read-shape-string-number-drift.md) | `detector-first` | 2026-07-18 |
 | #659 | [An Infinity price in the cache silently removed a whole investment account and 18 months of holdings history](659-non-finite-price-drops-documents.md) | `user-report` | 2026-08-21 |
+
+**`referential-integrity-gap`** — 1
+
+| | Bug | Found by | Date |
+|---|---|---|---|
+| #846 | [create_transaction and split_transaction stored a nonexistent category id, leaving the row with no category in the app](846-create-split-unknown-category-id.md) | `live-probe` | 2026-10-18 |
 
 **`ambiguous-candidate-selection`** — 2
 

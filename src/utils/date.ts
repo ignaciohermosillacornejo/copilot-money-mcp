@@ -13,6 +13,32 @@ function formatDate(date: Date): string {
 }
 
 /**
+ * True when `value` is `YYYY-MM-DD` AND names a day that exists on the
+ * calendar — `2026-02-30`, `2026-04-31` and `2026-13-01` are well-formed but
+ * false (#825). Computed in UTC so the answer never depends on the host's
+ * time zone or DST.
+ */
+export function isCalendarDate(value: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+  if (month < 1 || month > 12 || day < 1) return false;
+  // Day 0 of the next month is the last day of this one.
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return day <= lastDay;
+}
+
+/** True when `value` is `YYYY-MM` with a month from 01 to 12 (#825). */
+export function isCalendarMonth(value: string): boolean {
+  const m = /^\d{4}-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const month = Number(m[1]);
+  return month >= 1 && month <= 12;
+}
+
+/**
  * Get the date range for a specific month.
  */
 export function getMonthRange(year: number, month: number): [string, string] {

@@ -77,7 +77,7 @@ import {
   REMOVED_ACCOUNT_ARGS,
   REMOVED_TRANSACTION_ARGS,
 } from './errors.js';
-import { parsePeriod } from '../utils/date.js';
+import { isCalendarDate, isCalendarMonth, parsePeriod } from '../utils/date.js';
 import {
   readScheduledSmokeStatus,
   type ScheduledSmokeStatus,
@@ -392,6 +392,23 @@ function validateDate(date: string | undefined, paramName: string): string | und
     throw new Error(`Invalid ${paramName} format. Expected YYYY-MM-DD, got: ${date}`);
   }
   return date;
+}
+
+/**
+ * Validate a date a WRITE sends to Copilot (#825): `YYYY-MM-DD` and a day that
+ * exists. A well-formed impossible date (`2026-02-30`) otherwise reaches the
+ * server, whose 400 is reported as possible API drift. `formatMessage` keeps
+ * each tool's existing wording for a malformed string; only the impossible
+ * date gets the new message. Write paths only: read filters keep
+ * validateDate.
+ */
+function validateWriteDate(date: string, label: string, formatMessage: string): void {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(formatMessage);
+  }
+  if (!isCalendarDate(date)) {
+    throw new Error(`${label}: ${date} is not a real calendar date`);
+  }
 }
 
 /**
@@ -3193,14 +3210,32 @@ export class CopilotMoneyTools {
    * Validate a category id against the authoritative source — the live
    * categories cache (fetch-on-cold, existing TTLs) in live mode; the local
    * LevelDB cache only in degraded mode. Message contract unchanged (#510).
+   *
+   * The ONE category-reference check for every write that assigns a
+   * category (#846): create_transaction, split_transaction children,
+   * update_transaction(s), bulk_edit_transactions, update_recurring and
+   * set_budget. Copilot stores an unknown category id verbatim (ledger:
+   * Mutation.bulkEditTransactions:no-referential-validation,
+   * Mutation.createTransaction:no-referential-validation), so this is the
+   * only guard against a row pointing at no category.
+   *
+   * A miss on a cached list (1-day TTL) refetches once before rejecting, so a
+   * category created in the app since the list was cached is not refused.
    */
   private async validateCategoryId(categoryId: string): Promise<void> {
     const liveDb = this.liveDb;
     if (liveDb) {
-      const { rows } = await liveDb.getCategoriesCache().read(async () => {
+      const cache = liveDb.getCategoriesCache();
+      const load = async () => {
         const rollovers = await liveDb.resolveRolloversFlag();
         return fetchCategories(liveDb.getClient(), { rollovers });
-      });
+      };
+      const first = await cache.read(load);
+      let rows = first.rows;
+      if (!rows.find((c) => c.id === categoryId) && first.hit) {
+        cache.invalidate();
+        rows = (await cache.read(load)).rows;
+      }
       if (!rows.find((c) => c.id === categoryId)) {
         throw new Error(`Category not found: ${categoryId}`);
       }
@@ -3287,7 +3322,11 @@ export class CopilotMoneyTools {
       }
     }
     if ('date' in edit && edit.date !== undefined) {
-      validateDate(edit.date, 'date');
+      validateWriteDate(
+        edit.date,
+        `${label} date`,
+        `Invalid date format. Expected YYYY-MM-DD, got: ${edit.date}`
+      );
     }
     if ('amount' in edit && edit.amount !== undefined) {
       if (typeof edit.amount !== 'number' || !Number.isFinite(edit.amount)) {
@@ -3728,9 +3767,11 @@ export class CopilotMoneyTools {
       throw new Error('name must be a non-empty string');
     }
 
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      throw new Error(`Invalid date format. Expected YYYY-MM-DD, got: ${date}`);
-    }
+    validateWriteDate(
+      date,
+      'create_transaction date',
+      `Invalid date format. Expected YYYY-MM-DD, got: ${date}`
+    );
 
     if (typeof amount !== 'number' || !Number.isFinite(amount)) {
       throw new Error('amount must be a finite number');
@@ -3747,7 +3788,10 @@ export class CopilotMoneyTools {
       throw new Error(`type must be one of: ${TRANSACTION_TYPES.join(', ')}. Got: ${type}`);
     }
 
-    // Optional metadata validation (runs BEFORE any write for atomicity).
+    // Reference validation (runs BEFORE any write for atomicity). Copilot
+    // stores an unknown category id verbatim (#846), so this is the only guard.
+    // mutation-guard: create_transaction validates its category id
+    await this.validateCategoryId(category_id);
     if (args.tag_ids !== undefined) {
       for (const tagId of args.tag_ids) {
         validateDocId(tagId, 'tag_id');
@@ -4250,8 +4294,12 @@ export class CopilotMoneyTools {
         );
       }
 
-      if (s.date !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(s.date)) {
-        throw new Error(`splits[${i}].date: Expected YYYY-MM-DD, got: ${s.date}`);
+      if (s.date !== undefined) {
+        validateWriteDate(
+          s.date,
+          `splits[${i}].date`,
+          `splits[${i}].date: Expected YYYY-MM-DD, got: ${s.date}`
+        );
       }
 
       if (s.name !== undefined) {
@@ -4260,6 +4308,14 @@ export class CopilotMoneyTools {
           throw new Error(`splits[${i}].name must be a non-empty string`);
         }
       }
+    }
+
+    // Category references, before anything is resolved or sent: the server
+    // stores a child's unknown category id verbatim (#846). One check per
+    // distinct id; the categories list is cached, so this is one read.
+    // mutation-guard: split_transaction validates child category ids
+    for (const categoryId of new Set(splits.map((s) => s.category_id))) {
+      await this.validateCategoryId(categoryId);
     }
 
     // Resolve the parent's CONTENT (amount for the sum check, name/date for
@@ -5013,6 +5069,13 @@ export class CopilotMoneyTools {
     if (args.month !== undefined && !/^\d{4}-\d{2}$/.test(args.month)) {
       throw new Error('month must be "YYYY-MM"');
     }
+    if (args.month !== undefined && !isCalendarMonth(args.month)) {
+      throw new Error(`month: ${args.month} is not a real calendar month (01-12)`);
+    }
+    // A budget on a category that does not exist is a write to nothing the app
+    // can show; same single check as every other category reference (#846).
+    validateDocId(args.category_id, 'category_id');
+    await this.validateCategoryId(args.category_id);
 
     try {
       const result = await gqlSetBudget(client, {

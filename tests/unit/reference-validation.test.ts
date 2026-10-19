@@ -57,7 +57,7 @@ function stubLiveDb(graphqlClient: unknown) {
       for (const id of ids) out.set(id, { accountId: 'acct-1', itemId: 'item-1' });
       return out;
     },
-    getCategoriesCache: () => readThrough,
+    getCategoriesCache: () => ({ ...readThrough, invalidate: () => {} }),
     getTagsCache: () => readThrough,
     getRecurringCache: () => ({ peek: () => null }),
     resolveRolloversFlag: async () => false,
@@ -193,7 +193,7 @@ describe('live-mode reference validation (#510)', () => {
       name: 'Synthetic',
       date: '2026-07-01',
       amount: 100,
-      category_id: 'c1',
+      category_id: 'cat-live',
       type: 'REGULAR',
       tag_ids: ['tag-live'],
     });
