@@ -83,12 +83,12 @@ import {
 } from '../utils/scheduled-smoke-status.js';
 import { computeTotalReturnPercent, roundAmount } from '../utils/round.js';
 import { pLimit } from '../utils/concurrency.js';
+import { getCategoryName, isTransferCategory, isKnownPlaidCategory } from '../utils/categories.js';
 import {
-  getCategoryName,
-  isTransferCategory,
-  isIncomeCategory,
-  isKnownPlaidCategory,
-} from '../utils/categories.js';
+  TRANSACTION_TYPE_RULES,
+  cacheTypeRuleRow,
+  type SharedTransactionType,
+} from './transaction-type-rules.js';
 import type {
   Transaction,
   Account,
@@ -1036,8 +1036,7 @@ export class CopilotMoneyTools {
       const result = this._filterByTransactionType(
         transactions,
         transaction_type,
-        start_date,
-        end_date
+        await this.getUserCategoryMap()
       );
       transactions = result.transactions;
       typeSpecificData = result.typeSpecificData;
@@ -1162,9 +1161,15 @@ export class CopilotMoneyTools {
   private _filterByTransactionType(
     transactions: Transaction[],
     type: TransactionTypeFilter,
-    _startDate?: string,
-    _endDate?: string
+    userCategoryMap: Map<string, string>
   ): { transactions: Transaction[]; typeSpecificData?: Record<string, unknown> } {
+    // refunds / credits / hsa_eligible / tagged mean the same thing in live
+    // mode: both modes evaluate the one rule in transaction-type-rules.ts
+    // (#843), each through its own row adapter.
+    const byRule = (rule: SharedTransactionType) =>
+      transactions.filter((txn) =>
+        TRANSACTION_TYPE_RULES[rule](cacheTypeRuleRow(txn, userCategoryMap))
+      );
     switch (type) {
       case 'foreign': {
         const foreignTxns = transactions.filter((txn) => {
@@ -1209,13 +1214,7 @@ export class CopilotMoneyTools {
       }
 
       case 'refunds': {
-        const refundTxns = transactions.filter((txn) => {
-          if (txn.amount >= 0) return false;
-          if (isTransferCategory(txn.category_id)) return false;
-          if (isIncomeCategory(txn.category_id)) return false;
-          const name = getTransactionDisplayName(txn).toLowerCase();
-          return name.includes('refund') || name.includes('return') || name.includes('reversal');
-        });
+        const refundTxns = byRule('refunds');
         const totalRefunded = refundTxns.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
         return {
           transactions: refundTxns,
@@ -1224,14 +1223,7 @@ export class CopilotMoneyTools {
       }
 
       case 'credits': {
-        const creditKeywords = ['credit', 'cashback', 'reward', 'rebate', 'bonus'];
-        const creditTxns = transactions.filter((txn) => {
-          if (txn.amount >= 0) return false;
-          if (isTransferCategory(txn.category_id)) return false;
-          if (isIncomeCategory(txn.category_id)) return false;
-          const name = getTransactionDisplayName(txn).toLowerCase();
-          return creditKeywords.some((kw) => name.includes(kw));
-        });
+        const creditTxns = byRule('credits');
         const totalCredits = creditTxns.reduce((sum, txn) => sum + Math.abs(txn.amount), 0);
         return {
           transactions: creditTxns,
@@ -1262,25 +1254,7 @@ export class CopilotMoneyTools {
       }
 
       case 'hsa_eligible': {
-        const medicalCategories = ['medical', 'healthcare', 'pharmacy', 'dental', 'eye_care'];
-        const medicalMerchants = [
-          'cvs',
-          'walgreens',
-          'pharmacy',
-          'medical',
-          'dental',
-          'vision',
-          'hospital',
-        ];
-        const hsaTxns = transactions.filter((txn) => {
-          if (txn.amount <= 0) return false;
-          const isMedicalCat =
-            txn.category_id &&
-            medicalCategories.some((c) => txn.category_id?.toLowerCase().includes(c));
-          const merchantName = getTransactionDisplayName(txn).toLowerCase();
-          const isMedicalMerchant = medicalMerchants.some((m) => merchantName.includes(m));
-          return isMedicalCat || isMedicalMerchant;
-        });
+        const hsaTxns = byRule('hsa_eligible');
         const totalAmount = hsaTxns.reduce((sum, txn) => sum + txn.amount, 0);
         return {
           transactions: hsaTxns,
@@ -1289,7 +1263,7 @@ export class CopilotMoneyTools {
       }
 
       case 'tagged': {
-        const taggedTxns = transactions.filter((txn) => txn.tag_ids && txn.tag_ids.length > 0);
+        const taggedTxns = byRule('tagged');
         const tagMap = new Map<string, number>();
         for (const txn of taggedTxns) {
           for (const id of txn.tag_ids!) {

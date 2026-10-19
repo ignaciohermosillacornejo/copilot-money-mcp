@@ -89,7 +89,7 @@ a class yet.
 
 | Class | Definition | Detector |
 |---|---|---|
-| `path-divergence` | Two code paths that must agree drift apart silently, and which one runs depends on incidental state such as load order. | `decode-path-parity` (decode paths), `check:tool-counts`, `check:version-sync`, scripts typecheck; collection routing is one exported function (`routeCollection`) that the decoder, `smoke:cache` and `decode-coverage` all call, with `tests/scripts/smoke-cache.test.ts` running the smoke's raw side over a nested-layout fixture (mutation-verified against root anchoring, #778) |
+| `path-divergence` | Two code paths that must agree drift apart silently, and which one runs depends on incidental state such as load order. | `decode-path-parity` (decode paths), `check:tool-counts`, `check:version-sync`, scripts typecheck; collection routing is one exported function (`routeCollection`) that the decoder, `smoke:cache` and `decode-coverage` all call, with `tests/scripts/smoke-cache.test.ts` running the smoke's raw side over a nested-layout fixture (mutation-verified against root anchoring, #778); `tests/tools/transaction-type-parity.test.ts` runs every `transaction_type` value through both modes' tools over one fixture (#843) |
 | `vacuous-assertion` | A test executes a guard but would still pass if the guard were deleted. Coverage cannot detect this; only mutation can. | partial — `bun run check:mutation-guards` (`scripts/mutation-guards.ts`) applies each registered guard's exact disabling edit and requires its named test file to pass unmutated and fail mutated, so a registered invariant cannot be vacuous. Scoped by construction to the invariants on that ledger: a vacuous assertion elsewhere in the suite is still invisible, and adding the row is a human decision |
 | `silent-failure-masking` | An error-handling construct — `continue-on-error`, catch-and-return-null, an allow-list drop — turns a real failure into a green signal, so it surfaces late or never. | partial (mutation-verified) — `check:tracked-files` (`scripts/check-tracked-files.ts`, `tests/scripts/check-tracked-files.test.ts`) closes one mechanism repo-wide: the `.gitignore` allow-list drop that makes `git add` a silent no-op for a file the repo's own tooling reaches (#729). Every other mechanism in the definition — `continue-on-error`, catch-and-return-null, a filter that swallows its rejects — still has nothing static |
 | `doc-reality-drift` | Documentation asserts a verifiable property the code no longer has. Invisible to every behavioural gate, because nothing reads Markdown. | `check-privacy-endpoints`, `check:tool-counts` (per-property only); `tests/docs/jsdoc-stranding.test.ts` for the in-code case — a docblock separated from the declaration it describes (#701) |
@@ -117,7 +117,7 @@ this corpus actually says, across all 57 entries:
 | Found by | Count | |
 |---|---|---|
 | `dogfooding` — used the tool, noticed the answer disagreed with the Copilot app | 15 | █████████████ |
-| `live-probe` — a probe or smoke against the real backend | 11 | ██████████ |
+| `live-probe` — a probe or smoke against the real backend | 12 | ███████████ |
 | `audit-sweep` — a deliberate cross-cutting audit | 7 | ██████ |
 | `incidental` — found while working on something else | 8 | ███████ |
 | `user-report` | 8 | ███████ |
@@ -267,11 +267,12 @@ record near-misses.
 
 ### Our own machinery
 
-**`path-divergence`** — 1
+**`path-divergence`** — 2
 
 | | Bug | Found by | Date |
 |---|---|---|---|
 | #530 | [The live conformance smoke crashed on startup for a month — scripts/ silently drifted from a src/ contract change](530-scripts-drift-smoke-gate-crash.md) | `live-probe` | 2026-07-11 |
+| #843 | [transaction_type refunds and credits selected different, even disjoint, rows in cache and live mode](843-transaction-type-mode-divergence.md) | `live-probe` | 2026-10-18 |
 
 **`vacuous-assertion`** — 1
 

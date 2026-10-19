@@ -6,6 +6,7 @@ import { defineTool, type ToolMethodArgs } from './types.js';
 import { TRANSACTION_TYPE_FILTERS } from '../constants.js';
 import { TRANSACTION_TYPES } from '../../core/graphql/transactions.js';
 import { TRANSACTION_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
+import { TRANSACTION_TYPE_RULES_TEXT } from '../transaction-type-rules.js';
 
 export const getTransactionsTool = defineTool({
   schema: {
@@ -150,8 +151,9 @@ export const getTransactionsTool = defineTool({
           type: 'string',
           enum: [...TRANSACTION_TYPE_FILTERS],
           description:
-            'Filter by special type: foreign (international), refunds, credits (cashback/rewards), ' +
-            'duplicates (potential duplicate transactions), hsa_eligible (medical expenses), tagged (has tags)',
+            'Filter by special type. Cache-only: foreign (international) and duplicates ' +
+            '(potential duplicate transactions). ' +
+            TRANSACTION_TYPE_RULES_TEXT,
         },
         // NEW: Tag filter
         tag: {

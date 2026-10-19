@@ -1043,6 +1043,14 @@ function processTransaction(
   if (copilotType === 'internal_transfer') {
     txnData.internal_transfer = true;
   }
+  // The cache's only income signal (#825): derived from the same `type`
+  // string, the way internal_transfer is. Needed because the category cannot
+  // carry it — the normalization below clears category_id on income rows, and
+  // app-made income rows have an empty category on disk anyway. Absent means
+  // "not income", exactly as with internal_transfer.
+  if (copilotType === 'income') {
+    txnData.income = true;
+  }
   // Income and transfer rows have no category in Copilot: the server clears it
   // (GraphQL returns an empty categoryId) and the app shows none. A document
   // can still carry the old category_id — observed on rows created through

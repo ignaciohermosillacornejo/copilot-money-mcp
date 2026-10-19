@@ -61,7 +61,7 @@ These run on pages of results as they return, because GraphQL doesn't support th
 - `min_amount` / `max_amount` — absolute-value comparison
 - `pending` — filter on the `isPending` flag
 - `exclude_excluded` — cross-reference against `Category.isExcluded` from the local cache
-- `transaction_type: refunds | credits | hsa_eligible | tagged`
+- `transaction_type: refunds | credits | hsa_eligible | tagged` — the same rules cache mode applies, defined once in `src/tools/transaction-type-rules.ts` (#843)
 - `limit`, `offset` — applied to the full result set after filtering
 
 ### `exclude_deleted` / `exclude_split_parents: true`

@@ -55,6 +55,9 @@ export const TransactionSchema = z
     plaid_deleted: z.boolean().optional(),
     excluded: z.boolean().optional(), // True if excluded from spending calculations
     internal_transfer: z.boolean().optional(), // True if this is an internal transfer between accounts
+    // True when Copilot typed the row INCOME (document `type: "income"`).
+    // Derived by the decoder like internal_transfer; absent means not income.
+    income: z.boolean().optional(),
     is_manual: z.boolean().optional(),
     recurring: z.boolean().optional(),
     skip_balance_adjust: z.boolean().optional(),

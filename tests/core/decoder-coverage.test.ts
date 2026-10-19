@@ -1273,6 +1273,36 @@ describe('decoder coverage', () => {
       expect(result.transactions[0]?.category_id).toBe(expected);
     });
 
+    // #825: cache mode's income signal. category_id cannot carry it (cleared
+    // just above), so `income` is derived from the same `type` string the way
+    // internal_transfer is; the transaction_type rules (#843) read it.
+    test.each([
+      ['income', { type: 'income' }, true],
+      ['upper-case INCOME', { type: 'INCOME' }, true],
+      ['regular', { type: 'regular' }, undefined],
+      ['internal_transfer', { type: 'internal_transfer' }, undefined],
+      ['untyped', {}, undefined],
+    ] as const)('a %s document reports income %p', async (label, extra, expected) => {
+      const dbPath = path.join(FIXTURES_DIR, `type-income-${label.replace(/\W+/g, '-')}-db`);
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'transactions',
+          id: 'Pw6nK3qT8mR2vL9xB4sH',
+          fields: {
+            transaction_id: 'Pw6nK3qT8mR2vL9xB4sH',
+            amount: -50.0,
+            date: '2024-01-15',
+            name: 'Synthetic',
+            ...extra,
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.transactions[0]?.income).toBe(expected);
+    });
+
     // The id precedence both the decoder and smoke:cache check 9 rely on
     // (transactionDocumentId): the transaction_id field wins over the
     // document id, which is only the fallback.

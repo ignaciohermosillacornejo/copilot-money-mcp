@@ -377,6 +377,9 @@ const PINNED: Record<string, readonly string[]> = {
   ALL_TIME_FRAMES: ['ONE_DAY', 'ONE_WEEK', 'ONE_MONTH', 'THREE_MONTHS', 'YTD', 'ONE_YEAR', 'ALL'],
   // src/tools/constants.ts
   BALANCE_HISTORY_GRANULARITIES: ['daily', 'weekly', 'monthly'],
+  // src/tools/transaction-type-rules.ts — decides which rows `credits` selects
+  // in BOTH modes (#843), so a dropped keyword changes both answers at once.
+  CREDIT_NAME_KEYWORDS: ['credit', 'cashback', 'reward', 'rebate', 'bonus'],
   // src/tools/constants.ts
   CATEGORY_VIEWS: ['list', 'tree', 'search'],
   // src/core/decoder.ts — the decoder's dispatch routes (#778). Dropping one
@@ -518,6 +521,17 @@ const PINNED: Record<string, readonly string[]> = {
     'pending',
     'excluded',
     'internal_transfer',
+  ],
+  // src/tools/transaction-type-rules.ts — `hsa_eligible` in both modes (#843).
+  HSA_CATEGORY_KEYWORDS: ['health', 'medical', 'pharmac', 'dental', 'eye care', 'vision'],
+  HSA_MERCHANT_KEYWORDS: [
+    'cvs',
+    'walgreens',
+    'pharmacy',
+    'medical',
+    'dental',
+    'vision',
+    'hospital',
   ],
   // src/models/item.ts
   IGNORED_ITEM_FIELDS: [

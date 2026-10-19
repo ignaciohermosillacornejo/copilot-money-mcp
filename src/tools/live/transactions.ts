@@ -24,6 +24,12 @@ import {
 } from '../field-selection.js';
 import { rejectRemovedArgs, REMOVED_TRANSACTION_ARGS } from '../errors.js';
 import { normalizeMerchantName } from '../../utils/merchant.js';
+import {
+  TRANSACTION_TYPE_RULES,
+  TRANSACTION_TYPE_RULES_TEXT,
+  isSharedTransactionType,
+  liveTypeRuleRow,
+} from '../transaction-type-rules.js';
 import { parsePeriod } from '../../utils/date.js';
 
 /**
@@ -452,20 +458,11 @@ export class LiveTransactionsTools {
       result = result.filter((n) => !n.categoryId || !excludedIds.has(n.categoryId));
     }
 
-    // 9. transaction_type variants
-    if (opts.transaction_type === 'tagged') {
-      result = result.filter((n) => n.tags.length > 0);
-    } else if (opts.transaction_type === 'refunds') {
-      result = result.filter((n) => n.amount < 0);
-    } else if (opts.transaction_type === 'credits') {
-      result = result.filter((n) => n.amount < 0 && n.type === 'INCOME');
-    } else if (opts.transaction_type === 'hsa_eligible') {
+    // 9. transaction_type — the rules shared with cache mode (#843).
+    if (opts.transaction_type !== undefined && isSharedTransactionType(opts.transaction_type)) {
+      const rule = TRANSACTION_TYPE_RULES[opts.transaction_type];
       const { names } = await this.getCategoryIndex();
-      result = result.filter((n) => {
-        if (!n.categoryId) return false;
-        const name = (names.get(n.categoryId) ?? '').toLowerCase();
-        return name.includes('health') || name.includes('medical');
-      });
+      result = result.filter((n) => rule(liveTypeRuleRow(n, names)));
     }
 
     return result;
@@ -688,7 +685,12 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
         transaction_type: {
           type: 'string',
           enum: [...LIVE_TRANSACTION_TYPES],
-          description: 'Filter by special type (foreign/duplicates are cache-only).',
+          description:
+            'Filter by special type (foreign/duplicates are cache-only). ' +
+            TRANSACTION_TYPE_RULES_TEXT +
+            ' One live-only gap: the rules run after exclude_excluded, which in live mode sees ' +
+            'only category-level exclusion, so a row the user excluded individually can still ' +
+            'appear here (cache mode drops it).',
         },
         tag: {
           type: 'string',

@@ -277,7 +277,7 @@ describe('LiveTransactionsTools — post-filters', () => {
     expect(result.transactions.map((t) => t.transaction_id)).toEqual(['t1']);
   });
 
-  test('transaction_type=refunds filters to negative amounts', async () => {
+  test('transaction_type=refunds keeps a negative REGULAR row in a spending category', async () => {
     const nodes = [mkNode({ id: 't1', amount: -25 }), mkNode({ id: 't2', amount: 15 })];
     const live = await mkLiveReturning(nodes);
     const tools = new LiveTransactionsTools(live);

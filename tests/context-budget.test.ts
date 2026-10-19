@@ -157,7 +157,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // Amazon line items for it, and an undiscoverable field is a field nobody
   // requests. Headroom drops from ~10% to ~2.3%, which is inside the band the
   // rest of this file runs at; the next addition here needs its own argument.
-  get_transactions: 6_340,
+  //
+  // That argument, #843: raised 6_340 -> 6_830 so `transaction_type` can state
+  // what refunds / credits / hsa_eligible / tagged select — the same sentence
+  // get_transactions_live carries, because the two modes used to select
+  // different rows with neither rule written down. Measured 6_677 (~2.3%).
+  get_transactions: 6_830,
   get_cache_info: 640,
   refresh_database: 485,
   // Raised from 1_315 by #597 Tier 2: adds the `fields` param (shared
@@ -251,7 +256,13 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // on a live row — so making it mode-neutral took ~480 chars of wrong
   // information out of this schema. Measured 5_299 (~10% headroom); the old
   // budget left 20% and would not have failed.
-  get_transactions_live: 5_830,
+  //
+  // Raised 5_830 -> 6_200 by #843: `transaction_type` now states what each
+  // value selects (one shared sentence, TRANSACTION_TYPE_RULES_TEXT) plus the
+  // one live-only gap. The rules used to differ between modes with neither
+  // written down; the text is what lets a caller know which rows it got.
+  // Measured 6_048.
+  get_transactions_live: 6_200,
   // Raised from 570 by #597 Tier 2: adds the `fields` param (shared verbatim
   // with get_accounts — see ACCOUNT_FIELDS_PARAM_SCHEMA) plus a description
   // sentence naming the excluded sync/plumbing fields (`hasHistoricalUpdates`,
