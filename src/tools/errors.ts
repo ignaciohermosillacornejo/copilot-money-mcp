@@ -96,11 +96,13 @@ export const REMOVED_TRANSACTION_ARGS = {
 /**
  * Throw a migration error when a caller passes an argument removed in v3.
  *
- * Nothing else enforces this: `additionalProperties: false` sits only on
- * write-tool schemas and the server runs no input validator, so a removed
- * argument would otherwise be dropped in silence — an out-of-date caller
- * would just see their fields disappear with no explanation. Call this at
- * the top of a tool handler, before any other argument handling.
+ * Since #845 the server validates every call against the tool's
+ * inputSchema at dispatch, which would reject a removed argument as merely
+ * "unknown". A tool that retires an argument lists it in its
+ * `argsRejectedByHandler`, so the call reaches the handler and this
+ * migration-specific message, which tells an out-of-date caller what to pass
+ * instead. Call this at the top of a tool handler, before any other argument
+ * handling.
  */
 export function rejectRemovedArgs(
   args: Record<string, unknown>,

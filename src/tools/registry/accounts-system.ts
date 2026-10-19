@@ -8,6 +8,7 @@
 
 import { defineTool } from './types.js';
 import { ACCOUNT_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
+import { REMOVED_ACCOUNT_ARGS } from '../errors.js';
 
 export const getCacheInfoTool = defineTool({
   schema: {
@@ -97,6 +98,8 @@ export const getAccountsTool = defineTool({
     },
   },
   readOnly: true,
+  // The handler names this more precisely than dispatch would (#845).
+  argsRejectedByHandler: Object.keys(REMOVED_ACCOUNT_ARGS),
   swappedOutInLiveMode: true,
   handler: (ctx, args) => ctx.tools.getAccounts(args ?? {}),
 });

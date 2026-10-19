@@ -72,6 +72,14 @@ rejects an unknown `category` in both modes and accepts an orphan id its own row
 test is per filter, not a sweep: other filters that take an id (`account_id`) still return
 zero rows for an unknown value.
 
+The rest of #845, arguments a tool does not take at all, is closed at dispatch:
+`validateToolArgs` (`src/tools/input-validation.ts`) checks every call against the tool's
+`inputSchema` before any handler runs, and `tests/unit/dispatch-arg-validation.test.ts`
+walks the whole registry with an undeclared argument, a wrong type for every typed argument
+and an out-of-enum value for every enum. That detector is mutation-verified through the
+`tool arguments are validated at dispatch` row in `scripts/mutation-guards.ts`, and a tool
+added later is covered by being registered.
+
 Siblings: `transaction_type: "hsa_eligible"` matched Plaid-taxonomy slugs as substrings of the
 opaque category id in cache mode, the same defect, and used a different word list in live
 mode; #854 replaces both with one shared rule over the category NAME (#843).

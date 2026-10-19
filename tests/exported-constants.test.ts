@@ -611,6 +611,10 @@ const PINNED: Record<string, readonly string[]> = {
   RECURRING_STATE_VALUES: ['ACTIVE', 'PAUSED', 'ARCHIVED'],
   // src/core/fs-retry.ts
   RETRYABLE_ERRNOS: ['EINTR', 'EAGAIN'],
+  // src/tools/live/transactions.ts — the cache-only filters get_transactions_live
+  // rejects with "not supported in live mode"; dispatch lets exactly these
+  // through to that message (#845).
+  UNSUPPORTED_KEYS: ['city', 'lat', 'lon', 'radius_km', 'region', 'country'],
   // src/utils/scheduled-smoke-status.ts
   SCHEDULED_SMOKE_RESULTS: ['pass', 'fail', 'auth-missing', 'incomplete'],
   // src/conformance/ledger.ts

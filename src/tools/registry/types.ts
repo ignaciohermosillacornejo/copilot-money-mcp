@@ -114,6 +114,15 @@ export interface ToolDefinition {
    * handler. Defaults to `Error: ${message}`.
    */
   formatError?: (message: string) => string;
+  /**
+   * Arguments the schema does not declare but the handler deliberately
+   * receives, to reject them itself with a more specific message than the
+   * dispatch check's "unknown argument" (src/tools/input-validation.ts): the v3
+   * migration errors for removed arguments, and live mode's "not supported in
+   * live mode" for cache-only filters. Every other undeclared argument is
+   * rejected at dispatch (#845).
+   */
+  argsRejectedByHandler?: readonly string[];
 }
 
 /**

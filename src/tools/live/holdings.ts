@@ -39,6 +39,7 @@ import { computeTotalReturnPercent, roundAmount } from '../../utils/round.js';
 import { clampMaxRows, clampOffset } from '../../utils/pagination.js';
 import { isCashSecurityType, tickerMatches } from '../../utils/ticker.js';
 import type { ToolSchema } from '../tools.js';
+import { projectRows } from '../field-selection.js';
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 10_000;
@@ -58,9 +59,16 @@ export interface GetHoldingsLiveArgs {
   limit?: number;
   /** Default 0; clamped to >= 0. */
   offset?: number;
+  /**
+   * Return only these fields per row. Omitted (or "default" / "all") returns
+   * the whole row. Unknown names are reported in `_field_warning` (#845).
+   */
+  fields?: string[];
 }
 
-export interface GetHoldingsLiveEntry {
+// A type alias, not an interface, so rows assign to the field-selection
+// engine's Record<string, unknown> constraint (as EnrichedTransaction does).
+export type GetHoldingsLiveEntry = {
   security_id: string;
   ticker_symbol: string;
   name: string;
@@ -75,17 +83,45 @@ export interface GetHoldingsLiveEntry {
   total_return?: number;
   total_return_percent?: number;
   is_cash_equivalent: boolean;
-}
+};
+
+/**
+ * Every selectable field of a get_holdings_live row, derived from a record
+ * keyed exactly by GetHoldingsLiveEntry (the mapped type makes a missing or
+ * extra key a compile error), so the known-field set cannot drift from the row.
+ */
+const HOLDINGS_LIVE_FIELD_RECORD: { [K in keyof GetHoldingsLiveEntry]-?: true } = {
+  security_id: true,
+  ticker_symbol: true,
+  name: true,
+  type: true,
+  account_id: true,
+  item_id: true,
+  quantity: true,
+  institution_price: true,
+  institution_value: true,
+  cost_basis: true,
+  average_cost: true,
+  total_return: true,
+  total_return_percent: true,
+  is_cash_equivalent: true,
+};
+export const HOLDINGS_LIVE_KNOWN_FIELDS: ReadonlySet<string> = new Set(
+  Object.keys(HOLDINGS_LIVE_FIELD_RECORD)
+);
 
 export interface GetHoldingsLiveResult {
   count: number;
   total_count: number;
   offset: number;
   has_more: boolean;
-  holdings: GetHoldingsLiveEntry[];
+  // Partial: `fields` can project rows down to the names asked for.
+  holdings: Partial<GetHoldingsLiveEntry>[];
   _cache_oldest_fetched_at: string;
   _cache_newest_fetched_at: string;
   _cache_hit: boolean;
+  // Requested `fields` names that matched nothing (typos), when any.
+  _field_warning?: string;
 }
 
 function projectHolding(h: HoldingNode): GetHoldingsLiveEntry {
@@ -250,7 +286,15 @@ export class LiveHoldingsTools {
 
     const totalCount = filtered.length;
     const hasMore = offset + limit < totalCount;
-    const paged = filtered.slice(offset, offset + limit).map(projectHolding);
+    const fullRows = filtered.slice(offset, offset + limit).map(projectHolding);
+    // Not terse by default: the whole row is the default, so "default" means
+    // every field. Selection exists to narrow a row and to report a typo in
+    // `_field_warning`, as the other tools do (#845).
+    const { rows: paged, warning } = projectRows(fullRows, args.fields, {
+      preset: [...HOLDINGS_LIVE_KNOWN_FIELDS],
+      knownFields: HOLDINGS_LIVE_KNOWN_FIELDS,
+      validFieldsHint: `the get_holdings_live row fields (${[...HOLDINGS_LIVE_KNOWN_FIELDS].join(', ')})`,
+    });
 
     this.live.logReadCall({
       op: 'Holdings',
@@ -300,6 +344,7 @@ export class LiveHoldingsTools {
       _cache_oldest_fetched_at: new Date(oldestFetchedAt).toISOString(),
       _cache_newest_fetched_at: new Date(newestFetchedAt).toISOString(),
       _cache_hit: cacheHit,
+      ...(warning && { _field_warning: warning }),
     };
   }
 }
@@ -354,6 +399,13 @@ export function createLiveHoldingsToolSchema(): ToolSchema {
           type: 'integer',
           description: 'Pagination offset (>= 0). Default 0.',
           default: 0,
+        },
+        fields: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Return only these fields per row. Omitted, "default" or "all" returns the whole ' +
+            'row. Unknown names are omitted and reported via _field_warning.',
         },
       },
     },

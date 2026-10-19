@@ -32,7 +32,7 @@ When enabled, 6 cache-mode read tools are replaced with GraphQL-backed equivalen
 | `get_categories_live` | `get_categories` | ✅ | 24h cache; reflects rollovers per user setting. Terse by default as of v3.0.0: rows are `{id, parentId, name, colorName, isExcluded, budget_amount}`. The embedded `budget` object comes back with `fields: ["default", "budget"]`; `templateId`, `icon`, `isRolloverDisabled` and `canBeDeleted` are separate top-level fields and each has to be named too (or take `fields: ["all"]`) |
 | `get_budgets_live` | `get_budgets` | ✅ | Projection over `categories_live` data |
 | `get_recurring_live` | `get_recurring_transactions` | ✅ | ⚠️ Pattern-based detection from transactions is NOT in live mode — use cache mode if you need that. Rows are terse by default (`fields: [...]` opts into `rule`, `payments`, `icon`) |
-| `get_holdings_live` | `get_holdings` | ✅ | Includes cost basis via `metrics`; `metrics: null` for CASH and some 401(k) mutual fund positions (Copilot doesn't compute basis for those) |
+| `get_holdings_live` | `get_holdings` | ✅ | Includes cost basis via `metrics`; `metrics: null` for CASH and some 401(k) mutual fund positions (Copilot doesn't compute basis for those). Takes `fields` to narrow a row; the whole row is the default, and an unknown name is reported in `_field_warning` |
 | `get_tags_live` | _(additive)_ | ✅ | No cache-mode counterpart |
 | `get_networth_live` | _(additive)_ | ✅ | Net worth over time |
 | `get_upcoming_recurrings_live` | _(additive)_ | ✅ | Next-due unpaid recurrings (distinct from `get_recurring_live`'s historical view). Rows are terse by default (`fields: [...]` opts into `rule`, `payments`, `icon`) |
@@ -90,3 +90,7 @@ Where the two modes return different values for the same thing on the same trans
 | `internal_transfer` on a default row | Always present, `false` unless the document marks a transfer | Always present (`type === "INTERNAL_TRANSFER"`) |
 | `excluded` on a row the user excluded individually | `true`, and dropped by `exclude_excluded` | `false`, and returned: the API does not expose the per-transaction flag. Category-level exclusion agrees in both modes |
 | Cash holding ticker | `CUR:USD` | `USD`. A `ticker_symbol` filter of either spelling matches the cash sleeve in both modes. `CUR:USD` matches only cash; a bare `USD` also matches a security tickered `USD` |
+
+## Argument validation (both modes)
+
+Every tool call is checked against the tool's own `inputSchema` before it runs (#845). An argument the tool does not declare, a value of the wrong type (an `integer` must be a whole number), or a value outside an `enum` is an error that names the argument and lists what is accepted, instead of being ignored or forwarded to Copilot as a raw server error. Two kinds of argument still reach the tool for a more specific message: the arguments v3 removed (`compact`, `include_logos`), which get a migration hint, and the cache-only location filters on `get_transactions_live`, which say they are not supported in live mode. `required`, `pattern` and ranges are left to each tool, whose own messages say what to pass.

@@ -945,6 +945,29 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFailingTests: ['the internal `income` flag is never returned'],
     expectFails: 'tests/tools/transaction-type-parity.test.ts',
   },
+  {
+    name: 'tool arguments are validated at dispatch',
+    file: 'src/server.ts',
+    invariant:
+      "Every tool call is checked against the tool's inputSchema before any handler runs " +
+      '(#845). Without it an argument a tool does not take is dropped in silence — a filter ' +
+      'the caller believes ran did not — and on a write tool an unrecognised or mistyped ' +
+      "argument reaches the handler and, for enum values, Copilot's server.",
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: tool arguments are validated at dispatch\n' +
+        '    const argsError = validateToolArgs(toolDef, typedArgs);',
+      with:
+        '    // mutation-guard: tool arguments are validated at dispatch\n' +
+        '    const argsError: string | null = null;',
+    },
+    expectFailingTests: [
+      'every tool rejects an argument it does not declare, before any handler runs',
+      'get_investment_balance_live time_frame "1W" is a clean client-side error',
+    ],
+    expectFails: 'tests/unit/dispatch-arg-validation.test.ts',
+  },
 ];
 
 // ---------------------------------------------------------------------------

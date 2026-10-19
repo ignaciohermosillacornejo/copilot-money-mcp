@@ -8,6 +8,7 @@ import { TRANSACTION_TYPES } from '../../core/graphql/transactions.js';
 import { TRANSACTION_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
 import { TRANSACTION_TYPE_RULES_TEXT } from '../transaction-type-rules.js';
 import { categoryFilterDescription } from '../category-filter.js';
+import { REMOVED_TRANSACTION_ARGS } from '../errors.js';
 
 export const getTransactionsTool = defineTool({
   schema: {
@@ -197,6 +198,8 @@ export const getTransactionsTool = defineTool({
   },
   readOnly: true,
   swappedOutInLiveMode: true,
+  // The handler names this more precisely than dispatch would (#845).
+  argsRejectedByHandler: Object.keys(REMOVED_TRANSACTION_ARGS),
   handler: (ctx, args) =>
     ctx.tools.getTransactions((args as ToolMethodArgs<'getTransactions'>) || {}),
 });

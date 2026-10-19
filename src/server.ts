@@ -42,6 +42,7 @@ import { LiveInvestmentBalanceTools } from './tools/live/investment-balance.js';
 import { RefreshCacheTool } from './tools/live/refresh-cache.js';
 import { stripTypename } from './tools/strip-typename.js';
 import { graphQLErrorToMcpError } from './tools/errors.js';
+import { validateToolArgs } from './tools/input-validation.js';
 
 // Read version from package.json
 import { createRequire } from 'module';
@@ -241,6 +242,20 @@ export class CopilotMoneyServer {
             text: `Unknown tool: ${name}`,
           },
         ],
+        isError: true,
+      };
+    }
+
+    // Validate the arguments against the tool's own inputSchema before any
+    // handler runs (#845): an undeclared argument, a wrong type or an
+    // out-of-enum value is an error naming it, instead of being dropped in
+    // silence or forwarded to Copilot as a raw server 400. Before the cache
+    // gate on purpose: a malformed call is malformed whatever the cache state.
+    // mutation-guard: tool arguments are validated at dispatch
+    const argsError = validateToolArgs(toolDef, typedArgs);
+    if (argsError !== null) {
+      return {
+        content: [{ type: 'text' as const, text: argsError }],
         isError: true,
       };
     }

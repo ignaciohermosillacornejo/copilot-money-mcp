@@ -191,6 +191,25 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(result.holdings[0]?.ticker_symbol).toBe('USD');
   });
 
+  // #845: `fields` narrows a row and reports a typo, as the other tools do.
+  test('fields narrows rows; an unknown name is reported in _field_warning', async () => {
+    const client = makeClient([equityHolding, mutualFundHolding, cashHolding]);
+    const tools = new LiveHoldingsTools(makeLive(client));
+
+    const narrowed = await tools.getHoldings({ fields: ['ticker_symbol', 'quantity'] });
+    expect(narrowed._field_warning).toBeUndefined();
+    for (const row of narrowed.holdings) {
+      expect(Object.keys(row).sort()).toEqual(['quantity', 'ticker_symbol']);
+    }
+
+    const typo = await tools.getHoldings({ fields: ['ticker_symbol', 'quantty'] });
+    expect(typo._field_warning).toContain('quantty');
+
+    const whole = await tools.getHoldings({ fields: ['default'] });
+    const plain = await tools.getHoldings({});
+    expect(whole.holdings).toEqual(plain.holdings);
+  });
+
   test('pagination: limit + offset produce correct count / total_count / has_more', async () => {
     const client = makeClient([equityHolding, mutualFundHolding, cashHolding]);
     const tools = new LiveHoldingsTools(makeLive(client));

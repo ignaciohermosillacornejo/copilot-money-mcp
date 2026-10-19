@@ -257,7 +257,12 @@ function projectLiveTransactionFields(
   });
 }
 
-const UNSUPPORTED_KEYS = ['city', 'lat', 'lon', 'radius_km', 'region', 'country'] as const;
+/**
+ * Cache-only filters get_transactions_live rejects with a targeted "not
+ * supported in live mode" message; dispatch lets them through for that
+ * (`argsRejectedByHandler`, #845).
+ */
+export const UNSUPPORTED_KEYS = ['city', 'lat', 'lon', 'radius_km', 'region', 'country'] as const;
 
 export class LiveTransactionsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}

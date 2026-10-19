@@ -380,11 +380,15 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // description note landed later in the same PR, which is the shape the
   // ledger header now has a rule about: a present-tense measurement in a
   // comment goes false on the next commit and nothing re-derives it.
-  // IN FORCE (get_holdings_live): 2_030, raised from 1_615 by #860 (#825), measured 1_987 (~2.2%):
-  // the do-not-sum-holdings sentence (as on get_holdings) and the ticker note
-  // on `ticker_symbol` (CUR:USD and USD both match the cash sleeve; CUR:USD
+  // Raised 1_615 -> 2_030 by #860 (#825), measured 1_987: the
+  // do-not-sum-holdings sentence (as on get_holdings) and the ticker note on
+  // `ticker_symbol` (CUR:USD and USD both match the cash sleeve; CUR:USD
   // matches only cash).
-  get_holdings_live: 2_030,
+  // IN FORCE (get_holdings_live): 2_250, raised from 2_030 by #845's dispatch
+  // validation PR, measured 2_203 (~2.1%): a `fields` param, so a typo in a
+  // requested field is reported in `_field_warning` as the other tools do,
+  // instead of the argument being dropped (or, now, rejected as unknown).
+  get_holdings_live: 2_250,
   get_balance_history_live: 1_800,
   get_investment_prices_live: 1_835,
   get_investment_allocation_live: 810,
@@ -558,6 +562,10 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // headroom under the 84_280 #860 set, which left ~0.2%, below the ~1% this
 // ceiling is kept at, and too little for the next description fix to land
 // without a raise of its own.
+//
+// UNMOVED by #845's dispatch-validation PR (+216: get_holdings_live's
+// `fields` param). Measured 84_302 on main plus this PR (~0.7%), within the
+// 84_920 in force.
 const SCHEMA_TOTAL_BUDGET = 84_920;
 
 // ---------------------------------------------------------------------------

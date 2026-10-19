@@ -13,9 +13,11 @@
  */
 
 import { defineTool } from './types.js';
+import { REMOVED_TRANSACTION_ARGS } from '../errors.js';
 import {
   createLiveTransactionsToolSchema,
   type LiveTransactionsTools,
+  UNSUPPORTED_KEYS,
 } from '../live/transactions.js';
 import { createLiveAccountsToolSchema, type LiveAccountsTools } from '../live/accounts.js';
 import { createLiveCategoriesToolSchema, type LiveCategoriesTools } from '../live/categories.js';
@@ -59,6 +61,8 @@ export const getTransactionsLiveTool = defineTool({
   schema: createLiveTransactionsToolSchema(),
   readOnly: true,
   requiresLiveReads: true,
+  // The handler names these more precisely than dispatch would (#845).
+  argsRejectedByHandler: [...Object.keys(REMOVED_TRANSACTION_ARGS), ...UNSUPPORTED_KEYS],
   handler: (ctx, args) =>
     ctx.live!.transactions.getTransactions(
       (args as Parameters<LiveTransactionsTools['getTransactions']>[0]) || {}

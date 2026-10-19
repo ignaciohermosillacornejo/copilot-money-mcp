@@ -848,7 +848,8 @@ describe('handleCallTool — write tools', () => {
       goal_id: 'goal1',
     });
     expect(result.isError).toBe(true);
-    expect(firstText(result)).toMatch(/unknown field/i);
+    // Rejected at dispatch since #845, before the handler's own unknown-field check.
+    expect(firstText(result)).toContain("Unknown argument 'goal_id'");
   });
 });
 
@@ -1330,7 +1331,8 @@ describe('handleCallTool — write tool validation', () => {
       frequency: 'hourly',
     });
     expect(result.isError).toBe(true);
-    expect(firstText(result)).toContain('frequency must be one of');
+    // Rejected at dispatch since #845, naming the allowed values.
+    expect(firstText(result)).toContain("Argument 'frequency' must be one of");
   });
 
   test('set_recurring_state with invalid state returns error', async () => {
@@ -1339,7 +1341,8 @@ describe('handleCallTool — write tool validation', () => {
       state: 'invalid_state',
     });
     expect(result.isError).toBe(true);
-    expect(firstText(result)).toContain('state must be one of');
+    // Rejected at dispatch since #845, naming the allowed values.
+    expect(firstText(result)).toContain("Argument 'state' must be one of");
   });
 
   test('review_transactions with empty array returns error', async () => {
