@@ -765,10 +765,11 @@ export class CopilotDatabase {
    * included. So in live mode a delete pays for at most one decode attempt
    * per TTL, and per minute at a TTL of 0. (Cache-only mode — test-only
    * today, since --write implies --live-reads — also reads rows through
-   * getAllTransactions(), which can attempt a decode of its own.) Re-reading at all matters in live mode, where
-   * nothing else reloads the local cache: a split made and un-split in the
-   * app after the first decode reaches the cache later (#852 review). Any
-   * decode, a read's included, adds to the union.
+   * getAllTransactions(), which can attempt a decode of its own.)
+   * Re-reading at all matters in live mode, where nothing else reloads the
+   * local cache: a split made and un-split in the app after the first decode
+   * reaches the cache later (#852 review). Any decode, a read's included,
+   * adds to the union.
    *
    * A decode that throws leaves the union as it was, but the caller sees the
    * throw; callers that must not be blocked by an unreadable cache catch it

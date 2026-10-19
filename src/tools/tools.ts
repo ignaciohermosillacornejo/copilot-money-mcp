@@ -3762,8 +3762,8 @@ export class CopilotMoneyTools {
    * live mode a delete pays for at most one decode attempt per TTL, or per
    * minute at a TTL of 0, and nothing in between. Cache-only mode (test-only
    * today, since --write implies --live-reads) also reads rows through
-   * getAllTransactions(), which can attempt a decode of its own. A decode usually
-   * takes seconds, but its worst case is the decode timeout
+   * getAllTransactions(), which can attempt a decode of its own. A decode
+   * usually takes seconds, but its worst case is the decode timeout
    * (getDecodeTimeoutMs, 90 s by default), which can outlast an MCP client's
    * request timeout. Nothing is sent until the check resolves, so a
    * client-side timeout leaves no half-done delete, and the decode it
