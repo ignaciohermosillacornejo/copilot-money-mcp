@@ -27,14 +27,15 @@ Add a row to the right section with the next free ID. A good case names:
 5. **Last run**: date and result. A FAIL links its issue. When only part of a
    case ran, say which sources passed and mark the rest SKIP with its reason,
    e.g. `PASS (cache, live); web SKIP (not read)`; the same applies to a
-   sub-check not repeated: `PASS (total); description gap SKIP (not re-checked, #N)`.
-   A run that does not repeat a case leaves its cell alone, except that a
-   result other than a plain PASS (a FAIL, a dated SKIP, a partial result, or a PASS with a finding)
-   gets `; not re-run <date>`, replacing any earlier such stamp. So a recorded
-   FAIL is never overwritten by a SKIP, a plain PASS never gets a stamp, and a
-   case never run stays `not run`. A side
+   sub-check not repeated:
+   `PASS (total); description gap SKIP (not re-checked, #N)`. A side
    observation goes in the same parentheses after the verdict:
-   `PASS (live, web; finding: …, #N)`.
+   `PASS (live, web; finding: …, #N)`. A run that does not repeat a case
+   leaves its cell alone, except that a result other than a plain PASS (a FAIL,
+   a dated SKIP, a partial result, or a PASS with a finding) gets
+   `; not re-run <date>`, replacing any earlier such stamp. So a recorded FAIL
+   is never overwritten by a SKIP, a plain PASS never gets a stamp, and a case
+   never run stays `not run`.
 
 Prefix the Case cell of a new row with a priority: **[P1]** could hide a
 release-blocking bug, **[P2]** correctness, **[P3]** nice to have. When a fix
@@ -63,7 +64,7 @@ need it.
   (a childless split parent is deletable) and the run filed #843–#848. CAT-02's
   recipe was corrected to the app's own definition of spend, with the
   upcoming-recurrings horizon caveat; W-23 and CAT-11 were added.
-- 2026-10-19: five review rounds on that update (#849, #851). The run had
+- 2026-10-19: review rounds on that update (#849, #851). The run had
   overwritten a recorded FAIL with a SKIP because SKILL.md said to record unrun
   rows as SKIP; SKILL.md now keeps unrun rows, How to extend gained the Last-run
   convention (partial results, findings, the single `not re-run` stamp), P-07
@@ -112,9 +113,9 @@ need it.
 
 | ID | Case | Compare | Expected | Last run |
 |---|---|---|---|---|
-| INV-01 | [P2] Position detail | live `get_holdings_live` row vs web holding detail (shares, value, average cost, total return) | Equal; return % may differ in the last rounding digit | 2026-10-14 PASS (rounding note #825) |
+| INV-01 | [P2] Position detail | live `get_holdings_live` row vs web holding detail (shares, value, average cost, total return) | Equal; return % may differ in the last rounding digit | 2026-10-14 PASS (finding: rounding note, #825); not re-run 2026-10-18 |
 | INV-02 | [P1] Holdings sum vs investment balance | Sum `institution_value` vs `get_investment_balance_live.current` | Equal unless a position includes unvested stock-plan shares; then documented | 2026-10-18 PASS (finding: unvested shares, Copilot's data, #825) |
-| INV-03 | [P2] Cache vs live holdings | cache `getHoldings` vs live | Same securities and quantities; prices differ by cache age; cash ticker `CUR:USD` vs `USD` (#825) | 2026-10-14 PASS (finding: known ticker diff, #825) |
+| INV-03 | [P2] Cache vs live holdings | cache `getHoldings` vs live | Same securities and quantities; prices differ by cache age; cash ticker `CUR:USD` vs `USD` (#825) | 2026-10-14 PASS (finding: known ticker diff, #825); not re-run 2026-10-18 |
 | INV-04 | [P1] Hidden account that holds something | Hide an investment account in the web (user approval required each run); `refresh_cache`; holdings default vs `include_hidden: true`; investment balance vs web; unhide | Holdings exclude it by default and include it on request; investment balance (live and web) still includes it | 2026-10-18 PASS (holdings, balance); description gap SKIP (not re-checked, #825) |
 | INV-05 | [P2] Allocation | `get_investment_allocation_live` vs web allocation; sum vs `get_investment_balance_live.current`; then scoped to one account and unscoped again | Percentages sum to 100 ± 0.1; amounts equal the web; the second unscoped call equals the first, not the scoped one | not run |
 | INV-06 | [P2] Aggregated holdings | `get_aggregated_holdings_live` per security vs the sum of `get_holdings_live` rows, with and without `include_hidden` | Equal to one of the two sums; record which, and flag a description gap if unstated | not run |
@@ -222,7 +223,7 @@ Log every write in the ledger **before** sending it (SKILL.md Guardrail 2).
 | W-08 | [P2] Create recurring | `create_recurring` | In `get_recurring_live` | 2026-10-18 PASS |
 | W-09 | [P1] Link a transaction | `add_transaction_to_recurring` | `recurring_id` set; payment in `get_recurring_live {fields:["payments"]}` and the web recurring detail | 2026-10-18 PASS (category changes, #848) |
 | W-10 | [P2] Update and pause recurring | `update_recurring` (name + rule), `set_recurring_state PAUSED` | Read back exactly | 2026-10-14 PASS |
-| W-11 | [P2] Budget override for one month | `set_budget {month}` on the test category for the current month, then a non-current month; read each; restore | Shows in the web for that month, then restores (the two months take different live-cache paths, `live-database.ts` ~755-794) | 2026-10-14 PASS (current month only) |
+| W-11 | [P2] Budget override for one month | `set_budget {month}` on the test category for the current month, then a non-current month; read each; restore | Shows in the web for that month, then restores (the two months take different live-cache paths, `live-database.ts` ~755-794) | 2026-10-14 PASS (current month only); not re-run 2026-10-18 |
 | W-12 | [P1] Manual balance follows its transactions | Web balance vs baseline after the creates | Baseline minus expenses plus income | 2026-10-18 FAIL: Copilot ignores rows dated before the last balance reset (#848) |
 | W-13 | [P2] `update_category` and `update_tag` | Rename, colour, emoji, `is_excluded: true` then false on the test category; rename + colour on the test tag | Round-trip in live and web; while excluded the test row drops out of default reads and monthly spend; `tag: <old name>` errors, new name works | not run |
 | W-14 | [P2] Create with `note` and `recurring_id` | `create_transaction` with both | Round-trip; the recurring's payments include it | not run |
