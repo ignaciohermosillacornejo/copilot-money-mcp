@@ -781,16 +781,20 @@ export class CopilotMoneyTools {
    * mode: live's corpus is the raw server window too. An orphaned id stays
    * reachable, and both modes accept and reject the same values.
    *
-   * EXCEPTIONS, both stated rather than hidden:
-   *   - With no date bounds (cache allows that; live does not) the corpus is
-   *     the whole cache, and the error says "in the cache".
-   *   - On the filtered path, the corpus read shares the main query's date
-   *     bounds and 50k cap but not its merchant/account/amount filters, so
-   *     above 50k rows in range the two could truncate differently.
-   *     Unreachable in practice. On the transaction_id lookup path there is no
-   *     main query: the lookup searches the whole cache, so the corpus does
-   *     too, uncapped (`unbounded`), and an orphan id is judged against every
-   *     row the lookup could find (#858 review round 7).
+   * The corpus is read the same way the rows it vouches for are read, so it
+   * can be neither narrower nor wider than them (`scope`):
+   *   - 'query' (the filtered path): the main query's read — its date bounds,
+   *     or none, and its 50k cap — but not its merchant/account/amount
+   *     filters. With no date bounds (cache allows that; live does not) that is
+   *     the whole cache up to the cap, and the error says "in the cache".
+   *     Above 50k rows the corpus and the query truncate the same way.
+   *   - 'whole-cache' (the transaction_id lookup): the lookup searches the
+   *     whole cache uncapped, so the corpus does too, and an orphan id is
+   *     judged against every row the lookup could find (#858 review round 7).
+   * An earlier revision read the whole cache uncapped whenever no dates were
+   * passed, on the filtered path too: wider than that path's capped query, so
+   * an id carried only past the cap was accepted and returned nothing (#860
+   * review).
    *
    * WHY, dated: the first version checked the whole cache, so an
    * out-of-window orphan id returned zero rows silently in cache mode and
@@ -806,7 +810,8 @@ export class CopilotMoneyTools {
     category: string,
     startDate: string | undefined,
     endDate: string | undefined,
-    keep: { excludeDeleted: boolean; excludeSplitParents: boolean; unbounded?: boolean }
+    keep: { excludeDeleted: boolean; excludeSplitParents: boolean },
+    scope: 'query' | 'whole-cache' = 'query'
   ): Promise<Set<string>> {
     const userCategories = await this.db.getUserCategories();
     const nodes = userCategories.map((c) => ({
@@ -814,14 +819,12 @@ export class CopilotMoneyTools {
       parentId: c.parent_category_id ?? null,
       name: c.name ?? null,
     }));
-    // One fact feeds both the read and the error's label: `unbounded` (the
-    // transaction_id path) overrides the date args, and no date args means the
-    // whole cache too (#860 review: the two used to be derived separately).
-    const wholeCache =
-      keep.unbounded === true || (startDate === undefined && endDate === undefined);
+    // The read follows `scope`; the error's label follows what was searched:
+    // the whole cache whenever no date range bounded it (#860 review).
+    const unboundedByDate = startDate === undefined && endDate === undefined;
     const knownElsewhere =
       !nodes.some((n) => n.id === category) &&
-      (wholeCache
+      (scope === 'whole-cache'
         ? await this.db.getAllTransactions()
         : await this.db.getTransactions({ startDate, endDate, limit: 50000 })
       ).some(
@@ -833,7 +836,7 @@ export class CopilotMoneyTools {
     return resolveCategoryFilter(category, nodes, {
       listTool: 'get_categories',
       knownElsewhere,
-      ...(wholeCache ? { corpus: 'in the cache' } : {}),
+      ...(scope === 'whole-cache' || unboundedByDate ? { corpus: 'in the cache' } : {}),
     });
   }
 
@@ -1106,11 +1109,13 @@ export class CopilotMoneyTools {
       // so the error says "in the cache", and an orphan id the looked-up row
       // carries is accepted even when the row is outside a passed period.
       if (category !== undefined) {
-        await this.resolveCacheCategoryFilter(category, undefined, undefined, {
-          excludeDeleted: false,
-          excludeSplitParents: false,
-          unbounded: true,
-        });
+        await this.resolveCacheCategoryFilter(
+          category,
+          undefined,
+          undefined,
+          { excludeDeleted: false, excludeSplitParents: false },
+          'whole-cache'
+        );
       }
       const allTransactions = await this.db.getAllTransactions();
       const found = allTransactions.find((t) => t.transaction_id === transaction_id);

@@ -3844,6 +3844,25 @@ describe('getHoldings', () => {
     expect(plain.holdings.map((h) => h.ticker_symbol)).toContain('CUR:USD');
   });
 
+  // #860 review: cache mode reaches the cash widening through
+  // `is_cash_equivalent === true || type is cash`, and both fields are optional
+  // in the model. Each field alone must be enough, and a sleeve with neither
+  // must not be widened — so the flag is load-bearing, not decoration.
+  test.each([
+    ['type: cash only', { type: 'cash', is_cash_equivalent: undefined }, true],
+    ['is_cash_equivalent only', { type: undefined, is_cash_equivalent: true }, true],
+    ['neither', { type: 'equity', is_cash_equivalent: false }, false],
+  ] as const)(
+    'a CUR:USD security with %s %s matched by a bare USD filter',
+    async (_label, fields, matches) => {
+      (db as any)._securities = mockSecurities.map((sec) =>
+        sec.security_id === 'sec_usd' ? { ...sec, ...fields } : sec
+      );
+      const result = await tools.getHoldings({ ticker_symbol: 'USD' });
+      expect(result.holdings.some((h) => h.ticker_symbol === 'CUR:USD')).toBe(matches);
+    }
+  );
+
   test('ticker_symbol filter is case-insensitive', async () => {
     const result = await tools.getHoldings({ ticker_symbol: 'schx' });
     expect(result.count).toBe(2);

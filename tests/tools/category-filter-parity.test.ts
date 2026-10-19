@@ -310,6 +310,20 @@ describe('the cache lookup path searches the whole cache (#858 review round 6)',
     expect(whole).toHaveBeenCalled();
   });
 
+  // #860 review: on the FILTERED path with no date bounds, the corpus must be
+  // read the way the query is (capped), not uncapped — wider than the query, it
+  // would accept an id carried only past the cap and return nothing.
+  test('the filtered no-date path reads its corpus the way its query does', async () => {
+    const tools = cacheTools();
+    const db = (tools as unknown as { db: CopilotDatabase }).db;
+    const whole = spyOn(db, 'getAllTransactions');
+    const capped = spyOn(db, 'getTransactions');
+    const result = await tools.getTransactions({ category: ORPHAN, limit: 500 });
+    expect(result.transactions.map((t) => t.transaction_id)).toEqual([ROWS[4].id]);
+    expect(whole).not.toHaveBeenCalled();
+    expect(capped.mock.calls.every((c) => c[0]?.limit === 50000)).toBe(true);
+  });
+
   test('an unknown category on a lookup names the cache as the corpus', async () => {
     await expect(
       cacheTools().getTransactions({

@@ -149,6 +149,10 @@ describe('tickerMatches (#825, narrowed in the #860 review)', () => {
     // currency-prefixed one does not.
     ['USD', 'USD', false, true],
     ['USD', 'CUR:USD', false, false],
+    // A non-cash security that happens to be spelled with the prefix: only an
+    // exact match selects it (#860 review).
+    ['CUR:USD', 'USD', false, false],
+    ['CUR:USD', 'cur:usd', false, true],
   ] as const)('%p vs %p (cash: %p) -> %p', (row, filter, isCash, expected) => {
     expect(tickerMatches(row, filter, isCash)).toBe(expected);
   });

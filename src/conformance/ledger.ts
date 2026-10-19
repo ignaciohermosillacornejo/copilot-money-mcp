@@ -1390,6 +1390,21 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   // re-checks for it today.
   // -------------------------------------------------------------------------
   {
+    surface: 'SecurityDocument.ticker_symbol:cashSleeveCurPrefix',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      "Observed in the v3.0 release test pass (2026-10-14, #825): the cash sleeve's security " +
+      'document in the local cache carries ticker_symbol `CUR:USD`, while GraphQL returns `USD` ' +
+      'for the same holding. Cache-mode get_holdings now depends on it (#860): a ticker_symbol ' +
+      'filter ignores the `CUR:` prefix only for a cash security, recognised by ' +
+      '`is_cash_equivalent === true` or a `type` of cash (both optional in the model; tests pin ' +
+      'each alone). If Copilot changed either spelling or stopped marking the sleeve as cash, a ' +
+      '`USD` filter would quietly stop matching it in cache mode. One observation; nothing ' +
+      're-checks it.',
+  },
+  {
     surface: 'TransactionDocument.amazon:wireType',
     kind: 'response-shape',
     oracle: null,

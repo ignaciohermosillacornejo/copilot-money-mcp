@@ -475,8 +475,10 @@ export function applyFieldAliases(
       ? (aliases[f] ?? f)
       : f
   );
-  // Both spellings in one list (["user_note", "user_notes"]) name one field:
-  // keep the first occurrence, so the rewrite cannot introduce a duplicate.
+  // Both spellings in one list (["user_note", "user_notes"]) name one field.
+  // This drops EVERY repeated name, keeping the first occurrence, not only the
+  // ones the rewrite created: ["date", "date"] collapses too, which is
+  // harmless, since a field is either selected or not (#860 review).
   return mapped.filter((f, i) => mapped.indexOf(f) === i);
 }
 
