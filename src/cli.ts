@@ -94,6 +94,10 @@ Options:
                       With --browser: use this user-data root instead of the browser's default
                       locations (the folder holding "Local State" and Default/Profile N; Firefox:
                       a profiles root or a single profile dir). Not supported for Safari.
+                      Prefer an absolute path: MCP hosts often start the server in /.
+                      The --browser* options only apply with --live-reads or --write; without
+                      them they are ignored with a warning (an invalid one stops startup only
+                      when it applies).
   --verbose, -v       Enable verbose logging
   --help, -h          Show this help message
 
@@ -115,15 +119,46 @@ Environment:
     liveReadsEnabled = true;
   }
 
-  let browserSelection: BrowserSelection | undefined;
-  try {
-    browserSelection = parseBrowserSelection({ browserFlag, profileFlag, dataDirFlag });
-  } catch (err) {
-    if (err instanceof BrowserSelectionError) failArgs(err.message);
-    throw err;
-  }
+  const browserSelection = resolveSelection(
+    { browserFlag, profileFlag, dataDirFlag },
+    liveReadsEnabled
+  );
 
   return { dbPath, verbose, timeoutMs, writeFlagSeen, liveReadsEnabled, browserSelection };
+}
+
+const IGNORED_SUFFIX = 'it only applies with --live-reads or --write.';
+
+/**
+ * Validate the browser selection only where it applies.
+ *
+ * With `--live-reads` / `--write` the selection decides whose session is read,
+ * so an invalid one (from a flag or from `COPILOT_BROWSER*`) stops the server.
+ * In cache-only mode nothing reads a browser at all, so a selection — valid or
+ * not, flag or environment — is ignored with a one-line stderr warning instead
+ * of failing startup: a `COPILOT_BROWSER_DATA_DIR` left in a shared MCP config
+ * must not take down a server that never uses it.
+ */
+function resolveSelection(
+  flags: { browserFlag?: string; profileFlag?: string; dataDirFlag?: string },
+  applies: boolean
+): BrowserSelection | undefined {
+  let selection: BrowserSelection | undefined;
+  try {
+    selection = parseBrowserSelection(flags);
+  } catch (err) {
+    if (!(err instanceof BrowserSelectionError)) throw err;
+    if (applies) failArgs(err.message);
+    console.error(`Browser selection ignored: ${IGNORED_SUFFIX} (As given: ${err.message})`);
+    return undefined;
+  }
+  if (selection && !applies) {
+    console.error(
+      `Browser selection ${describeBrowserSelection(selection)} ignored: ${IGNORED_SUFFIX}`
+    );
+    return undefined;
+  }
+  return selection;
 }
 
 /**
@@ -172,13 +207,9 @@ async function main(): Promise<void> {
       if (liveReadsEnabled) {
         console.log('Live reads enabled (--live-reads)');
       }
+      // A selection in cache-only mode was already reported as ignored.
       if (browserSelection) {
-        console.log(
-          liveReadsEnabled
-            ? `Browser session: ${describeBrowserSelection(browserSelection)} only`
-            : `Browser selection ${describeBrowserSelection(browserSelection)} ignored: ` +
-                'it only applies with --live-reads or --write'
-        );
+        console.log(`Browser session: ${describeBrowserSelection(browserSelection)} only`);
       }
       /* eslint-enable no-console */
     }

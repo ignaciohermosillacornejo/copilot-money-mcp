@@ -79,7 +79,7 @@ a class yet.
 
 | Class | Definition | Detector |
 |---|---|---|
-| `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. Includes treating content as identity, e.g. a dedup key built from a display name. | `assertOpaqueIds` fixture invariant (#461); `tests/core/dedup-identity.test.ts` — the five primary decoder dedups must preserve two documents identical in content and differing only by id, and every other dedup site must be explicitly listed as omitted (#662) |
+| `identity-resolution` | Comparing values across id spaces — matching a display name against an id, or an id belonging to a different entity. Includes treating content as identity, e.g. a dedup key built from a display name. | `assertOpaqueIds` fixture invariant (#461); `tests/core/dedup-identity.test.ts` — the five primary decoder dedups must preserve two documents identical in content and differing only by id, and every other dedup site must be explicitly listed as omitted (#662); `tests/core/auth/browser-selection.test.ts` → `ambiguous --browser-profile` (mutation-verified) — a name resolved against several namespaces (directory, display name, Firefox suffix, `profiles.ini` `Name=`) must refuse when any pair of them names two different profiles (#837) |
 | `aggregation-double-count` | Summing across a parent/child hierarchy without excluding parents, so the same money is counted twice — in our own arithmetic, or by a write that makes Copilot's server count it twice. | partial (mutation-verified) — `tests/unit/delete-split-parent.test.ts` + the `delete_transaction refuses a split parent` mutation-guard row: `delete_transaction` must refuse a known split parent before sending anything (#822), including once its children are deleted and the server shows it as an ordinary row — eight more rows pin the evidence that still knows it then: the never-retired record, its persistence across restarts, and the soft-deleted children in the local cache, read in live mode too, re-read past the cache TTL and after a login change, joined by concurrent deletes, and accumulated so a re-read never retires an id (#842). Nothing covers the read-side sums |
 | `sign-convention` | Ignoring the domain's sign/direction convention, so the stored sign is not the semantic sign and naive sums are wrong. | none |
 | `ui-parity` | A reimplementation of an app-side computation uses different semantics — time window, enumeration set, exclusion rules — and disagrees with the Copilot app. | partial — `smoke:cache` check 9 (#824) covers income/transfer rows carrying a category, raw documents against decoded rows; nothing covers the class at large |
@@ -112,7 +112,7 @@ a class yet.
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 56 entries:
+this corpus actually says, across all 57 entries:
 
 | Found by | Count | |
 |---|---|---|
@@ -123,7 +123,7 @@ this corpus actually says, across all 56 entries:
 | `user-report` | 8 | ███████ |
 | `adversarial-review` — a reviewer tried to refute a claim or mutation-tested a guard | 2 | █ |
 | `detector-first` — a detector was built, and then found bugs | 1 | ▌ |
-| `code-review` | 4 | ███ |
+| `code-review` | 5 | ████ |
 | **`ci-gate`** — **a checked-in invariant failed** | **0** | |
 
 **No bug in this corpus was first caught by a CI gate.** That is the single most useful
@@ -227,7 +227,7 @@ record near-misses.
 
 ### Computing the answer
 
-**`identity-resolution`** — 4
+**`identity-resolution`** — 5
 
 | | Bug | Found by | Date |
 |---|---|---|---|
@@ -235,6 +235,7 @@ record near-misses.
 | #122 | [Content-based dedup key silently dropped real transactions](122-dedup-drops-real-transactions.md) | `user-report` | 2026-03-11 |
 | #394 | [Cache-mode tag filter compared tag names against opaque tag IDs — always zero results](394-tag-filter-name-vs-id.md) | `dogfooding` | 2026-05-12 |
 | #662 | [Content-based dedup key silently dropped real accounts — the same defect as #122, in the collection nobody swept](662-account-dedup-drops-documents.md) | `code-review` | 2026-08-21 |
+| #837 | [An ambiguous --browser-profile silently picked one profile — on Edge, often the other person's](837-ambiguous-browser-profile.md) | `code-review` | 2026-10-18 |
 
 **`aggregation-double-count`** — 4
 

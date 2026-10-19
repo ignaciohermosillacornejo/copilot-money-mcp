@@ -209,7 +209,9 @@ describe('CLI entry point', () => {
 
     test('the --browser flag wins over COPILOT_BROWSER', async () => {
       // A bad flag fails even though the env var names a valid browser…
-      const flagBad = await runCli(['--browser', 'netscape'], { COPILOT_BROWSER: 'brave' });
+      const flagBad = await runCli(['--browser', 'netscape', '--live-reads'], {
+        COPILOT_BROWSER: 'brave',
+      });
       expect(flagBad.exitCode).toBe(1);
       expect(flagBad.stderr).toContain('Unknown browser "netscape"');
 
@@ -256,6 +258,66 @@ describe('CLI entry point', () => {
     });
   });
 
+  describe('selection validated only where it applies', () => {
+    const IGNORED = 'it only applies with --live-reads or --write.';
+
+    test('cache-only: a valid selection is ignored with a warning, even without -v', async () => {
+      const { exitCode, stderr } = await runCli(['--browser', 'brave']);
+
+      expect(exitCode).not.toBe(1);
+      expect(stderr).toContain(`Browser selection Brave ignored: ${IGNORED}`);
+      expect(stderr).not.toContain('Browser session:');
+    });
+
+    test('cache-only: a stray COPILOT_BROWSER_DATA_DIR warns instead of exiting 1', async () => {
+      const { exitCode, stderr } = await runCli([], { COPILOT_BROWSER_DATA_DIR: tmpdir() });
+
+      expect(exitCode).not.toBe(1);
+      expect(stderr).toContain(`Browser selection ignored: ${IGNORED}`);
+      expect(stderr).toContain('requires --browser');
+    });
+
+    test('cache-only: an invalid COPILOT_BROWSER warns instead of exiting 1', async () => {
+      const { exitCode, stderr } = await runCli([], { COPILOT_BROWSER: 'netscape' });
+
+      expect(exitCode).not.toBe(1);
+      expect(stderr).toContain(`Browser selection ignored: ${IGNORED}`);
+      expect(stderr).toContain('Unknown browser "netscape"');
+    });
+
+    test('cache-only: explicit invalid flags warn instead of exiting 1', async () => {
+      const missing = join(tmpdir(), `cmm-no-such-dir-${process.pid}-${Date.now()}`);
+      const { exitCode, stderr } = await runCli([
+        '--browser',
+        'chrome',
+        '--browser-data-dir',
+        missing,
+      ]);
+
+      expect(exitCode).not.toBe(1);
+      expect(stderr).toContain(`Browser selection ignored: ${IGNORED}`);
+      expect(stderr).toContain(`"${missing}" does not exist.`);
+    });
+
+    test('--live-reads: the same stray env var is fatal', async () => {
+      const { exitCode, stderr } = await runCli(['--live-reads'], {
+        COPILOT_BROWSER_DATA_DIR: tmpdir(),
+      });
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('requires --browser');
+      expect(stderr).not.toContain('ignored');
+    });
+
+    test('--write: explicit invalid flags are fatal', async () => {
+      const { exitCode, stderr } = await runCli(['--browser', 'netscape', '--write']);
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Unknown browser "netscape"');
+      expect(stderr).not.toContain('ignored');
+    });
+  });
+
   describe('--browser-data-dir', () => {
     test('--help documents the flag and COPILOT_BROWSER_DATA_DIR', async () => {
       const { stderr } = await runCli(['--help']);
@@ -287,6 +349,7 @@ describe('CLI entry point', () => {
         'chrome',
         '--browser-data-dir',
         missing,
+        '--live-reads',
       ]);
 
       expect(exitCode).toBe(1);
@@ -295,7 +358,7 @@ describe('CLI entry point', () => {
 
     test('Safari with a data dir exits 1', async () => {
       const { exitCode, stderr } = await runCli(
-        ['--browser', 'safari', '--browser-data-dir', tmpdir()],
+        ['--browser', 'safari', '--browser-data-dir', tmpdir(), '--write'],
         {}
       );
 

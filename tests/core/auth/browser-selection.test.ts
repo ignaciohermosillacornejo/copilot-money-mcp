@@ -22,6 +22,7 @@ import {
   describeBrowserSelection,
   parseBrowserSelection,
   resolveBrowserName,
+  resolveDataDirPath,
   validBrowserNames,
 } from '../../../src/core/auth/browser-selection.js';
 import {
@@ -290,6 +291,7 @@ describe('getBrowserConfigs', () => {
     ]);
     expect(paths('Firefox')).toEqual([
       join(home, '.mozilla/firefox'),
+      join(config, 'mozilla/firefox'),
       join(home, 'snap/firefox/common/.mozilla/firefox'),
       join(home, '.var/app/org.mozilla.firefox/.mozilla/firefox'),
     ]);
@@ -305,10 +307,11 @@ describe('getBrowserConfigs', () => {
     expect(chromium[0]).toBe(join(xdg, 'chromium/Default', IDB));
     // The snap location is not under XDG_CONFIG_HOME.
     expect(chromium).toContain(join(home, 'snap/chromium/common/chromium/Default', IDB));
-    // Firefox lives under ~/.mozilla regardless.
-    expect(withXdg.find((b) => b.name === 'Firefox')!.paths[0]).toBe(
-      join(home, '.mozilla/firefox')
-    );
+    // Firefox's legacy ~/.mozilla stays first; its 147+ XDG root follows XDG_CONFIG_HOME.
+    expect(withXdg.find((b) => b.name === 'Firefox')!.paths.slice(0, 2)).toEqual([
+      join(home, '.mozilla/firefox'),
+      join(xdg, 'mozilla/firefox'),
+    ]);
 
     const relative = getBrowserConfigs({
       platform: 'linux',
@@ -342,6 +345,16 @@ describe('getBrowserConfigs', () => {
       ['Chrome', fakeToken('chrome')],
       ['Firefox', fakeToken('ff')],
     ]);
+  });
+
+  test('Linux: the default extraction finds a Firefox 147+ profile under ~/.config/mozilla', async () => {
+    plantFirefox(join(home, '.config/mozilla/firefox'), 'x1.default-release', fakeToken('xdg'));
+    const { candidates } = await extractRefreshTokenCandidates(undefined, {
+      platform: 'linux',
+      home,
+      env: {},
+    });
+    expect(candidates.map((c) => [c.browser, c.token])).toEqual([['Firefox', fakeToken('xdg')]]);
   });
 });
 
@@ -566,12 +579,336 @@ describe('extraction with a selection', () => {
   });
 });
 
+/**
+ * A `--browser-profile` value is looked up in several namespaces at once —
+ * Chromium directory names and `Local State` display names; Firefox directory
+ * names, their post-dot suffix, and `profiles.ini` `Name=`. Whenever two
+ * DIFFERENT profiles answer to the value, through any pair of namespaces, the
+ * selection must refuse and search nothing: picking one by precedence can hand
+ * over someone else's session (Edge's built-in display names are off by one
+ * from its directories). The sweep below builds every pair, so a namespace
+ * added later without the check fails here rather than silently picking.
+ */
+describe('ambiguous --browser-profile', () => {
+  let home: string;
+  let appSupport: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'browser-select-ambiguous-'));
+    appSupport = join(home, 'Library/Application Support');
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  const mac = (selection: NonNullable<ReturnType<typeof parseBrowserSelection>>) =>
+    extractRefreshTokenCandidates(undefined, { platform: 'darwin', home, env: {}, selection });
+
+  test('Edge off-by-one display names: a directory name that is another profile’s display name is refused', async () => {
+    const edge = join(appSupport, 'Microsoft Edge');
+    plantChromium(edge, 'Default', fakeToken('default'));
+    plantChromium(edge, 'Profile 1', fakeToken('profile1'));
+    writeLocalState(edge, { Default: { name: 'Profile 1' }, 'Profile 1': { name: 'Profile 2' } });
+
+    const result = await mac({ browser: 'edge', profile: 'Profile 1' });
+    expect(result.candidates).toEqual([]);
+    expect(result.selection?.problem).toBe(
+      '--browser-profile "Profile 1" is ambiguous in Microsoft Edge: it matches directory ' +
+        '"Profile 1" and the display name of directory "Default". Use the directory name.'
+    );
+    const message = noCopilotSessionError(result.checked, result.selection).message;
+    expect(message).toContain('is ambiguous in Microsoft Edge');
+    expect(message).not.toContain(fakeToken('default'));
+
+    // Unambiguous names still resolve: "Profile 2" is only a display name,
+    // "Default" only a directory.
+    const two = await mac({ browser: 'edge', profile: 'Profile 2' });
+    expect(two.candidates.map((c) => c.token)).toEqual([fakeToken('profile1')]);
+    const dflt = await mac({ browser: 'edge', profile: 'default' });
+    expect(dflt.candidates.map((c) => c.token)).toEqual([fakeToken('default')]);
+  });
+
+  test('two profiles with the same display name are refused, not both searched', async () => {
+    const chrome = join(appSupport, 'Google/Chrome');
+    plantChromium(chrome, 'Default', fakeToken('a'));
+    plantChromium(chrome, 'Profile 3', fakeToken('b'));
+    writeLocalState(chrome, { 'Profile 3': { name: 'Work' }, Default: { name: 'work' } });
+
+    const result = await mac({ browser: 'chrome', profile: 'Work' });
+    expect(result.candidates).toEqual([]);
+    expect(result.selection?.problem).toBe(
+      '--browser-profile "Work" is ambiguous in Chrome: it matches the display name of ' +
+        'directory "Default" and the display name of directory "Profile 3". ' +
+        'Use the directory name.'
+    );
+  });
+
+  test('a directory whose own display name is the same string is one match', async () => {
+    const chrome = join(appSupport, 'Google/Chrome');
+    plantChromium(chrome, 'Default', fakeToken('a'));
+    plantChromium(chrome, 'Profile 2', fakeToken('b'));
+    writeLocalState(chrome, { Default: { name: 'Person A' }, 'Profile 2': { name: 'Profile 2' } });
+
+    const result = await mac({ browser: 'chrome', profile: 'profile 2' });
+    expect(result.candidates.map((c) => c.token)).toEqual([fakeToken('b')]);
+    expect(result.selection?.problem).toBeUndefined();
+  });
+
+  test('Linux Chrome channels are separate roots: the same directory in each is not ambiguous', async () => {
+    const config = join(home, '.config');
+    plantChromium(join(config, 'google-chrome'), 'Default', fakeToken('stable'));
+    plantChromium(join(config, 'google-chrome-beta'), 'Default', fakeToken('beta'));
+
+    const ok = await extractRefreshTokenCandidates(undefined, {
+      platform: 'linux',
+      home,
+      env: {},
+      selection: { browser: 'chrome', profile: 'Default' },
+    });
+    expect(ok.candidates.map((c) => c.token).sort()).toEqual(
+      [fakeToken('beta'), fakeToken('stable')].sort()
+    );
+
+    // An ambiguity inside one channel refuses the whole selection and names that root.
+    plantChromium(join(config, 'google-chrome-beta'), 'Profile 1', fakeToken('beta1'));
+    writeLocalState(join(config, 'google-chrome-beta'), { 'Profile 1': { name: 'Default' } });
+    const refused = await extractRefreshTokenCandidates(undefined, {
+      platform: 'linux',
+      home,
+      env: {},
+      selection: { browser: 'chrome', profile: 'Default' },
+    });
+    expect(refused.candidates).toEqual([]);
+    expect(refused.selection?.problem).toContain(
+      `is ambiguous in Chrome (${join(config, 'google-chrome-beta')}): it matches directory ` +
+        '"Default" and the display name of directory "Profile 1".'
+    );
+  });
+
+  test('Firefox: a suffix match and a different profile’s Name= are refused', async () => {
+    const root = join(appSupport, 'Firefox');
+    const profiles = join(root, 'Profiles');
+    plantFirefox(profiles, 'a1.work', fakeToken('a'));
+    plantFirefox(profiles, 'b2.default-release', fakeToken('b'));
+    writeFileSync(
+      join(root, 'profiles.ini'),
+      '[Profile0]\nName=Work\nIsRelative=1\nPath=Profiles/b2.default-release\n'
+    );
+
+    const result = await mac({ browser: 'firefox', profile: 'work' });
+    expect(result.candidates).toEqual([]);
+    expect(result.selection?.problem).toBe(
+      '--browser-profile "work" is ambiguous in Firefox: it matches directory "a1.work" and ' +
+        'the profiles.ini Name= of "Profiles/b2.default-release". Use the directory name.'
+    );
+    // The full directory name is unambiguous.
+    const exact = await mac({ browser: 'firefox', profile: 'a1.work' });
+    expect(exact.candidates.map((c) => c.token)).toEqual([fakeToken('a')]);
+  });
+
+  test('Firefox: a suffix and the same profile’s own Name= are one match', async () => {
+    const root = join(appSupport, 'Firefox');
+    plantFirefox(join(root, 'Profiles'), 'a1.work', fakeToken('a'));
+    writeFileSync(
+      join(root, 'profiles.ini'),
+      '[Profile0]\nName=work\nIsRelative=1\nPath=Profiles/a1.work\n'
+    );
+    const result = await mac({ browser: 'firefox', profile: 'WORK' });
+    expect(result.candidates.map((c) => c.token)).toEqual([fakeToken('a')]);
+    expect(result.selection?.problem).toBeUndefined();
+  });
+
+  describe('every pair of namespaces, both browsers', () => {
+    type ChromiumKind = 'dir' | 'display';
+    type FirefoxKind = 'dir' | 'suffix' | 'name';
+    const TARGET = 'Target';
+
+    /** Make Chromium profile `i` answer to TARGET through `kind`. */
+    function chromiumProfile(
+      root: string,
+      i: number,
+      kind: ChromiumKind,
+      names: Record<string, { name: string }>
+    ): string {
+      const dir = kind === 'dir' ? TARGET : `Profile ${i}`;
+      plantChromium(root, dir, fakeToken(`c${i}`));
+      names[dir] = { name: kind === 'display' ? TARGET : `Person ${i}` };
+      return fakeToken(`c${i}`);
+    }
+
+    /** Make Firefox profile `i` answer to TARGET through `kind`; returns its ini section. */
+    function firefoxProfile(profiles: string, i: number, kind: FirefoxKind): string {
+      const dir =
+        kind === 'dir' ? TARGET : kind === 'suffix' ? `s${i}.${TARGET}` : `n${i}.other${i}`;
+      plantFirefox(profiles, dir, fakeToken(`f${i}`));
+      const name = kind === 'name' ? TARGET : `Person ${i}`;
+      return `[Profile${i}]\nName=${name}\nIsRelative=1\nPath=Profiles/${dir}\n`;
+    }
+
+    const chromiumKinds: ChromiumKind[] = ['dir', 'display'];
+    const firefoxKinds: FirefoxKind[] = ['dir', 'suffix', 'name'];
+
+    for (const kind of chromiumKinds) {
+      test(`Chromium: one profile matched by ${kind} resolves`, async () => {
+        const root = join(appSupport, 'Google/Chrome');
+        const names: Record<string, { name: string }> = {};
+        const token = chromiumProfile(root, 1, kind, names);
+        writeLocalState(root, names);
+        const result = await mac({ browser: 'chrome', profile: TARGET.toLowerCase() });
+        expect(result.candidates.map((c) => c.token)).toEqual([token]);
+      });
+    }
+
+    for (const [a, b] of [
+      ['dir', 'display'],
+      ['display', 'display'],
+    ] as Array<[ChromiumKind, ChromiumKind]>) {
+      test(`Chromium pair is refused: ${a} + ${b} on two profiles`, async () => {
+        const root = join(appSupport, 'Google/Chrome');
+        const names: Record<string, { name: string }> = {};
+        chromiumProfile(root, 1, a, names);
+        chromiumProfile(root, 2, b, names);
+        writeLocalState(root, names);
+        const result = await mac({ browser: 'chrome', profile: TARGET });
+        expect(result.candidates).toEqual([]);
+        expect(result.selection?.problem).toContain(`"${TARGET}" is ambiguous in Chrome`);
+      });
+    }
+
+    for (const kind of firefoxKinds) {
+      test(`Firefox: one profile matched by ${kind} resolves`, async () => {
+        const root = join(appSupport, 'Firefox');
+        const ini = [firefoxProfile(join(root, 'Profiles'), 1, kind)];
+        writeFileSync(join(root, 'profiles.ini'), ini.join('\n'));
+        const result = await mac({ browser: 'firefox', profile: TARGET.toLowerCase() });
+        expect(result.candidates.map((c) => c.token)).toEqual([fakeToken('f1')]);
+      });
+    }
+
+    for (let x = 0; x < firefoxKinds.length; x++) {
+      for (let y = x; y < firefoxKinds.length; y++) {
+        const [a, b] = [firefoxKinds[x]!, firefoxKinds[y]!];
+        // Two directories cannot both be named exactly TARGET.
+        if (a === 'dir' && b === 'dir') continue;
+        test(`Firefox pair is refused: ${a} + ${b} on two profiles`, async () => {
+          const root = join(appSupport, 'Firefox');
+          const profiles = join(root, 'Profiles');
+          const ini = [firefoxProfile(profiles, 1, a), firefoxProfile(profiles, 2, b)];
+          writeFileSync(join(root, 'profiles.ini'), ini.join('\n'));
+          const result = await mac({ browser: 'firefox', profile: TARGET });
+          expect(result.candidates).toEqual([]);
+          expect(result.selection?.problem).toContain(`"${TARGET}" is ambiguous in Firefox`);
+        });
+      }
+    }
+  });
+});
+
+describe('profile lookup errors and file formats', () => {
+  let home: string;
+  let appSupport: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'browser-select-formats-'));
+    appSupport = join(home, 'Library/Application Support');
+  });
+
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  const mac = (selection: NonNullable<ReturnType<typeof parseBrowserSelection>>) =>
+    extractRefreshTokenCandidates(undefined, { platform: 'darwin', home, env: {}, selection });
+
+  test('profiles.ini with CRLF line endings and a BOM still parses', async () => {
+    const root = join(appSupport, 'Firefox');
+    plantFirefox(join(root, 'Profiles'), 'abc.default-release', fakeToken('crlf'));
+    writeFileSync(
+      join(root, 'profiles.ini'),
+      '\uFEFF[Profile0]\r\nName=Windows Edited\r\nIsRelative=1\r\n' +
+        'Path=Profiles/abc.default-release\r\n\r\n[General]\r\nVersion=2\r\n'
+    );
+    const result = await mac({ browser: 'firefox', profile: 'windows edited' });
+    expect(result.candidates.map((c) => c.token)).toEqual([fakeToken('crlf')]);
+  });
+
+  test('IsRelative=0 uses Path= as an absolute directory', async () => {
+    const root = join(appSupport, 'Firefox');
+    mkdirSync(join(root, 'Profiles'), { recursive: true });
+    const elsewhere = join(home, 'elsewhere');
+    plantFirefox(elsewhere, 'zz.custom', fakeToken('absolute'));
+    writeFileSync(
+      join(root, 'profiles.ini'),
+      `[Profile0]\nName=Moved\nIsRelative=0\nPath=${join(elsewhere, 'zz.custom')}\n`
+    );
+    const result = await mac({ browser: 'firefox', profile: 'moved' });
+    expect(result.candidates.map((c) => c.token)).toEqual([fakeToken('absolute')]);
+  });
+
+  test('a profiles.ini Name= whose directory is missing is named in the error', async () => {
+    const root = join(appSupport, 'Firefox');
+    plantFirefox(join(root, 'Profiles'), 'abc.default-release', fakeToken('other'));
+    writeFileSync(
+      join(root, 'profiles.ini'),
+      '[Profile0]\nName=Gone\nIsRelative=1\nPath=Profiles/deleted.gone-profile\n'
+    );
+    const result = await mac({ browser: 'firefox', profile: 'Gone' });
+    expect(result.candidates).toEqual([]);
+    expect(result.selection?.problem).toContain('No Firefox profile named "Gone" was found');
+    expect(result.selection?.problem).toContain(
+      `profiles.ini in "${root}" names "Gone" at "${join(root, 'Profiles/deleted.gone-profile')}", ` +
+        'which does not exist.'
+    );
+  });
+
+  test('malformed Local State: directory names still match, and the error says display names were unavailable', async () => {
+    const chrome = join(appSupport, 'Google/Chrome');
+    plantChromium(chrome, 'Default', fakeToken('default'));
+    writeFileSync(join(chrome, 'Local State'), '{"profile": {"info_cache": ');
+
+    const byDir = await mac({ browser: 'chrome', profile: 'Default' });
+    expect(byDir.candidates.map((c) => c.token)).toEqual([fakeToken('default')]);
+
+    const byName = await mac({ browser: 'chrome', profile: 'Person A' });
+    expect(byName.candidates).toEqual([]);
+    expect(byName.selection?.problem).toContain(
+      `Display names were unavailable: "${join(chrome, 'Local State')}" could not be parsed.`
+    );
+  });
+
+  test('a missing Local State is not reported as a problem', async () => {
+    const chrome = join(appSupport, 'Google/Chrome');
+    plantChromium(chrome, 'Default', fakeToken('default'));
+    const result = await mac({ browser: 'chrome', profile: 'Nope' });
+    expect(result.selection?.problem).not.toContain('Display names were unavailable');
+  });
+
+  test('the available profile list is sorted', async () => {
+    const chrome = join(appSupport, 'Google/Chrome');
+    for (const dir of ['Profile 10', 'Profile 2', 'Default']) {
+      plantChromium(chrome, dir, fakeToken(dir));
+    }
+    const result = await mac({ browser: 'chrome', profile: 'Nope' });
+    expect(result.selection?.problem).toContain('(available: Default, Profile 2, Profile 10;');
+  });
+});
+
 describe('noCopilotSessionError', () => {
   test('without a selection the message is unchanged', () => {
     expect(noCopilotSessionError(['Chrome', 'Firefox']).message).toBe(
       'No Copilot Money session found. Searched: Chrome, Firefox. ' +
         'Please log into Copilot Money at https://app.copilot.money in your browser, then try again.'
     );
+  });
+
+  test('with a selection the hint names every selection flag and variable', () => {
+    const message = noCopilotSessionError(['Brave'], { label: 'Brave', browser: 'Brave' }).message;
+    expect(message).toContain('--browser / --browser-profile / --browser-data-dir');
+    expect(message).toContain(
+      '(COPILOT_BROWSER / COPILOT_BROWSER_PROFILE / COPILOT_BROWSER_DATA_DIR)'
+    );
+    expect(message).toContain('Other browsers were not searched.');
   });
 
   test('FirebaseAuth surfaces the selection-specific message', async () => {
@@ -695,6 +1032,13 @@ describe('--browser-data-dir', () => {
           pathKind: ok,
         })?.dataDir
       ).toBe(custom);
+    });
+
+    test('a Windows-style ~\\ prefix expands to home too', () => {
+      expect(resolveDataDirPath('~\\chrome-profile', '/', home)).toBe(join(home, 'chrome-profile'));
+      // Not a home reference: ~user and a bare ~ inside a name resolve as relative paths.
+      expect(resolveDataDirPath('~other', home, '/unused')).toBe(join(home, '~other'));
+      expect(resolveDataDirPath('a~/b', home, '/unused')).toBe(join(home, 'a~/b'));
     });
 
     test('Safari refuses a data dir', () => {
@@ -824,6 +1168,34 @@ describe('--browser-data-dir', () => {
       const message = noCopilotSessionError(result.checked, result.selection).message;
       expect(message).toContain(`No Copilot Money session found in Chrome (data dir "${custom}").`);
       expect(message).not.toContain(fakeToken('default'));
+    });
+
+    test('Chromium: a data dir that is one profile, not the user-data root, is named in the error', async () => {
+      // By name: the Default directory itself.
+      const profileDir = join(custom, 'Default');
+      plantChromium(custom, 'Default', fakeToken('x'));
+      const byName = await linux({ browser: 'chrome', dataDir: profileDir });
+      expect(byName.candidates).toEqual([]);
+      const message = noCopilotSessionError(byName.checked, byName.selection).message;
+      expect(message).toContain(
+        `"${profileDir}" looks like a single Chrome profile directory, not the user-data root`
+      );
+      expect(message).toContain(`its parent ("${custom}")`);
+      expect(message).toContain('--browser-profile "Default"');
+
+      // By content: any name, holding a Preferences file.
+      const copied = join(home, 'copied-profile');
+      mkdirSync(copied, { recursive: true });
+      writeFileSync(join(copied, 'Preferences'), '{}');
+      const byFile = await linux({ browser: 'chrome', dataDir: copied });
+      expect(byFile.selection?.hint).toContain(`"${copied}" looks like a single Chrome profile`);
+    });
+
+    test('Chromium: a real user-data root gets no profile-dir hint', async () => {
+      plantChromium(custom, 'Default', fakeToken('x'));
+      writeLocalState(custom, { Default: { name: 'Person A' } });
+      const result = await linux({ browser: 'chrome', dataDir: custom });
+      expect(result.selection?.hint).toBeUndefined();
     });
 
     test('a data dir removed after startup is reported as missing', async () => {

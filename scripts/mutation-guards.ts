@@ -639,6 +639,53 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     ],
     expectFails: 'tests/unit/delete-split-parent.test.ts',
   },
+  {
+    name: 'an ambiguous Chromium profile name is refused',
+    file: 'src/core/auth/browser-token.ts',
+    invariant:
+      'A --browser-profile that matches two Chromium profiles (a directory name and another ' +
+      "profile's display name, or two display names) must search nothing. Edge's built-in " +
+      'display names are off by one from its directories, so resolving by precedence hands ' +
+      "the server another person's session, and under --write their account (#837).",
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: an ambiguous Chromium profile name is refused\n' +
+        '    if (matches.size > 1) {',
+      with:
+        '    // mutation-guard: an ambiguous Chromium profile name is refused\n' +
+        '    if (matches.size > 99) {',
+    },
+    expectFailingTests: [
+      'Edge off-by-one display names',
+      'two profiles with the same display name are refused',
+      'Chromium pair is refused',
+    ],
+    expectFails: 'tests/core/auth/browser-selection.test.ts',
+  },
+  {
+    name: 'an ambiguous Firefox profile name is refused',
+    file: 'src/core/auth/browser-token.ts',
+    invariant:
+      'A --browser-profile that matches two Firefox profiles (by directory, post-dot suffix ' +
+      'or profiles.ini Name=, in any combination) must search nothing, for the same reason ' +
+      'as the Chromium guard: either match may be another person, and the first token to ' +
+      'exchange would win (#837).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: an ambiguous Firefox profile name is refused\n' +
+        '    if (matches.size > 1) {',
+      with:
+        '    // mutation-guard: an ambiguous Firefox profile name is refused\n' +
+        '    if (matches.size > 99) {',
+    },
+    expectFailingTests: [
+      'Firefox: a suffix match and a different profile’s Name= are refused',
+      'Firefox pair is refused',
+    ],
+    expectFails: 'tests/core/auth/browser-selection.test.ts',
+  },
 ];
 
 // ---------------------------------------------------------------------------
