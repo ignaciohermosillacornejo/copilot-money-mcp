@@ -1,6 +1,8 @@
 ---
 name: release-parity-test
 description: "Use before cutting a release, after a change to live reads, write tools or skills, or when the user asks to test the MCP against the web app. Runs the three-way parity test in test-matrix.md (cache mode vs live MCP vs app.copilot.money), including round-trip writes with throwaway test data in the user's Manual account, then cleans up. Produces a local report with real figures and PII-free GitHub issues. Repo-maintenance skill, not a finance skill."
+metadata:
+  modes: "live"
 ---
 
 # Release Parity Test

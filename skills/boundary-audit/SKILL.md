@@ -1,6 +1,8 @@
 ---
 name: boundary-audit
 description: "Use when running the quarterly boundary audit of this repo's external assumptions — inventory the write/read/docs surfaces against the conformance ledger, track the verification-class trend, retro-check recent bugs for missing class-level ratchets, and spot-check docs freshness. Produces a dated report under docs/audits/ plus filed follow-up issues. Repo-maintenance skill, not a finance skill."
+metadata:
+  modes: "live, cache"
 ---
 
 # Boundary Audit

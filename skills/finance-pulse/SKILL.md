@@ -1,6 +1,8 @@
 ---
 name: finance-pulse
 description: "Use when the user asks how they're doing financially, wants a spending check-in, asks about free money or discretionary budget, or says 'pulse'. Read-only — never writes to Copilot Money."
+metadata:
+  modes: "live, cache"
 ---
 
 # Finance Pulse

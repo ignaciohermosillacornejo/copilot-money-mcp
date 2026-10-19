@@ -1,6 +1,8 @@
 ---
 name: finance-cleanup
 description: "Use when the user wants to clean up transactions, fix categories, find missing recurring charges, or do general transaction hygiene in Copilot Money."
+metadata:
+  modes: "live"
 ---
 
 # Finance Cleanup

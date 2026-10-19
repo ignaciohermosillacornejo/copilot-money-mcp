@@ -94,6 +94,7 @@ scripts/*
 !scripts/check-skills.py
 !scripts/dump-tool-names.ts
 !scripts/dump-tool-args.ts
+!scripts/dump-tool-modes.ts
 !scripts/schema-args.ts
 !scripts/scheduled-smoke.ts
 !scripts/install-scheduled-smoke.sh

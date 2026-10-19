@@ -24,7 +24,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { CopilotMoneyServer } from '../../src/server.js';
 import { ALL_TOOL_DEFS } from '../../src/tools/registry/index.js';
+import { createMockGraphQLClient } from '../helpers/mock-graphql.js';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/check-skills.py', import.meta.url));
 const REAL_REPO = fileURLToPath(new URL('../..', import.meta.url));
@@ -51,6 +53,8 @@ async function runLinter(
 const SKILL_BODY = `---
 name: demo
 description: A demo skill.
+metadata:
+  modes: "live"
 ---
 
 Call \`get_transactions\` and then \`update_transaction\`.
@@ -103,6 +107,8 @@ const SOURCE_TREE: Record<string, string> = {
 async function makeRepo(opts: {
   dumpBody?: string;
   argsBody?: string;
+  /** Body of the synthetic scripts/dump-tool-modes.ts (check 6, #847). */
+  modesBody?: string;
   /** Write the names dump but NOT the args dump — the only way to reach
    *  `_run_dump_script`'s "is missing" branch for ARGS_SCRIPT, since removing
    *  the whole scripts/ directory makes the names lookup raise first. */
@@ -117,7 +123,11 @@ async function makeRepo(opts: {
   // that set only `argsBody` got no `scripts/` directory at all and silently
   // tested "the dump script is missing entirely" instead — invisible in this
   // file, because that case asserts the same four invariants.
-  if (opts.dumpBody !== undefined || opts.argsBody !== undefined) {
+  if (
+    opts.dumpBody !== undefined ||
+    opts.argsBody !== undefined ||
+    opts.modesBody !== undefined
+  ) {
     await mkdir(join(root, 'scripts'), { recursive: true });
     await writeFile(join(root, 'scripts', 'dump-tool-names.ts'), opts.dumpBody ?? WORKING_DUMP);
     if (opts.omitArgs !== true) {
@@ -126,6 +136,10 @@ async function makeRepo(opts: {
         opts.argsBody ?? WORKING_ARGS_DUMP
       );
     }
+    await writeFile(
+      join(root, 'scripts', 'dump-tool-modes.ts'),
+      opts.modesBody ?? WORKING_MODES_DUMP
+    );
   }
   for (const [path, body] of Object.entries({ ...SOURCE_TREE, ...opts.sourceFiles })) {
     if (body === null) continue;
@@ -142,13 +156,18 @@ async function makeRepo(opts: {
   return root;
 }
 
-const WORKING_DUMP = `console.log(JSON.stringify(['get_transactions', 'update_transaction']));`;
-const WORKING_ARGS_DUMP = `console.log(JSON.stringify({ get_transactions: ['fields', 'period'], update_transaction: ['transaction_id'] }));`;
+// get_accounts / get_accounts_live are the synthetic cache-only / live-only
+// pair the mode check (#847) needs; get_transactions is listed in both modes
+// here so the older checks' fixtures need no mode tags.
+const WORKING_DUMP = `console.log(JSON.stringify(['get_accounts', 'get_accounts_live', 'get_transactions', 'update_transaction']));`;
+const WORKING_ARGS_DUMP = `console.log(JSON.stringify({ get_accounts: ['include_hidden', 'view'], get_accounts_live: ['fields'], get_transactions: ['fields', 'period'], update_transaction: ['transaction_id'] }));`;
+const WORKING_MODES_DUMP = `console.log(JSON.stringify({ get_accounts: ['cache'], get_accounts_live: ['live'], get_transactions: ['cache', 'live'], update_transaction: ['live'] }));`;
 
 async function withRepo(
   opts: {
     dumpBody?: string;
     argsBody?: string;
+    modesBody?: string;
     omitArgs?: boolean;
     skill?: string;
     extraDocs?: Record<string, string>;
@@ -165,10 +184,12 @@ async function withRepo(
   }
 }
 
-function skillWith(body: string): string {
+function skillWith(body: string, modes = 'live'): string {
   return `---
 name: demo
 description: A demo skill.
+metadata:
+  modes: "${modes}"
 ---
 
 ${body}
@@ -189,6 +210,7 @@ describe('tool-lookup gate (class-level detector)', () => {
     name: string;
     dumpBody?: string;
     argsBody?: string;
+    modesBody?: string;
     omitArgs?: boolean;
     /**
      * REQUIRED — and enforced at runtime below, not by the type.
@@ -248,9 +270,32 @@ describe('tool-lookup gate (class-level detector)', () => {
       omitArgs: true,
       because: 'dump-tool-args.ts is missing',
     },
+    {
+      // The mode dump's degenerate answer (#847): a filter reading renamed
+      // registry flags lists every tool in every mode, and the mode check then
+      // passes every skill.
+      name: 'the modes dump lists every tool in both modes',
+      modesBody: `console.log(JSON.stringify({ get_accounts: ['cache', 'live'], get_accounts_live: ['cache', 'live'], get_transactions: ['cache', 'live'], update_transaction: ['cache', 'live'] }));`,
+      because: 'reports no cache-only tool',
+    },
+    {
+      name: 'the modes dump and the names dump disagree on the tool list',
+      modesBody: `console.log(JSON.stringify({ get_accounts: ['cache'], get_accounts_live: ['live'] }));`,
+      because: 'disagree on the tool list',
+    },
+    {
+      name: 'the modes dump lists a tool in no mode at all',
+      modesBody: `console.log(JSON.stringify({ get_accounts: ['cache'], get_accounts_live: ['live'], get_transactions: [], update_transaction: ['live'] }));`,
+      because: 'in no mode at all',
+    },
+    {
+      name: 'the modes dump names a mode that does not exist',
+      modesBody: `console.log(JSON.stringify({ get_accounts: ['cache'], get_accounts_live: ['live'], get_transactions: ['offline'], update_transaction: ['live'] }));`,
+      because: 'array of modes drawn from',
+    },
   ];
 
-  for (const { name, dumpBody, argsBody, omitArgs, because } of cases) {
+  for (const { name, dumpBody, argsBody, modesBody, omitArgs, because } of cases) {
     test(`fails as a linter fault when ${name}`, async () => {
       if (!because) {
         throw new Error(
@@ -258,7 +303,7 @@ describe('tool-lookup gate (class-level detector)', () => {
             'to its own failure, or it can silently become a duplicate of another row'
         );
       }
-      await withRepo({ dumpBody, argsBody, omitArgs }, ({ code, stderr }) => {
+      await withRepo({ dumpBody, argsBody, modesBody, omitArgs }, ({ code, stderr }) => {
         expect(code).toBe(1);
         expect(stderr).toContain('linter self-check');
         expect(stderr).toContain('Skill references were NOT validated');
@@ -471,6 +516,8 @@ Call \`get_transactions\` and then \`delete_everything\`.
         skill: `---
 name: demo
 description: A demo skill.
+metadata:
+  modes: "live"
 ---
 
 Call \`get_transactions\`, then tag via \`add_tag_ids\` and untag via \`remove_tag_ids\`.
@@ -670,6 +717,167 @@ describe('terse-default field references (#704)', () => {
         expect(stderr).not.toContain('`tag_ids` is a row field');
       }
     );
+  });
+});
+
+/**
+ * Check 6 (#847): finance-pulse and finance named `get_accounts`,
+ * `get_transactions` with `period`, `get_budgets` with `active_only` — all real
+ * tools, so check 2 passed — while the server runs in live mode whenever
+ * --write is on, where none of them is listed. Both directions and the quiet
+ * cases are covered, for the same reason as check 4's.
+ */
+describe('mode surface (#847)', () => {
+  test('a skill that declares no modes fails, naming the fix', async () => {
+    await withRepo(
+      { dumpBody: WORKING_DUMP, skill: `---\nname: demo\ndescription: A demo skill.\n---\n\nCall \`get_transactions\`.\n` },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('demo/SKILL.md: frontmatter must declare the server mode(s)');
+        expect(stderr).toContain('modes: "live, cache"');
+      }
+    );
+  });
+
+  test('an unknown mode value fails', async () => {
+    await withRepo(
+      { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_transactions`.', 'live, offline') },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain("`metadata.modes` has 'offline'");
+      }
+    );
+  });
+
+  test('a live skill naming a cache-only tool fails', async () => {
+    await withRepo({ dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts` for balances.') }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain(
+        'demo/SKILL.md:8: `get_accounts` is listed only in cache mode, but this skill declares live'
+      );
+    });
+  });
+
+  test('...and the reverse: a cache skill naming a live-only tool fails', async () => {
+    await withRepo(
+      { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts_live` for balances.', 'cache') },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('`get_accounts_live` is listed only in live mode');
+        expect(stderr).toContain('does not exist in cache mode');
+      }
+    );
+  });
+
+  test('a two-mode skill may name both variants, each tagged with its mode', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith(
+          'Call `get_accounts_live` (live) / `get_accounts` (cache only), then `get_transactions`.',
+          'live, cache'
+        ),
+      },
+      ({ code, stdout, stderr }) => {
+        expect(stderr).not.toContain('FAIL');
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 skills validated');
+      }
+    );
+  });
+
+  test('...but an untagged variant still fails beside a tagged one', async () => {
+    await withRepo(
+      { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts_live` / `get_accounts` (cache).', 'live, cache') },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('`get_accounts_live` is listed only in live mode');
+        expect(stderr).not.toContain('`get_accounts` is listed only');
+      }
+    );
+  });
+
+  test('a tag for the wrong mode does not excuse the tool', async () => {
+    await withRepo(
+      { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts` (live).', 'live, cache') },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('`get_accounts` is listed only in cache mode');
+      }
+    );
+  });
+
+  test('a tag for a mode the skill does not declare does not excuse the tool', async () => {
+    // A live-only skill cannot opt a cache tool back in by tagging it: its
+    // own declaration says that mode never runs it.
+    await withRepo({ dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts` (cache).') }, ({ code, stderr }) => {
+      expect(code).toBe(1);
+      expect(stderr).toContain('`get_accounts` is listed only in cache mode');
+    });
+  });
+
+  test("an argument the line's tool does not take fails", async () => {
+    // The #847 shape: the live tool swapped in, the cache tool's argument kept.
+    await withRepo(
+      { dumpBody: WORKING_DUMP, skill: skillWith('Call `get_accounts_live` with `view: "list"`.') },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('argument `view` is not taken by `get_accounts_live`');
+      }
+    );
+  });
+
+  test('an argument of the tool on the line passes, and so does a response value', async () => {
+    // `success: true` is not an argument of ANY tool: it describes a response,
+    // so it is not something this check can judge.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        skill: skillWith(
+          'Call `get_accounts_live` with `fields: ["default"]`; expect `success: true`.'
+        ),
+      },
+      ({ code, stderr }) => {
+        expect(stderr).not.toContain('FAIL');
+        expect(code).toBe(0);
+      }
+    );
+  });
+});
+
+describe('dump-tool-modes.ts matches the server', () => {
+  // The dump re-implements handleListTools()'s filter. Pin it to real servers
+  // in both modes, so a change to the server's gating that the dump does not
+  // follow fails here instead of linting every skill against the wrong surface.
+  test('cache and live surfaces equal handleListTools() in each mode', async () => {
+    const proc = Bun.spawn(['bun', 'run', 'scripts/dump-tool-modes.ts'], {
+      cwd: REAL_REPO,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const stdout = await new Response(proc.stdout).text();
+    expect(await proc.exited).toBe(0);
+    const modes: Record<string, string[]> = JSON.parse(stdout);
+
+    const listed = (write: boolean, live: boolean): string[] =>
+      new CopilotMoneyServer(
+        '/nonexistent/check-skills-mode-fixture',
+        undefined,
+        write,
+        live,
+        live ? createMockGraphQLClient({}) : undefined
+      )
+        .handleListTools()
+        .tools.map((t) => t.name)
+        .sort();
+    const inMode = (mode: string): string[] =>
+      Object.keys(modes)
+        .filter((name) => modes[name]?.includes(mode))
+        .sort();
+
+    expect(inMode('cache')).toEqual(listed(false, false));
+    expect(inMode('live')).toEqual(listed(true, true));
+    expect(Object.keys(modes).sort()).toEqual(ALL_TOOL_DEFS.map((d) => d.name).sort());
   });
 });
 

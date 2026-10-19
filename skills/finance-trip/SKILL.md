@@ -1,6 +1,8 @@
 ---
 name: finance-trip
 description: "Use when the user wants to track trip expenses, tag travel transactions, find late-posting charges from a trip, or get a trip spending summary. Example: 'tag my Tahiti trip expenses' or 'how much did I spend in Whistler?'"
+metadata:
+  modes: "live"
 ---
 
 # Finance Trip

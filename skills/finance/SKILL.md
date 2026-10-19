@@ -1,6 +1,8 @@
 ---
 name: finance
 description: "Use for open-ended financial questions: 'can I afford X?', 'should I buy X?', 'how much can I spend on Y?', or any affordability, budgeting, or financial planning question. Also use when the user asks a financial question that doesn't fit /finance-cleanup, /finance-pulse, or /finance-trip."
+metadata:
+  modes: "live, cache"
 ---
 
 # Finance — Financial Advisor

@@ -11,8 +11,11 @@ Checks:
    preset (#704) — see "Check 4" below.
 5. Every markdown table row has as many cells as its header (review on #826);
    see check_tables.
+6. Mode surface (#847): every skill declares the server mode(s) it runs in,
+   and each tool and argument it names exists in those modes — see "Check 6"
+   below.
 
-Checks 2–5 read every markdown file under a skill's folder, not just
+Checks 2–6 read every markdown file under a skill's folder, not just
 SKILL.md (skill_docs); check 1 reads SKILL.md only.
 
 Check 2 gets its tool list from `scripts/dump-tool-names.ts`, which imports
@@ -68,6 +71,44 @@ LIMITATIONS (documented rather than silently tolerated):
     the line really does instruct a read, or drop the backticks when it is
     prose ABOUT a field rather than an instruction to read one.
 
+Check 6 exists because check 2 validates against the UNION of every mode's
+tools, and every tool exists in some mode. `finance-pulse` and `finance` told
+their agents to call `get_accounts`, `get_transactions` with `period`, and
+`get_budgets` with `active_only` — all real tools, so check 2 passed — while
+the server runs in live mode whenever `--write` is on, where none of those are
+listed and the `_live` replacements take different arguments (#847).
+
+  - A skill declares its modes in frontmatter, under the Agent Skills spec's
+    `metadata` map (so no non-standard top-level key):
+        metadata:
+          modes: "live, cache"
+    Values are `cache` (no flags) and `live` (`--write`, which implies
+    `--live-reads`). A skill with no declaration fails: an undeclared skill is
+    exactly the one nobody checked.
+  - Per-tool availability comes from `scripts/dump-tool-modes.ts`, which
+    applies the server's own list filter to the registry.
+  - A backticked tool that is listed in every declared mode passes. One that
+    is not must sit on a line carrying a mode tag — `(live)`, `(cache)`,
+    `(live only)`, `(cache mode)`, ... — for a declared mode it IS listed in.
+    That is how a two-mode skill names both variants:
+        `get_accounts_live` (live) / `get_accounts` (cache)
+  - An argument written as `` `name: value` `` on a line that names a tool must
+    be accepted by at least one tool named on that line, when it is an
+    argument of some tool at all. A key no tool takes is left alone: it is a
+    response value the line describes (`success: true`) or a removed input a
+    case sends on purpose (`compact: true`). A line naming both
+    variants therefore accepts either variant's arguments; keep each variant
+    on its own line when the arguments differ, so the reader can tell which
+    goes with which.
+
+LIMITATIONS: the tag is per LINE, so a tagged line excuses every tool on it
+that is listed in the tagged mode; arguments are only seen in the
+`` `name: value` `` form, so a bare `` `period` `` is not checked, and a
+misspelled argument no tool takes is skipped with the response values; and a tool
+that is listed in a mode but does nothing useful there (`refresh_database` in
+live mode refreshes only the cache reads live mode kept) is not something a
+surface check can see.
+
 Exit 1 on any failure with a clear per-check message.
 """
 
@@ -89,6 +130,10 @@ REPO_ROOT = Path(
 SKILLS_DIR = REPO_ROOT / "skills"
 DUMP_SCRIPT = REPO_ROOT / "scripts" / "dump-tool-names.ts"
 ARGS_SCRIPT = REPO_ROOT / "scripts" / "dump-tool-args.ts"
+MODES_SCRIPT = REPO_ROOT / "scripts" / "dump-tool-modes.ts"
+
+#: The server modes a skill can declare (check 6).
+MODES = ("cache", "live")
 
 # Sources check 4 reads. Only field-selection.ts is mandatory: it is the one
 # file that decides what a terse row contains, so its absence means the check
@@ -246,6 +291,45 @@ def collect_tool_args() -> dict[str, set[str]]:
         )
 
     return {name: set(props) for name, props in args.items()}
+
+
+def collect_tool_modes(known_tools: set[str]) -> dict[str, set[str]]:
+    """Ask the registry which mode(s) list each tool (check 6, #847)."""
+    modes = _run_dump_script(MODES_SCRIPT)
+
+    if not isinstance(modes, dict) or not all(
+        isinstance(name, str)
+        and isinstance(avail, list)
+        and all(m in MODES for m in avail)
+        for name, avail in modes.items()
+    ):
+        raise ToolLookupError(
+            f"{MODES_SCRIPT.name} printed an unexpected shape, expected a JSON "
+            f"object of tool name -> array of modes drawn from {list(MODES)}"
+        )
+    if set(modes) != known_tools:
+        raise ToolLookupError(
+            f"{MODES_SCRIPT.name} and {DUMP_SCRIPT.name} disagree on the tool list "
+            f"({len(modes)} vs {len(known_tools)} tools)"
+        )
+    unlisted = sorted(name for name, avail in modes.items() if not avail)
+    if unlisted:
+        raise ToolLookupError(
+            f"{MODES_SCRIPT.name} lists {', '.join(unlisted)} in no mode at all — "
+            "a registry flag combination the server never lists"
+        )
+    # The degenerate answer: a collector reading renamed flags gives every
+    # tool every mode, and the check then passes every skill. The real surface
+    # always has tools that exist in one mode only (the swapped cache reads
+    # and their `_live` replacements), so refuse a map without both kinds.
+    for mode in MODES:
+        if not any(avail == [mode] for avail in modes.values()):
+            raise ToolLookupError(
+                f"{MODES_SCRIPT.name} reports no {mode}-only tool — the mode "
+                "filter is not reading the registry flags, and every skill would "
+                "pass the mode check vacuously"
+            )
+    return {name: set(avail) for name, avail in modes.items()}
 
 
 # --- Check 4: terse-default field references (#704) -------------------------
@@ -644,6 +728,91 @@ def check_frontmatter(skill_dir: Path) -> list[str]:
     return errors
 
 
+# --- Check 6: mode surface (#847) ------------------------------------------
+
+#: A parenthetical that scopes a line to one mode: `(live)`, `(cache only)`,
+#: `(in live mode)`, `(live mode: ...)`.
+MODE_TAG_RE = re.compile(r"\((?:in\s+)?(cache|live)\b[^)]*\)", re.IGNORECASE)
+#: A backticked `name: value` argument, e.g. `period: "this_month"`.
+ARG_SPAN_RE = re.compile(r"`([a-z_][a-z0-9_]*):\s*[^`]*`")
+
+
+def declared_modes(skill_dir: Path) -> tuple[set[str], list[str]]:
+    """The `metadata.modes` a SKILL.md declares, plus any errors."""
+    skill_md = skill_dir / "SKILL.md"
+    fm_match = re.match(r"^---\n(.*?)\n---\n", skill_md.read_text(), re.DOTALL)
+    hint = (
+        f'{skill_dir.name}/SKILL.md: frontmatter must declare the server mode(s) '
+        'the skill runs in, as `metadata:` then `  modes: "live, cache"` '
+        f"(values: {', '.join(MODES)}). Live is the mode whenever --write is on."
+    )
+    if not fm_match:
+        return set(), []  # check_frontmatter already reports this
+    meta = re.search(r"^metadata:\s*\n((?:[ \t]+.*\n?)*)", fm_match.group(1) + "\n", re.MULTILINE)
+    modes_line = meta and re.search(r"^[ \t]+modes:\s*(.+)$", meta.group(1), re.MULTILINE)
+    if not modes_line:
+        return set(), [hint]
+    values = re.findall(r"[A-Za-z_]+", modes_line.group(1))
+    unknown = [v for v in values if v not in MODES]
+    if unknown or not values:
+        return set(), [
+            f"{skill_dir.name}/SKILL.md: `metadata.modes` has "
+            f"{', '.join(repr(v) for v in unknown) or 'no values'}; "
+            f"allowed: {', '.join(MODES)}"
+        ]
+    return set(values), []
+
+
+def check_mode_surface(
+    skill_dir: Path,
+    tool_modes: dict[str, set[str]],
+    tool_args: dict[str, set[str]],
+) -> list[str]:
+    """Report tools and arguments a skill names that its modes do not list."""
+    modes, errors = declared_modes(skill_dir)
+    if errors or not modes:
+        return errors
+    claimed = "/".join(m for m in MODES if m in modes)
+    all_args = set().union(*tool_args.values())
+    for doc in skill_docs(skill_dir):
+        for line_no, line in enumerate(doc.read_text().splitlines(), start=1):
+            tools = [
+                t for t in BACKTICK_IDENT_RE.findall(line) if t in tool_modes
+            ]
+            if not tools:
+                continue
+            tags = {m.lower() for m in MODE_TAG_RE.findall(line)}
+            where = _loc(skill_dir, doc, line_no)
+            for tool in dict.fromkeys(tools):
+                avail = tool_modes[tool]
+                if modes <= avail:
+                    continue
+                if tags & modes & avail:
+                    continue  # explicitly scoped to a declared mode that lists it
+                missing = "/".join(m for m in MODES if m in modes - avail)
+                listed_in = "/".join(m for m in MODES if m in avail)
+                errors.append(
+                    f"{where}: `{tool}` is listed only in {listed_in} mode, but "
+                    f"this skill declares {claimed} and the line does not scope "
+                    f"it, so the call does not exist in {missing} mode. Use the "
+                    f"{missing}-mode tool, or name both variants with mode tags, "
+                    f"e.g. `x_live` (live) / `x` (cache)."
+                )
+            accepted = set().union(*(tool_args.get(t, set()) for t in tools))
+            for arg in dict.fromkeys(ARG_SPAN_RE.findall(line)):
+                if arg in accepted or arg not in all_args:
+                    # Not an argument of ANY tool: a response value the line
+                    # describes (`success: true`) or an input a case sends on
+                    # purpose to test the error (`compact: true`).
+                    continue
+                errors.append(
+                    f"{where}: argument `{arg}` is not taken by "
+                    f"{'/'.join(f'`{t}`' for t in dict.fromkeys(tools))}. Drop it, "
+                    "or move it to a line that names the tool that takes it."
+                )
+    return errors
+
+
 def check_tool_refs(skill_dir: Path, known_tools: set[str]) -> list[str]:
     errors: list[str] = []
     for doc in skill_docs(skill_dir):
@@ -690,6 +859,7 @@ def main() -> int:
     try:
         known_tools = collect_all_tool_names()
         tool_args = collect_tool_args()
+        tool_modes = collect_tool_modes(known_tools)
         terse_tools = collect_terse_default_tools()
         vocabulary = collect_field_vocabulary()
     except ToolLookupError as exc:
@@ -719,6 +889,7 @@ def main() -> int:
             all_errors.extend(
                 check_field_refs(skill_dir, terse_tools, tool_args, vocabulary)
             )
+            all_errors.extend(check_mode_surface(skill_dir, tool_modes, tool_args))
 
     if all_errors:
         for err in all_errors:

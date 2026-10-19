@@ -1,6 +1,8 @@
 ---
 name: amazon-sync
 description: "Use when the user wants to reconcile Amazon order history with Copilot Money transactions — categorize purchases, split multi-category orders, and match card refunds. Requires an Amazon order-data export in CSV form."
+metadata:
+  modes: "live"
 ---
 
 # Amazon Sync
