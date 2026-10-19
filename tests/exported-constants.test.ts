@@ -611,6 +611,9 @@ const PINNED: Record<string, readonly string[]> = {
   RECURRING_STATE_VALUES: ['ACTIVE', 'PAUSED', 'ARCHIVED'],
   // src/core/fs-retry.ts
   RETRYABLE_ERRNOS: ['EINTR', 'EAGAIN'],
+  // src/tools/transaction-type-rules.ts — which rules make a mode resolve
+  // category names; a rule missing here sees category_name null (#854 review).
+  RULES_READING_CATEGORY_NAME: ['hsa_eligible'],
   // src/utils/scheduled-smoke-status.ts
   SCHEDULED_SMOKE_RESULTS: ['pass', 'fail', 'auth-missing', 'incomplete'],
   // src/conformance/ledger.ts

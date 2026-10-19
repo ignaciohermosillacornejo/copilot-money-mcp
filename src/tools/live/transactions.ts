@@ -25,6 +25,7 @@ import {
 import { rejectRemovedArgs, REMOVED_TRANSACTION_ARGS } from '../errors.js';
 import { normalizeMerchantName } from '../../utils/merchant.js';
 import {
+  RULES_READING_CATEGORY_NAME,
   TRANSACTION_TYPE_RULES,
   TRANSACTION_TYPE_RULES_TEXT,
   isSharedTransactionType,
@@ -461,7 +462,10 @@ export class LiveTransactionsTools {
     // 9. transaction_type — the rules shared with cache mode (#843).
     if (opts.transaction_type !== undefined && isSharedTransactionType(opts.transaction_type)) {
       const rule = TRANSACTION_TYPE_RULES[opts.transaction_type];
-      const { names } = await this.getCategoryIndex();
+      // Only a rule that reads category_name costs a categories round trip.
+      const names = RULES_READING_CATEGORY_NAME.has(opts.transaction_type)
+        ? (await this.getCategoryIndex()).names
+        : new Map<string, string>();
       result = result.filter((n) => rule(liveTypeRuleRow(n, names)));
     }
 

@@ -4,7 +4,7 @@ title: transaction_type refunds and credits selected different, even disjoint, r
 class: path-divergence
 status: fixed
 detected: live-probe  # release parity row TXN-08 compared both modes over the window both cover
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/854
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/843
 date: 2026-10-18
 ---

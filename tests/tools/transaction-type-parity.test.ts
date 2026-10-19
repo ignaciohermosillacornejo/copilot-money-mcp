@@ -141,6 +141,16 @@ const SPECS: Spec[] = [
     categoryId: null,
     name: 'Peer Payment',
   },
+  // A category id in neither mode's name map, whose raw id happens to contain
+  // a medical keyword: no name means no hsa match, in both modes (#854 review —
+  // cache mode used to fall back to the id itself).
+  {
+    id: 'Nq7zK5aD3gJ8cX4hY6eC',
+    kind: 'REGULAR',
+    amount: 33,
+    categoryId: 'Ux9visionK4mT7qR2wL5s',
+    name: 'Corner Store',
+  },
   {
     id: 'Mp6yJ4zC2fH7bW3gX5dB',
     kind: 'REGULAR',
@@ -256,6 +266,62 @@ async function liveTools(): Promise<LiveTransactionsTools> {
 }
 
 const RANGE = { start_date: '2026-03-01', end_date: '2026-03-31' } as const;
+
+describe('transaction_type totals and internal fields (#854 review)', () => {
+  test('cache totals cover exactly the rows returned, after the exclusion filters', async () => {
+    const db = new CopilotDatabase('/fake/path');
+    const refund = (id: string, amount: number, extra: Partial<Transaction> = {}): Transaction => ({
+      transaction_id: id,
+      amount,
+      date: '2026-03-10',
+      name: 'OUTDOOR STORE',
+      category_id: CAT_SHOPPING,
+      ...extra,
+    });
+    db._injectDataForTesting({
+      transactions: [
+        refund('Ra1kW9mQ2nR7tV4xL8sP', -40),
+        // Individually excluded: dropped by exclude_excluded, so not in the total.
+        refund('Rb2mX2nR8tW5qK9vL3sQ', -25, { excluded: true }),
+        // A split parent and its child: only the child is returned and counted.
+        refund('Rc3nY3pS9vX6rL2wM4tR', -30, {
+          children_transaction_ids: ['Rd4pZ4qT2wY7sM3xN5vS'],
+        }),
+        refund('Rd4pZ4qT2wY7sM3xN5vS', -30, { parent_transaction_id: 'Rc3nY3pS9vX6rL2wM4tR' }),
+      ],
+      accounts: [],
+      recurring: [],
+      budgets: [],
+      goals: [],
+      goalHistory: [],
+      investmentPrices: [],
+      items: [],
+      tags: [],
+      userCategories: CATEGORIES.map((c, i) => ({ category_id: c.id, name: c.name, order: i })),
+      categoryNameMap: new Map(CATEGORIES.map((c) => [c.id, c.name])),
+      accountNameMap: new Map(),
+    });
+    const result = await new CopilotMoneyTools(db).getTransactions({
+      ...RANGE,
+      transaction_type: 'refunds',
+      fields: ['all'],
+    });
+    expect(result.transactions.map((t) => t.transaction_id).sort()).toEqual([
+      'Ra1kW9mQ2nR7tV4xL8sP',
+      'Rd4pZ4qT2wY7sM3xN5vS',
+    ]);
+    const returnedSum = result.transactions.reduce((sum, t) => sum + Math.abs(t.amount ?? 0), 0);
+    expect(result.type_specific_data?.total_refunded).toBe(returnedSum);
+    expect(returnedSum).toBe(70);
+  });
+
+  test('the internal `income` flag is never returned, and is not a selectable field', async () => {
+    const all = await cacheTools().getTransactions({ ...RANGE, fields: ['all'], limit: 500 });
+    expect(all.transactions.some((t) => 'income' in t)).toBe(false);
+    const asked = await cacheTools().getTransactions({ ...RANGE, fields: ['income'] });
+    expect(asked._field_warning).toContain('income');
+  });
+});
 
 describe('transaction_type parity across modes (#843)', () => {
   test('live mode accepts exactly the values the shared rule table defines', () => {

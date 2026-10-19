@@ -17,7 +17,7 @@
  * currency fields the GraphQL row does not carry.
  */
 
-import { getCategoryName, isIncomeCategory, isTransferCategory } from '../utils/categories.js';
+import { CATEGORY_NAMES, isIncomeCategory, isTransferCategory } from '../utils/categories.js';
 import { getTransactionDisplayName, type Transaction } from '../models/index.js';
 import type { TransactionNode } from '../core/graphql/queries/transactions.js';
 
@@ -47,8 +47,13 @@ export interface TypeRuleRow {
  * Cache-mode adapter. `kind` comes from the booleans processTransaction
  * derives from the document's `type` string; a document with neither flag is
  * a REGULAR row. `category_id: ''` (what the decoder writes on income and
- * transfer rows) is folded into `null`, and the category name is resolved the
- * same way the row's `category_name` field is.
+ * transfer rows) is folded into `null`.
+ *
+ * The category name is the user's name for the id, else the Plaid-taxonomy
+ * name, else `null` — deliberately NOT getCategoryName(), which title-cases or
+ * echoes an unknown id. That fallback would let `hsa_eligible` match keywords
+ * inside a raw id in cache mode only, where live mode (names.get() ?? null)
+ * sees nothing (#854 review).
  */
 export function cacheTypeRuleRow(
   txn: Transaction,
@@ -64,7 +69,12 @@ export function cacheTypeRuleRow(
           : 'regular',
     amount: txn.amount,
     category_id: categoryId,
-    category_name: categoryId ? getCategoryName(categoryId, userCategoryMap) : null,
+    category_name: categoryId
+      ? (userCategoryMap.get(categoryId) ??
+        CATEGORY_NAMES[categoryId] ??
+        CATEGORY_NAMES[categoryId.toLowerCase()] ??
+        null)
+      : null,
     name: getTransactionDisplayName(txn),
     tag_ids: txn.tag_ids ?? [],
   };
@@ -98,6 +108,13 @@ export function liveTypeRuleRow(n: TransactionNode, names: Map<string, string>):
  * taxonomy ids such as `income_wages` still appear on old documents; on live
  * rows (opaque ids) the `kind === 'regular'` test the rules also apply is what
  * keeps income and transfers out.
+ *
+ * Known cache-only widening, which live mode cannot mirror: isIncomeCategory /
+ * isTransferCategory match any id CONTAINING income, payroll, salary, wage,
+ * transfer or payment. A REGULAR cache row still carrying such a legacy id
+ * (the #824 clear only fires on income/transfer-typed rows) is therefore not
+ * in a spending category in cache mode, while its live twin, with an opaque
+ * id, is. Opaque Firestore ids do not contain those words in practice.
  */
 function inSpendingCategory(row: TypeRuleRow): boolean {
   if (!row.category_id) return false;
@@ -145,6 +162,13 @@ export const TRANSACTION_TYPE_RULES = {
    * live mode used to count paychecks as refunds), never a transfer, never
    * uncategorized. No merchant-name keyword is required: a merchant refund
    * usually carries the merchant's own name.
+   *
+   * Why a category is required: without one, a negative REGULAR row is any
+   * money coming in — a peer payment, a deposit, a manual adjustment — and
+   * nothing on the row tells a refund apart from those. The category is the
+   * only signal that the money came back against spending. The cost is real:
+   * a refund not yet categorized is not counted until it is. `credits` admits
+   * uncategorized rows because its merchant-name keyword is the signal there.
    */
   refunds: (row: TypeRuleRow) =>
     row.kind === 'regular' && row.amount < 0 && inSpendingCategory(row),
@@ -159,10 +183,7 @@ export const TRANSACTION_TYPE_RULES = {
   credits: (row: TypeRuleRow) =>
     row.kind === 'regular' &&
     row.amount < 0 &&
-    !(
-      row.category_id &&
-      (isIncomeCategory(row.category_id) || isTransferCategory(row.category_id))
-    ) &&
+    (!row.category_id || inSpendingCategory(row)) &&
     includesAny(row.name, CREDIT_NAME_KEYWORDS),
 
   /**
@@ -182,6 +203,16 @@ export const TRANSACTION_TYPE_RULES = {
 } as const satisfies Record<string, (row: TypeRuleRow) => boolean>;
 
 export type SharedTransactionType = keyof typeof TRANSACTION_TYPE_RULES;
+
+/**
+ * The rules that read `category_name`. Only these make a mode resolve category
+ * names (a categories round trip in live mode); for the others both adapters
+ * are handed an empty name map, so `category_name` is null and unread. A new
+ * rule that reads the name must be added here, or it sees null in both modes
+ * (agreeing, and wrong); the parity test catches that only through a fixture
+ * row the rule should match by name (#854 review).
+ */
+export const RULES_READING_CATEGORY_NAME: ReadonlySet<string> = new Set(['hsa_eligible']);
 
 export const SHARED_TRANSACTION_TYPES = Object.keys(
   TRANSACTION_TYPE_RULES

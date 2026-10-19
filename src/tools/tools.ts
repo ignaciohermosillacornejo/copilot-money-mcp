@@ -85,6 +85,7 @@ import { computeTotalReturnPercent, roundAmount } from '../utils/round.js';
 import { pLimit } from '../utils/concurrency.js';
 import { getCategoryName, isTransferCategory, isKnownPlaidCategory } from '../utils/categories.js';
 import {
+  RULES_READING_CATEGORY_NAME,
   TRANSACTION_TYPE_RULES,
   cacheTypeRuleRow,
   type SharedTransactionType,
@@ -198,12 +199,23 @@ const INVESTMENT_PRICE_KNOWN_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Decoded transaction fields that exist for this server's own use and are never
+ * returned to a caller. `income` (#825) is derived from the document `type` so
+ * the shared transaction_type rules can tell an INCOME row apart in cache mode;
+ * live rows carry the same fact as `type`, which the cache row does not have.
+ * Surfacing `income` would add a cache-only field name, the cross-mode
+ * divergence #843 removed, so it is stripped from every row and is not a
+ * selectable name (#854 review).
+ */
+const INTERNAL_TRANSACTION_FIELDS: ReadonlySet<string> = new Set(['income']);
+
+/**
  * Every selectable field name on a get_transactions row: the Transaction
  * document schema keys plus the two enrichment fields synthesized at read
  * time. Derived from the zod schema so model drift cannot desync this set.
  */
 export const TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set([
-  ...Object.keys(TransactionSchema.shape),
+  ...Object.keys(TransactionSchema.shape).filter((k) => !INTERNAL_TRANSACTION_FIELDS.has(k)),
   'category_name',
   'normalized_merchant',
 ]);
@@ -752,7 +764,8 @@ export class CopilotMoneyTools {
   > {
     const excludedCategoryIds = await this.getExcludedCategoryIds();
     return Promise.all(
-      transactions.map(async (txn) => ({
+      // `income` is internal — see INTERNAL_TRANSACTION_FIELDS.
+      transactions.map(async ({ income: _internal, ...txn }) => ({
         ...txn,
         category_name: txn.category_id
           ? await this.resolveCategoryName(txn.category_id)
@@ -1028,21 +1041,6 @@ export class CopilotMoneyTools {
     }
 
     // ============================================
-    // MODE 3: Special transaction types
-    // ============================================
-    let typeSpecificData: Record<string, unknown> | undefined;
-
-    if (transaction_type) {
-      const result = this._filterByTransactionType(
-        transactions,
-        transaction_type,
-        await this.getUserCategoryMap()
-      );
-      transactions = result.transactions;
-      typeSpecificData = result.typeSpecificData;
-    }
-
-    // ============================================
     // MODE 4: Tag filter
     // ============================================
     if (tag) {
@@ -1123,6 +1121,29 @@ export class CopilotMoneyTools {
           txn.country?.toLowerCase() === countryLower ||
           txn.country?.toLowerCase().includes(countryLower)
       );
+    }
+
+    // ============================================
+    // MODE 3: Special transaction types
+    // ============================================
+    // Runs LAST among the filters, so `type_specific_data` totals are computed
+    // over exactly the rows this call returns (before pagination). It used to
+    // run before the exclusion filters, so totals summed rows the pipeline
+    // then dropped — excluded rows, transfers, and split parents counted
+    // against their own children (#854 review). Only the rules that read a
+    // category name pay for the name map.
+    let typeSpecificData: Record<string, unknown> | undefined;
+
+    if (transaction_type) {
+      const result = this._filterByTransactionType(
+        transactions,
+        transaction_type,
+        RULES_READING_CATEGORY_NAME.has(transaction_type)
+          ? await this.getUserCategoryMap()
+          : new Map<string, string>()
+      );
+      transactions = result.transactions;
+      typeSpecificData = result.typeSpecificData;
     }
 
     const totalCount = transactions.length;
