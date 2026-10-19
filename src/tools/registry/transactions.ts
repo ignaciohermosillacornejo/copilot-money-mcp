@@ -324,8 +324,9 @@ export const addTransactionToRecurringTool = defineTool({
       "Copilot's auto-detection missed a rent/subscription/etc. charge that should be grouped " +
       'with a recurring. All four IDs are required (transaction_id, account_id, item_id, ' +
       'recurring_id). The transaction must already exist — create_transaction followed by ' +
-      "add_transaction_to_recurring is the manual flow. Copilot also sets the row's category " +
-      "to the recurring's. Returns the updated transaction with its recurring_id and category.",
+      'add_transaction_to_recurring is the manual flow. Refuses a known split parent. ' +
+      "Copilot also sets the row's category to the recurring's. Returns the updated " +
+      'transaction with its recurring_id and category.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -375,8 +376,9 @@ export const splitTransactionTool = defineTool({
       'reference it via parent_transaction_id); it reappears as an ordinary row once its ' +
       'children are all deleted. A split cannot be undone: there is no unsplit, ' +
       'and deleting the parent corrupts the balance (delete_transaction refuses it) — delete ' +
-      'the children to remove the split. Splits accept no per-split ' +
-      'tags/notes/reviewed — set those via update_transaction on each child afterwards.',
+      'the children to remove the split; a known split parent or child is not split. Splits ' +
+      'accept no per-split tags/notes/reviewed — set those via update_transaction on each ' +
+      'child afterwards.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -449,7 +451,8 @@ export const updateTransactionTool = defineTool({
       'category_id, note, tag_ids, type, reviewed, date, or amount — only the fields you ' +
       'pass change. note="" clears the note; tag_ids=[] clears all tags. category_id cannot ' +
       'be combined with type INCOME or INTERNAL_TRANSFER (those clear the category ' +
-      'server-side) — pass the type alone, or REGULAR to keep/set a category. If the ' +
+      'server-side) — pass the type alone, or REGULAR to keep/set a category. amount, date ' +
+      'and type edits on a known split parent are refused (balance effect unverified). If the ' +
       'transaction cannot be resolved locally (outside the resolution window), also pass ' +
       'account_id and item_id from a live read. To edit MANY transactions use ' +
       'update_transactions (an array of these same edits in one call); for bulk review-only ' +

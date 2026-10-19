@@ -116,6 +116,8 @@ function stubLiveDb(overrides: {
         hit: false,
       }),
     }),
+    // The split-parent check (#836): no cached row is a split child here.
+    hasSplitChildOf: () => false,
     lookupTransactionNodes,
     lookupTransactionMeta: () => new Map(),
     getTransactions,
@@ -161,7 +163,7 @@ afterEach(() => {
 });
 
 describe('splitTransaction parent resolution — live mode', () => {
-  test('window-cache hit: no live fetch; defaults come from the cached node', async () => {
+  test('window-cache hit: defaults come from the cached node; the only fetch is the split-parent check', async () => {
     const client = createMockGraphQLClient(SPLIT_RESPONSE);
     const { liveDb, getTransactions } = stubLiveDb({
       cachedNodes: [node('parent-1', 120, '2025-10-05', 'Cached Parent')],
@@ -176,7 +178,9 @@ describe('splitTransaction parent resolution — live mode', () => {
     });
 
     expect(result.success).toBe(true);
-    expect(getTransactions).toHaveBeenCalledTimes(0);
+    // One window load, by the split-parent check (#836); the parent itself
+    // resolves from the cache.
+    expect(getTransactions).toHaveBeenCalledTimes(1);
     const sent = (client._calls[0]!.variables as any).input;
     expect(sent[0].name).toBe('Cached Parent');
     expect(sent[0].date).toBe('2025-10-05');
@@ -266,8 +270,11 @@ describe('splitTransaction parent resolution — live mode', () => {
     });
     expect(ok.success).toBe(true);
 
+    // A fresh instance: the first split recorded parent-1, and this one would
+    // otherwise be refused as a re-split (#836) before the sum check runs.
+    const fresh = new CopilotMoneyTools(makeDb([staleLocalRow]), client, liveDb);
     await expect(
-      tools.splitTransaction({
+      fresh.splitTransaction({
         transaction_id: 'parent-1',
         account_id: 'acct-P',
         item_id: 'item-P',

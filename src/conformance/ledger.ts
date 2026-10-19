@@ -1248,6 +1248,50 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       '(the session record is never retired), and the round-trip smoke leaves the parent ' +
       'behind. Nothing re-checks it.',
   },
+  // Split targets whose server-side effect nobody has observed (#836). Each
+  // could count a split parent's amount twice, and a wrong guess corrupts a
+  // balance, so every one is REFUSED client-side on a known split parent (or
+  // child) rather than probed. Settling one means a round-trip on a throwaway
+  // manual transaction, reading the account balance before and after.
+  {
+    surface: 'Mutation.editTransaction:splitParentBalanceFields',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      "UNKNOWN: what changing a split parent's amount, date or type does to the account " +
+      "balance. The children already replaced the parent's amount, so the balance could " +
+      'move twice. update_transaction(s) refuse those edits on a known split parent; name, ' +
+      'category, note, tags and reviewed stay allowed (no balance effect). Never probed.',
+  },
+  {
+    surface: 'Mutation.addTransactionToRecurring:splitParent',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'UNKNOWN: whether a recurring that a split parent joins counts the parent and its ' +
+      'children, the same money twice. add_transaction_to_recurring refuses a known split ' +
+      'parent. Never probed.',
+  },
+  {
+    surface: 'Mutation.splitTransaction:resplit',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'UNKNOWN: what splitting an existing split parent again does to its children and to ' +
+      'the account balance. split_transaction refuses a known split parent. Never probed.',
+  },
+  {
+    surface: 'Mutation.splitTransaction:splitChild',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'UNKNOWN: whether a split child can itself be split, and what that does to the ' +
+      'balance. split_transaction refuses a known split child. Never probed.',
+  },
   {
     surface: 'FirestoreTransaction.parent_transaction_id:survivesSoftDelete',
     kind: 'response-shape',

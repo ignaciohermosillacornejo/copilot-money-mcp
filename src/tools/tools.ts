@@ -567,6 +567,19 @@ const EDIT_MUTABLE_KEYS = [
 ] as const;
 
 /**
+ * Edit fields whose effect on a SPLIT PARENT is unverified (#836): they can
+ * move the account balance, and the parent's amount is already replaced by its
+ * children's, so the balance might move twice. Refused on a known split parent;
+ * name, category, note, tags and reviewed stay editable.
+ */
+const SPLIT_PARENT_REFUSED_EDIT_KEYS = ['amount', 'date', 'type'] as const;
+
+/** The SPLIT_PARENT_REFUSED_EDIT_KEYS an edit sets. */
+function splitParentRefusedKeys(edit: TransactionEdit): string[] {
+  return SPLIT_PARENT_REFUSED_EDIT_KEYS.filter((k) => edit[k] !== undefined);
+}
+
+/**
  * Every accepted key. The routing ids (account_id/item_id) address the write —
  * they are not edits, which is why they sit outside EDIT_MUTABLE_KEYS.
  */
@@ -808,6 +821,56 @@ export class CopilotMoneyTools {
   private isRecordedSplitParent(id: string): boolean {
     // mutation-guard: split-parent records survive a restart
     return this.knownSplitParents.has(id) || (this.splitParentStore?.has(id) ?? false);
+  }
+
+  /**
+   * Refuse an edit of amount, date or type on a known split parent (#836).
+   * Copilot's effect there is unverified: the children already replaced the
+   * parent's amount on the account, so a change to the parent could move the
+   * balance a second time. The evidence is splitParentEvidence's, so the same
+   * sources that make delete_transaction refuse a parent apply. Edits that set
+   * none of those fields are not checked and cost nothing. `loadWindow` lets a
+   * batch share one window load.
+   */
+  private async refuseSplitParentBalanceEdit(
+    edit: TransactionEdit,
+    label: string,
+    loadWindow?: () => Promise<TransactionNode[]>
+  ): Promise<void> {
+    const keys = splitParentRefusedKeys(edit);
+    if (keys.length === 0) return;
+    const evidence = await this.splitParentEvidence(edit.transaction_id, loadWindow);
+    // mutation-guard: a split parent's amount, date and type are not edited
+    if (evidence.isParent) {
+      throw new Error(
+        `${label}: transaction ${edit.transaction_id} is a split parent, and changing its ` +
+          `${keys.join(', ')} is refused. What Copilot does to the account balance when a ` +
+          `split parent's amount, date or type changes is unverified, and it could move the ` +
+          `balance twice: once for the parent and again through its children. Edit the child ` +
+          `transactions instead. The parent's name, category, note, tags and reviewed state ` +
+          `can still be changed.`
+      );
+    }
+  }
+
+  /**
+   * One write-resolve window load shared by every caller of the returned
+   * function (#836): a batch that checks many ids, or a split that both checks
+   * its target and resolves it. A failed load rejects every caller alike.
+   */
+  private sharedWindowLoad(): () => Promise<TransactionNode[]> {
+    let pending: Promise<TransactionNode[]> | null = null;
+    return () => {
+      pending ??= this.loadWriteResolveWindow();
+      return pending;
+    };
+  }
+
+  /** The write-resolve window's rows ([] with no live layer). Rejects if the fetch fails. */
+  private async loadWriteResolveWindow(): Promise<TransactionNode[]> {
+    if (!this.liveDb) return [];
+    const { from, to } = CopilotMoneyTools.writeResolveWindow();
+    return (await this.liveDb.getTransactions({ from, to })).rows;
   }
 
   /**
@@ -3306,7 +3369,10 @@ export class CopilotMoneyTools {
    * stale-first LevelDB read it replaces; the server remains the final
    * enforcer of the sum.
    */
-  private async resolveParentSnapshot(id: string): Promise<{
+  private async resolveParentSnapshot(
+    id: string,
+    loadWindow: () => Promise<TransactionNode[]> = () => this.loadWriteResolveWindow()
+  ): Promise<{
     snapshot: { amount: number; date: string; name?: string } | null;
     liveWindowMonths: number | null;
   }> {
@@ -3319,7 +3385,7 @@ export class CopilotMoneyTools {
         liveWindowMonths: null,
       };
     }
-    const { from, to, lookbackMonths } = CopilotMoneyTools.writeResolveWindow();
+    const { lookbackMonths } = CopilotMoneyTools.writeResolveWindow();
     const cached = this.liveDb.lookupTransactionNodes([id]).get(id);
     if (cached) {
       return {
@@ -3327,14 +3393,13 @@ export class CopilotMoneyTools {
         liveWindowMonths: lookbackMonths,
       };
     }
-    const live = await this.liveDb.getTransactions({ from, to });
+    const liveRows = await loadWindow();
     // Cache-first: the window cache holds same-month future-dated rows the
     // date-filtered return value misses (#513). Rows-fallback: unlike the
     // append-only meta index resolveTransactionMeta reads, the window cache
     // LRU-evicts per ingest, so a very large window can evict early months
     // before the fetch returns — the in-hand rows are immune to that.
-    const n =
-      this.liveDb.lookupTransactionNodes([id]).get(id) ?? live.rows.find((r) => r.id === id);
+    const n = this.liveDb.lookupTransactionNodes([id]).get(id) ?? liveRows.find((r) => r.id === id);
     if (!n) return { snapshot: null, liveWindowMonths: lookbackMonths };
     return {
       snapshot: { amount: n.amount, date: n.date, name: n.name },
@@ -3720,6 +3785,7 @@ export class CopilotMoneyTools {
 
     // Per-field validation (runs BEFORE any write for atomicity).
     await this.validateEditFields(args, 'update_transaction');
+    await this.refuseSplitParentBalanceEdit(args, 'update_transaction');
 
     try {
       const result = await editTransaction(client, {
@@ -3856,6 +3922,12 @@ export class CopilotMoneyTools {
     // --- Phase 3: per-field validation for every edit, still before any write ---
     for (const [i, edit] of edits.entries()) {
       await this.validateEditFields(edit, label(i));
+    }
+    // Split parents (#836): an amount/date/type edit of one refuses the whole
+    // batch, before any write. One window load serves every edit checked.
+    const loadWindow = this.sharedWindowLoad();
+    for (const [i, edit] of edits.entries()) {
+      await this.refuseSplitParentBalanceEdit(edit, label(i), loadWindow);
     }
 
     // --- Phase 4: write ---
@@ -4294,7 +4366,8 @@ export class CopilotMoneyTools {
    * local rows, which may be stale.
    */
   private async splitParentEvidence(
-    id: string
+    id: string,
+    loadWindow: () => Promise<TransactionNode[]> = () => this.loadWriteResolveWindow()
   ): Promise<{ isParent: boolean; parentOfTarget: string | null }> {
     // mutation-guard: a fresh row never retires a split record
     if (this.isRecordedSplitParent(id)) return { isParent: true, parentOfTarget: null };
@@ -4306,8 +4379,7 @@ export class CopilotMoneyTools {
 
     let fetched: TransactionNode[] = [];
     try {
-      const { from, to } = CopilotMoneyTools.writeResolveWindow();
-      fetched = (await this.liveDb.getTransactions({ from, to })).rows;
+      fetched = await loadWindow();
     } catch {
       // Best-effort: proceed on what the caches and the record hold.
     }
@@ -4426,6 +4498,19 @@ export class CopilotMoneyTools {
     validateDocId(account_id, 'account_id');
     validateDocId(item_id, 'item_id');
     validateDocId(recurring_id, 'recurring_id');
+
+    // Split parents (#836): whether the recurring then counts the parent's
+    // amount as well as its children's is unverified. Refused before sending.
+    const evidence = await this.splitParentEvidence(transaction_id);
+    // mutation-guard: a split parent is not linked to a recurring
+    if (evidence.isParent) {
+      throw new Error(
+        `add_transaction_to_recurring: transaction ${transaction_id} is a split parent and is ` +
+          `not linked. What Copilot does when a split parent joins a recurring is unverified: ` +
+          `the recurring could count the parent's amount on top of its children's, the same ` +
+          `money twice. Link the child transactions instead.`
+      );
+    }
 
     try {
       const tx = await gqlAddTransactionToRecurring(client, {
@@ -4606,6 +4691,31 @@ export class CopilotMoneyTools {
       await this.validateCategoryId(categoryId);
     }
 
+    // Re-splitting a split parent, or splitting a split child (#836): what the
+    // server does to the account balance is unverified for both, and either
+    // could count the same money twice. Refused before anything is sent.
+    // One window load serves this check and the parent resolution below.
+    const loadWindow = this.sharedWindowLoad();
+    const splitEvidence = await this.splitParentEvidence(transaction_id, loadWindow);
+    // mutation-guard: a split parent is not split again
+    if (splitEvidence.isParent) {
+      throw new Error(
+        `split_transaction: transaction ${transaction_id} is already a split parent and is not ` +
+          `split again. What Copilot does to the account balance on a re-split is unverified, ` +
+          `and it could move the balance twice. Split one of its children instead, or edit the ` +
+          `children's amounts and categories. There is no unsplit operation.`
+      );
+    }
+    // mutation-guard: a split child is not split
+    if (splitEvidence.parentOfTarget) {
+      throw new Error(
+        `split_transaction: transaction ${transaction_id} is a split child (of ` +
+          `${splitEvidence.parentOfTarget}) and is not split. What Copilot does to the account ` +
+          `balance when a split child is split again is unverified, and it could count the ` +
+          `amount twice. Edit the child's amount and category instead.`
+      );
+    }
+
     // Resolve the parent's CONTENT (amount for the sum check, name/date for
     // defaults) — live-first via the window cache / windowed fetch; local
     // cache only in degraded (no-liveDb) mode. Routing ids are NOT resolved
@@ -4616,8 +4726,10 @@ export class CopilotMoneyTools {
     // when a split needs a parent-derived default: with an explicit name and
     // date on every split, nothing else is read from the snapshot and the
     // amount-sum check is deferred to the server (which enforces it anyway).
-    const { snapshot: parentTxn, liveWindowMonths } =
-      await this.resolveParentSnapshot(transaction_id);
+    const { snapshot: parentTxn, liveWindowMonths } = await this.resolveParentSnapshot(
+      transaction_id,
+      loadWindow
+    );
     if (!parentTxn && splits.some((s) => s.name === undefined || s.date === undefined)) {
       throw new Error(
         CopilotMoneyTools.transactionsNotFoundMessage([transaction_id], liveWindowMonths) +

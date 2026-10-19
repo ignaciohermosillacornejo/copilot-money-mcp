@@ -540,6 +540,83 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/unit/delete-split-parent.test.ts',
   },
   {
+    name: "a split parent's amount, date and type are not edited",
+    file: 'src/tools/tools.ts',
+    invariant:
+      "A split parent's amount is already replaced on the account by its children's. What " +
+      "Copilot does to the balance when the parent's amount, date or type changes is " +
+      'unverified, and it could move the balance twice, so update_transaction(s) refuse those ' +
+      'edits on a known split parent before anything is sent (#836).',
+    mutation: {
+      kind: 'replace',
+      find:
+        "    // mutation-guard: a split parent's amount, date and type are not edited\n" +
+        '    if (evidence.isParent) {',
+      with:
+        "    // mutation-guard: a split parent's amount, date and type are not edited\n" +
+        '    if (false) {',
+    },
+    expectFailingTests: [
+      'edit is refused, nothing sent',
+      'update_transactions: one amount edit on a parent refuses the whole batch, nothing sent',
+    ],
+    expectFails: 'tests/unit/split-target-refusal.test.ts',
+  },
+  {
+    name: 'a split parent is not linked to a recurring',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'Whether a recurring counts a split parent on top of its children is unverified; linking ' +
+      'one could count the same money twice, so add_transaction_to_recurring refuses a known ' +
+      'split parent before anything is sent (#836).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: a split parent is not linked to a recurring\n' +
+        '    if (evidence.isParent) {',
+      with:
+        '    // mutation-guard: a split parent is not linked to a recurring\n' + '    if (false) {',
+    },
+    expectFailingTests: ['a parent is refused, nothing sent'],
+    expectFails: 'tests/unit/split-target-refusal.test.ts',
+  },
+  {
+    name: 'a split parent is not split again',
+    file: 'src/tools/tools.ts',
+    invariant:
+      "What Copilot does to the balance on a re-split is unverified, and the parent's amount " +
+      'could be counted twice, so split_transaction refuses a known split parent (#836).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: a split parent is not split again\n' +
+        '    if (splitEvidence.isParent) {',
+      with: '    // mutation-guard: a split parent is not split again\n' + '    if (false) {',
+    },
+    expectFailingTests: [
+      're-splitting a known parent is refused, nothing sent',
+      'a parent this server just split is refused a second split',
+    ],
+    expectFails: 'tests/unit/split-target-refusal.test.ts',
+  },
+  {
+    name: 'a split child is not split',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'What Copilot does to the balance when a split child is split again is unverified, and ' +
+      'the amount could be counted twice, so split_transaction refuses a known split child ' +
+      '(#836).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: a split child is not split\n' +
+        '    if (splitEvidence.parentOfTarget) {',
+      with: '    // mutation-guard: a split child is not split\n' + '    if (false) {',
+    },
+    expectFailingTests: ['splitting a split child is refused, nothing sent'],
+    expectFails: 'tests/unit/split-target-refusal.test.ts',
+  },
+  {
     name: 'a fresh row never retires a split record',
     file: 'src/tools/tools.ts',
     invariant:

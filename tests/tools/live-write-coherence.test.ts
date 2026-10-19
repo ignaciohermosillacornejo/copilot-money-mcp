@@ -404,6 +404,9 @@ const CASES: Record<string, Case> = {
         parent_transaction_id: TX_SPLIT_PARENT,
       });
     },
+    // The split-parent check (#836) loads the write-resolve window, which also
+    // resolves the parent.
+    expectedWriteFetches: writeResolveWindowMonthCount(),
   },
 
   update_transaction: {
@@ -439,6 +442,9 @@ const CASES: Record<string, Case> = {
         parent_transaction_id: null,
       });
     },
+    // It edits date and amount, so the split-parent check (#836) loads the
+    // write-resolve window.
+    expectedWriteFetches: writeResolveWindowMonthCount(),
   },
 
   update_transactions: {
@@ -476,6 +482,8 @@ const CASES: Record<string, Case> = {
         tag_ids: [TAG_ID],
       });
     },
+    // One edit sets type, so the split-parent check (#836) loads the window once.
+    expectedWriteFetches: writeResolveWindowMonthCount(),
   },
 
   add_transaction_to_recurring: {
@@ -497,6 +505,8 @@ const CASES: Record<string, Case> = {
         category_id: CAT_NEW,
       });
     },
+    // The split-parent check (#836) loads the write-resolve window.
+    expectedWriteFetches: writeResolveWindowMonthCount(),
   },
 
   review_transactions: {
@@ -751,7 +761,7 @@ const hiddenEditEcho: MockResponsesByOp = {
 /** Every transaction write tool that edits an existing row, with args targeting the hidden parent. */
 const EDIT_OF_UNCACHED_ROW: Record<
   string,
-  { mocks: MockResponsesByOp; args: Record<string, unknown> }
+  { mocks: MockResponsesByOp; args: Record<string, unknown>; expectedWriteFetches?: number }
 > = {
   update_transaction: {
     mocks: hiddenEditEcho,
@@ -770,6 +780,8 @@ const EDIT_OF_UNCACHED_ROW: Record<
       },
     },
     args: { ...hiddenRouting, recurring_id: RECURRING_ID },
+    // The split-parent check (#836) loads the write-resolve window.
+    expectedWriteFetches: writeResolveWindowMonthCount(),
   },
   review_transactions: {
     mocks: {
@@ -821,7 +833,7 @@ describe('an edit of an uncached row never inserts it (split parents)', () => {
       // from the cache beside the rows it was split into.
       const after = await read();
       expect(after.transactions.map((r) => r.transaction_id)).not.toContain(TX_HIDDEN_PARENT);
-      expect(fetches()).toBe(2);
+      expect(fetches()).toBe(2 + (c.expectedWriteFetches ?? 0));
     }
   );
 });
@@ -1236,7 +1248,7 @@ describe('a malformed returned row is never cached (#864 review)', () => {
 
       const after = await read();
       expect(after._cache_hit).toBe(false);
-      expect(fetches()).toBe(2);
+      expect(fetches()).toBe(2 + (c.expectedWriteFetches ?? 0));
     }
   );
 
@@ -1258,7 +1270,7 @@ describe('a malformed returned row is never cached (#864 review)', () => {
 
       const after = await read();
       expect(after._cache_hit).toBe(false);
-      expect(fetches()).toBe(2);
+      expect(fetches()).toBe(2 + (CASES.update_transaction!.expectedWriteFetches ?? 0));
       // Served from the refetch: the row is present, never silently missing.
       expect(after.transactions.some((r) => r.transaction_id === TX_UPDATE)).toBe(true);
     }

@@ -987,7 +987,9 @@ describe('addTransactionToRecurring', () => {
         category_id: 'cat-food',
       },
     ];
-    (mockDb as any)._allCollectionsLoaded = true;
+    // A fresh full load: the split-parent check (#836) reads the local cache,
+    // and a stale one would be re-decoded from the fake path.
+    mockDb._markLoadedForTesting();
   });
 
   test('links a transaction absent from the local cache — ids forwarded verbatim, no lookup', async () => {
@@ -1356,7 +1358,9 @@ describe('splitTransaction', () => {
       'cat-food',
       'cat-travel',
     ]);
-    (mockDb as any)._allCollectionsLoaded = true;
+    // A fresh full load: the split-parent check (#836) reads the local cache,
+    // and a stale one would be re-decoded from the fake path.
+    mockDb._markLoadedForTesting();
   });
 
   test('dispatches SplitTransaction with mapped input array and returns parent + children', async () => {
