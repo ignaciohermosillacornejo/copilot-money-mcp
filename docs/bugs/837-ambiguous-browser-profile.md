@@ -4,7 +4,7 @@ title: An ambiguous --browser-profile silently picked one profile — on Edge, o
 class: identity-resolution
 status: fixed
 detected: code-review  # maintainer review of the merged fork PR #837, reasoning about Edge's built-in profile names
-fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/837 (follow-up PR "fix/837-followups")
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/853
 issue: none — found in review and fixed directly
 date: 2026-10-18
 ---
