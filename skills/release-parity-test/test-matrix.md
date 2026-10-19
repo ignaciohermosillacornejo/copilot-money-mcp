@@ -10,8 +10,9 @@ three sources for the same fact:
 
 **Committed file, PII rules apply.** Record outcomes as PASS / FAIL #issue / SKIP
 with a reason, or `not run` for a case never run (see How to extend for partial
-results and findings). Never write a real balance, amount, account, merchant or place
-name here; the per-run figures go in the local report under `docs/superpowers/`.
+results and findings). Never write a real balance, amount, account, merchant or
+place name here; the per-run figures go in the local report under
+`docs/superpowers/`.
 
 ## How to extend
 
