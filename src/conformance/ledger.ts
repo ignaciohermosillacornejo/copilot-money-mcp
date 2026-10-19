@@ -952,8 +952,8 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'reset. Such a row never moves the balance and deleting it credits nothing back; a row ' +
       'created after the reset and then moved before it keeps its original effect for good. ' +
       'Copilot behaviour, not ours. create_transaction and update_transaction(date) state it ' +
-      'in their descriptions so a caller checking a balance is not surprised. Nothing ' +
-      're-checks it.',
+      'in their descriptions; the delete and amount halves are in docs/tools-by-mode.md ' +
+      '(Known caveats), for the schema budget. Nothing re-checks it.',
   },
   {
     surface: 'AccountNode.hiddenAccounts:returnedUnfiltered',

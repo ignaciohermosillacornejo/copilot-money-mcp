@@ -63,6 +63,8 @@ const RECURRING_ID = 'yU7iO4pA1sD8fG5hJ2kL';
 const TX_UPDATE = 'aB3xK9pQ2mN7vR4tY8wZ';
 const TX_BATCH_1 = 'cD5yL1rS4oP9wT6uZ0xA';
 const TX_BATCH_2 = 'eF7zM3tU6qR1yV8wB2zC';
+/** Seeded as an INTERNAL_TRANSFER, so a retype must clear the old flag too. */
+const TX_BATCH_3 = 'eG8aN4uV7rS2zW9xC3aD';
 const TX_RECURRING = 'gH9aN5vW8sT3aX0yD4bE';
 const TX_REVIEW = 'iJ1bO7xY0uV5cZ2aF6dG';
 const TX_BULK_1 = 'kL3cP9zA2wX7eB4cH8fI';
@@ -117,7 +119,9 @@ const SEED: TransactionNode[] = [
   TX_BULK_2,
   TX_DELETE,
   TX_SPLIT_PARENT,
-].map((id) => seedNode(id));
+]
+  .map((id) => seedNode(id))
+  .concat([seedNode(TX_BATCH_3, { type: 'INTERNAL_TRANSFER', categoryId: '' })]);
 
 /**
  * A row as a MUTATION returns it: the mutations' TransactionFields fragment
@@ -256,6 +260,9 @@ function setup(mutationMocks: MockResponsesByOp) {
     amount: n.amount,
     date: n.date,
     name: n.name,
+    // The decoder's type-derived flags (#864 review).
+    ...(n.type === 'INTERNAL_TRANSFER' ? { internal_transfer: true } : {}),
+    ...(n.type === 'INCOME' ? { income: true } : {}),
   }));
   (db as any)._allCollectionsLoaded = true;
   (db as any)._cacheLoadedAt = Date.now();
@@ -447,10 +454,13 @@ const CASES: Record<string, Case> = {
           note: 'batch note',
           tag_ids: [TAG_ID],
         },
+        // transfer → income: clears one derived flag and sets the other.
+        { ...routing, transaction_id: TX_BATCH_3, type: 'INCOME' as TransactionType },
       ],
     },
     verify: (rows) => {
       expect(rows.get(TX_BATCH_1)).toMatchObject({ type: 'INTERNAL_TRANSFER', category_id: null });
+      expect(rows.get(TX_BATCH_3)).toMatchObject({ type: 'INCOME', category_id: null });
       expect(rows.get(TX_BATCH_2)).toMatchObject({
         category_id: CAT_NEW,
         user_reviewed: false,
@@ -503,8 +513,10 @@ const CASES: Record<string, Case> = {
       BulkEditTransactions: {
         bulkEditTransactions: {
           updated: [TX_BULK_1, TX_BULK_2].map((id) => ({
+            // A type change: the server clears the category (verified).
             ...mutationNode(seedById(id), {
-              categoryId: CAT_NEW,
+              categoryId: '',
+              type: 'INTERNAL_TRANSFER',
               isReviewed: false,
               tags: [TAG_NODE],
             }),
@@ -516,14 +528,15 @@ const CASES: Record<string, Case> = {
     },
     args: {
       rows: [TX_BULK_1, TX_BULK_2].map((id) => ({ ...routing, transaction_id: id })),
-      category_id: CAT_NEW,
+      type: 'INTERNAL_TRANSFER',
       reviewed: false,
       add_tag_ids: [TAG_ID],
     },
     verify: (rows) => {
       for (const id of [TX_BULK_1, TX_BULK_2]) {
         expect(rows.get(id)).toMatchObject({
-          category_id: CAT_NEW,
+          type: 'INTERNAL_TRANSFER',
+          category_id: null,
           user_reviewed: false,
           tag_ids: [TAG_ID],
         });
@@ -636,7 +649,7 @@ const LOCAL_MIRROR: Record<string, { mirrored: string[]; removed: string[] }> = 
   split_transaction: { mirrored: [], removed: [TX_SPLIT_PARENT, TX_CHILD_1, TX_CHILD_2] },
   delete_transaction: { mirrored: [], removed: [TX_DELETE] },
   update_transaction: { mirrored: [TX_UPDATE], removed: [] },
-  update_transactions: { mirrored: [TX_BATCH_1, TX_BATCH_2], removed: [] },
+  update_transactions: { mirrored: [TX_BATCH_1, TX_BATCH_2, TX_BATCH_3], removed: [] },
   add_transaction_to_recurring: { mirrored: [TX_RECURRING], removed: [] },
   review_transactions: { mirrored: [TX_REVIEW], removed: [] },
   bulk_edit_transactions: { mirrored: [TX_BULK_1, TX_BULK_2], removed: [] },
@@ -673,14 +686,19 @@ describe('the local cache agrees with the server after a write (#848)', () => {
             value: norm(server[liveKey]),
           });
         }
-        // Derived: internal_transfer is the local counterpart of the live type.
-        // A seeded local row may omit it (false); the patch must set it when a
-        // write changes the type.
-        expect({ id, field: 'internal_transfer', value: mine.internal_transfer === true }).toEqual({
-          id,
-          field: 'internal_transfer',
-          value: server.type === 'INTERNAL_TRANSFER',
-        });
+        // Derived: internal_transfer and income are the local counterparts of
+        // the live type. A seeded row may omit them (false); a retype must set
+        // the new one and clear the old.
+        for (const [flag, type] of [
+          ['internal_transfer', 'INTERNAL_TRANSFER'],
+          ['income', 'INCOME'],
+        ] as const) {
+          expect({ id, field: flag, value: mine[flag] === true }).toEqual({
+            id,
+            field: flag,
+            value: server.type === type,
+          });
+        }
       }
     }
   );

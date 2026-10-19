@@ -624,17 +624,27 @@ function buildEditInput(edit: TransactionEdit): EditTransactionInput {
 }
 
 /**
+ * The cache-model fields the decoder derives from Copilot's `type`: the two
+ * booleans `internal_transfer` and `income` (#864 review). Patched together so
+ * a retype clears the old flag as well as setting the new one.
+ */
+function typeFlagsPatch(type: string): Pick<Transaction, 'internal_transfer' | 'income'> {
+  return { internal_transfer: type === 'INTERNAL_TRANSFER', income: type === 'INCOME' };
+}
+
+/**
  * Build the optimistic cache patch for one applied edit: writes to the
  * in-memory cache so a subsequent read returns the new value without needing
  * refresh_database + re-decode.
  *
- * `type` has one local counterpart: `internal_transfer`, which the decoder
- * derives from Copilot's type (the model's `transaction_type` is Plaid's), so
- * it is patched. The other effect patched is INCOME/INTERNAL_TRANSFER clearing
- * the category server-side (verified live), so mirror that so a follow-up read
- * doesn't show a stale category.
+ * `type` has two local counterparts, `internal_transfer` and `income`, which
+ * the decoder derives from Copilot's type (the model's `transaction_type` is
+ * Plaid's), so both are patched (typeFlagsPatch), from `serverType`, the type
+ * on the row the server returned, when given. The other effect patched is
+ * INCOME/INTERNAL_TRANSFER clearing the category server-side (verified live),
+ * so a follow-up read doesn't show a stale category.
  */
-function buildEditCachePatch(edit: TransactionEdit): Partial<Transaction> {
+function buildEditCachePatch(edit: TransactionEdit, serverType?: string): Partial<Transaction> {
   const patch: Partial<Transaction> = {};
   if ('name' in edit && edit.name !== undefined) patch.name = edit.name.trim();
   if ('category_id' in edit && edit.category_id !== undefined) patch.category_id = edit.category_id;
@@ -646,9 +656,10 @@ function buildEditCachePatch(edit: TransactionEdit): Partial<Transaction> {
   if (edit.type === 'INCOME' || edit.type === 'INTERNAL_TRANSFER') {
     patch.category_id = '';
   }
-  // The local model's one counterpart of Copilot's type: the decoder derives
-  // internal_transfer from it, and get_transactions filters on it (#864 review).
-  if (edit.type !== undefined) patch.internal_transfer = edit.type === 'INTERNAL_TRANSFER';
+  // The local model's counterparts of Copilot's type (internal_transfer,
+  // income): the decoder derives them from it and get_transactions' type
+  // filters read them (#864 review).
+  if (edit.type !== undefined) Object.assign(patch, typeFlagsPatch(serverType ?? edit.type));
   return patch;
 }
 
@@ -3671,7 +3682,7 @@ export class CopilotMoneyTools {
       // Map GraphQL field names back to MCP API names in the response.
       const updated = Object.keys(result.changed).map((k) => EDIT_GRAPHQL_TO_API_NAME[k] ?? k);
 
-      const patch = buildEditCachePatch(args);
+      const patch = buildEditCachePatch(args, result.transaction?.type);
       if (Object.keys(patch).length > 0) {
         this.db.patchCachedTransaction(transaction_id, patch);
       }
@@ -3829,7 +3840,7 @@ export class CopilotMoneyTools {
         });
         // Patch per success, not once at the end: on a partial batch the cache
         // must reflect the rows that actually landed and nothing else.
-        const patch = buildEditCachePatch(edit);
+        const patch = buildEditCachePatch(edit, result.transaction?.type);
         if (Object.keys(patch).length > 0) {
           this.db.patchCachedTransaction(route.id, patch);
         }
@@ -5038,8 +5049,8 @@ export class CopilotMoneyTools {
 
     const [first, ...rest] = entries;
     // Optimistic cache patch, per confirmed row, applied inside bulkEdit before
-    // any partial-batch error is thrown. `type` is mirrored through its one
-    // local counterpart, internal_transfer, and its category-clearing effect.
+    // any partial-batch error is thrown. `type` is mirrored through its local
+    // counterparts (internal_transfer, income) and its category-clearing effect.
     // Tag add/remove is applied against the tag list the SERVER returned, not
     // recomputed locally, so the cache matches the authoritative result.
     const result = await this.bulkEdit(
@@ -5053,8 +5064,8 @@ export class CopilotMoneyTools {
           if (category_id !== undefined) patch.category_id = category_id;
           if (reviewed !== undefined) patch.user_reviewed = reviewed;
           if (type === 'INCOME' || type === 'INTERNAL_TRANSFER') patch.category_id = '';
-          // internal_transfer is the local counterpart of one type value.
-          if (type !== undefined) patch.internal_transfer = type === 'INTERNAL_TRANSFER';
+          // The type-derived flags, from the server's row (#864 review).
+          if (type !== undefined) Object.assign(patch, typeFlagsPatch(tx.type ?? type));
           if (add_tag_ids !== undefined || remove_tag_ids !== undefined) {
             patch.tag_ids = tx.tags.map((t) => t.id);
           }
