@@ -513,7 +513,11 @@ function ambiguousProfileMessage(
   // One clause per shared value: two different shared values ARE told apart
   // by name, only the matches within one group are not.
   const groups = new Map<string, string[]>();
-  for (const m of shared) groups.set(m.pick, [...(groups.get(m.pick) ?? []), `"${m.path}"`]);
+  for (const m of shared) {
+    const group = groups.get(m.pick) ?? [];
+    group.push(`"${m.path}"`);
+    groups.set(m.pick, group);
+  }
   for (const paths of groups.values()) {
     offers.push(`No --browser-profile value tells ${joinList(sortProfileNames(paths))} apart.`);
   }
@@ -521,14 +525,15 @@ function ambiguousProfileMessage(
     // Dropping --browser-profile matters: a name: value never matches a
     // single profile directory, so keeping it would be refused at startup.
     offers.push(
-      'Select one of those by dropping --browser-profile and pointing --browser-data-dir at ' +
-        'its path.'
+      'Select one by dropping --browser-profile and pointing --browser-data-dir at one of ' +
+        'those paths.'
     );
   }
   // Matches that share a value would read identically ("directory "a1.work"
-  // and directory "a1.work""), so those carry their path.
+  // and directory "a1.work""), so those carry their path — unless the
+  // description already holds it (an absolute profiles.ini Path=).
   const described = matches.map((m) =>
-    count.get(m.pick) !== 1 ? `${m.how} at "${m.path}"` : m.how
+    count.get(m.pick) !== 1 && !m.how.includes(`"${m.path}"`) ? `${m.how} at "${m.path}"` : m.how
   );
   return (
     `--browser-profile "${profile}" is ambiguous in ${browser}${root ? ` (${root})` : ''}: ` +
@@ -972,7 +977,7 @@ export function resolveBrowserSelection(
       namespace === 'any'
         ? `available: ${listing}`
         : `${namespace === 'name' ? `${names} are not listed; ` : ''}` +
-          `profile directories include: ${listing}`;
+          `profile directories include: ${listing}, each usable as "dir:<directory>"`;
     report.problem =
       `No ${browser} profile named "${profile}" was found ` +
       `(${listed}; checked: ${roots.join(', ')}).`;

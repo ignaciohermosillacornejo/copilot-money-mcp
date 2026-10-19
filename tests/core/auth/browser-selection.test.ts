@@ -827,13 +827,15 @@ describe('ambiguous --browser-profile', () => {
     writeLocalState(chrome, { Default: { name: 'Person A' } });
     const result = await mac({ browser: 'chrome', profile: 'name:Nobody' });
     expect(result.selection?.problem).toContain(
-      'display names are not listed; profile directories include: Default;'
+      'display names are not listed; profile directories include: Default, each usable as "dir:<directory>";'
     );
     expect(result.selection?.problem).not.toContain('Person A');
 
     // dir: misses list the same thing, in the same terms.
     const dirMiss = await mac({ browser: 'chrome', profile: 'dir:Nobody' });
-    expect(dirMiss.selection?.problem).toContain('(profile directories include: Default;');
+    expect(dirMiss.selection?.problem).toContain(
+      '(profile directories include: Default, each usable as "dir:<directory>";'
+    );
   });
 
   test('a Firefox name: miss speaks of profiles.ini names, not display names', async () => {
@@ -845,7 +847,8 @@ describe('ambiguous --browser-profile', () => {
     );
     const result = await mac({ browser: 'firefox', profile: 'name:Nope' });
     expect(result.selection?.problem).toContain(
-      'profiles.ini names are not listed; profile directories include: abc.default-release;'
+      'profiles.ini names are not listed; profile directories include: abc.default-release, ' +
+        'each usable as "dir:<directory>";'
     );
     expect(result.selection?.problem).not.toContain('display names');
     expect(result.selection?.problem).not.toContain('Someone');
@@ -1379,16 +1382,17 @@ describe('--browser-data-dir', () => {
       const problem = result.selection?.problem ?? '';
       // "dir:a1.work" would itself be ambiguous, so it must not be offered.
       expect(problem).not.toContain('"dir:a1.work"');
-      // Order-independent: the pair's order is a collation detail.
-      expect([
-        `No --browser-profile value tells "${flat}" and "${nested}" apart.`,
-        `No --browser-profile value tells "${nested}" and "${flat}" apart.`,
-      ]).toContain(
-        /No --browser-profile value tells "[^"]+" and "[^"]+" apart\./.exec(problem)?.[0]
-      );
+      // Either order: the pair's order is a collation detail.
+      const pairOf = (x: string, y: string): string =>
+        `No --browser-profile value tells "${x}" and "${y}" apart.`;
+      expect(
+        problem.includes(pairOf(flat, nested)) || problem.includes(pairOf(nested, flat))
+          ? 'found'
+          : problem
+      ).toBe('found');
       expect(problem).toContain(
-        'Select one of those by dropping --browser-profile and pointing --browser-data-dir at ' +
-          'its path.'
+        'Select one by dropping --browser-profile and pointing --browser-data-dir at one of ' +
+          'those paths.'
       );
       expect(problem).toContain(`directory "a1.work" at "${flat}"`);
       // And the offered remedy works for each.
@@ -1425,7 +1429,9 @@ describe('--browser-data-dir', () => {
         [one, 'one'],
         [two, 'two'],
       ] as const) {
-        expect(problem).toContain(`"${path}"`);
+        // Named twice — once in its match, once in the "tells … apart" clause —
+        // never doubled up as `of "<path>" at "<path>"`.
+        expect(problem.split(`"${path}"`).length - 1).toBe(2);
         const selected = parse({ browserFlag: 'firefox', dataDirFlag: path });
         const found = await linux(selected!);
         expect(found.candidates.map((c) => c.token)).toEqual([fakeToken(tag)]);

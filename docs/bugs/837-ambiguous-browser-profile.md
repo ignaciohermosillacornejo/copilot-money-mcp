@@ -64,8 +64,12 @@ fix therefore adds a namespace qualifier: `dir:<name>` matches the exact directo
 only, which always names one profile, and the refusal offers it (`--browser-profile
 "dir:Default" or "dir:Profile 1"`). `name:` restricts the match to display names; a
 Firefox profile that `profiles.ini` keeps outside the listed profiles dir is offered as
-`name:`, since `dir:` cannot see it. The tests check that every value a refusal offers
-selects exactly one profile.
+`name:`, since `dir:` cannot see it. When two Firefox matches would share one offered value
+(the same directory name directly in a `--browser-data-dir` and under its `Profiles/`, or
+two out-of-root `profiles.ini` entries with one `Name=`), no `--browser-profile` value
+splits them, so the refusal names them by path instead: drop `--browser-profile` and point
+`--browser-data-dir` at one. The tests check that every value a refusal offers selects
+exactly one profile.
 
 Downstream cleanup in the same PR: retried `Local State` / `profiles.ini` reads, clearer
 not-found errors, a profile-directory hint for `--browser-data-dir`, and validating the
