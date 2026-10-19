@@ -3220,10 +3220,11 @@ export class CopilotMoneyTools {
    * caller retrying an id that does not exist from paying a fetch per try:
    * at most one wasted refetch (one that still misses an id, or fails) per
    * list per REFERENCE_REFETCH_MIN_MS, so a refetch that finds the new id
-   * never delays the next one; and a
-   * refetch that fails returns the rows already held, so the caller still
-   * reports the id as not found (the cache, dropped for the refetch, simply
-   * loads again on its next read).
+   * never delays the next one; and a refetch that fails returns the rows
+   * already held, so the caller still reports the id as not found (the
+   * cache, dropped for the refetch, simply loads again on its next read).
+   * Under concurrency the refetch can join a load already in flight, whose
+   * rows may predate the new id; that narrow case is accepted.
    */
   private async referenceRows<T extends { id: string }>(
     cache: SnapshotCache<T>,
@@ -3241,10 +3242,10 @@ export class CopilotMoneyTools {
     cache.invalidate();
     try {
       const rows = (await cache.read(load)).rows;
-      if (missesAny(rows)) this.lastReferenceRefetch.set(cache, now);
+      if (missesAny(rows)) this.lastReferenceRefetch.set(cache, Date.now());
       return rows;
     } catch {
-      this.lastReferenceRefetch.set(cache, now);
+      this.lastReferenceRefetch.set(cache, Date.now());
       return first.rows;
     }
   }
@@ -3267,8 +3268,31 @@ export class CopilotMoneyTools {
    * referenceRows).
    */
   private async validateCategoryId(categoryId: string): Promise<void> {
+    if (!(await this.categoryExists(categoryId))) {
+      throw new Error(`Category not found: ${categoryId}`);
+    }
+  }
+
+  /**
+   * Whether `categoryId` is a known category: the lookup validateCategoryId
+   * throws on. `refetch: false` answers from what is already held (a cold or
+   * stale live list counts as unknown) and never fetches or arms the refetch
+   * throttle, for callers that need knowledge, not verification.
+   */
+  private async categoryExists(
+    categoryId: string,
+    opts: { refetch?: boolean } = {}
+  ): Promise<boolean> {
     const liveDb = this.liveDb;
     if (liveDb) {
+      if (opts.refetch === false) {
+        return (
+          liveDb
+            .getCategoriesCache()
+            .peek()
+            ?.some((c) => c.id === categoryId) ?? false
+        );
+      }
       const rows = await this.referenceRows(
         liveDb.getCategoriesCache(),
         async () => {
@@ -3277,15 +3301,10 @@ export class CopilotMoneyTools {
         },
         [categoryId]
       );
-      if (!rows.find((c) => c.id === categoryId)) {
-        throw new Error(`Category not found: ${categoryId}`);
-      }
-      return;
+      return rows.some((c) => c.id === categoryId);
     }
     const categories = await this.db.getUserCategories();
-    if (!categories.find((c) => c.category_id === categoryId)) {
-      throw new Error(`Category not found: ${categoryId}`);
-    }
+    return categories.some((c) => c.category_id === categoryId);
   }
 
   /** Tag-ids sibling of validateCategoryId — same mode split, same messages. */
@@ -4842,7 +4861,10 @@ export class CopilotMoneyTools {
       }
       for (const tagId of tagIds) validateDocId(tagId, 'tag_id');
       // The server silently drops unknown tag ids rather than erroring, so an
-      // unvalidated typo would report success having applied nothing.
+      // unvalidated typo would report success having applied nothing. That
+      // holds for remove_tag_ids too, so removal is validated as well: unlike
+      // clearing a budget, removing a tag the app deleted has nothing to clean
+      // up (a deleted tag is no longer in the tag list rows are read against).
       await this.validateTagIds(tagIds);
     }
     // Adding and removing the same tag in one call has no defined resolution
@@ -5126,17 +5148,12 @@ export class CopilotMoneyTools {
     // the write-through below is skipped rather than synthesizing a cached
     // budget row for it (the caches catch up on their TTL).
     validateDocId(args.category_id, 'category_id');
-    let categoryKnown = true;
-    if (parseFloat(args.amount) !== 0) {
-      await this.validateCategoryId(args.category_id);
-    } else {
-      try {
-        await this.validateCategoryId(args.category_id);
-      } catch (e) {
-        if (!(e instanceof Error && e.message.startsWith('Category not found'))) throw e;
-        categoryKnown = false;
-      }
-    }
+    const clearing = parseFloat(args.amount) === 0;
+    if (!clearing) await this.validateCategoryId(args.category_id);
+    // Knowledge, not verification: no fetch and no throttle stamp for a miss
+    // the clear path expects.
+    const categoryKnown =
+      !clearing || (await this.categoryExists(args.category_id, { refetch: false }));
 
     try {
       const result = await gqlSetBudget(client, {

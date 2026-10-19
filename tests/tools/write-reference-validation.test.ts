@@ -306,7 +306,7 @@ function referenceSetup() {
   const edit = (fields: { category_id?: string; tag_ids?: string[] }) =>
     tools.updateTransaction({ ...routing, transaction_id: TX_ID, ...fields });
   const edits = () => client._calls.filter((c) => c.op === 'EditTransaction').length;
-  return { categories, tags, fetches, failNext, edit, edits };
+  return { tools, categories, tags, fetches, failNext, edit, edits };
 }
 
 describe('reference lists: a miss on a cached list refetches once (#846)', () => {
@@ -325,14 +325,25 @@ describe('reference lists: a miss on a cached list refetches once (#846)', () =>
     const r = referenceSetup();
     spyOn(Date, 'now').mockReturnValue(Date.now());
     await expect(r.edit({ category_id: CAT_KNOWN })).rejects.toThrow(/mutation reached/);
-    const second = 'Cs2dF5gH8jK1lZ4xC7vB';
-    r.categories.push(CAT_UNKNOWN, second);
+    r.categories.push(CAT_UNKNOWN);
     await expect(r.edit({ category_id: CAT_UNKNOWN })).rejects.toThrow(/mutation reached/);
     r.categories.push('Ct3fG6hJ9kL2zX5cV8bN');
     await expect(r.edit({ category_id: 'Ct3fG6hJ9kL2zX5cV8bN' })).rejects.toThrow(
       /mutation reached/
     );
     expect(r.fetches.categories).toBe(3);
+  });
+
+  test("clearing a deleted category's budget neither fetches nor arms the throttle", async () => {
+    const r = referenceSetup();
+    spyOn(Date, 'now').mockReturnValue(Date.now());
+    await expect(r.edit({ category_id: CAT_KNOWN })).rejects.toThrow(/mutation reached/);
+    await r.tools.setBudget({ category_id: 'Dd4fG7hJ0kL3zX6cV9bN', amount: '0' }).catch(() => {});
+    expect(r.fetches.categories).toBe(1);
+    // A category created in the app right after is still accepted.
+    r.categories.push(CAT_UNKNOWN);
+    await expect(r.edit({ category_id: CAT_UNKNOWN })).rejects.toThrow(/mutation reached/);
+    expect(r.fetches.categories).toBe(2);
   });
 
   test('a tag created since the list was cached is accepted after one refetch', async () => {
