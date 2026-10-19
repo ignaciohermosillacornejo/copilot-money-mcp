@@ -708,12 +708,19 @@ export class CopilotMoneyTools {
    */
   private invalidateAfterFailedWrite(ids: readonly string[], months: readonly string[] = []): void {
     try {
+      // mutation-guard: a failed transaction write drops its live months
       this.liveDb?.invalidateLiveTransactionMonths(ids);
       if (months.length > 0) this.liveDb?.invalidateLiveMonthKeys(months);
       this.liveDb?.invalidateTransactionDerivedSnapshots();
-    } catch {
+    } catch (e) {
       // Never let cache housekeeping mask the write's own error, which the
-      // caller rethrows next and is the one that matters.
+      // caller rethrows next and is the one that matters; but leave a trace,
+      // since a failure here is the stale-cache bug this exists to prevent.
+      console.error(
+        `[copilot-money-mcp] live-cache invalidation after a failed write threw: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
     }
   }
 
@@ -727,8 +734,8 @@ export class CopilotMoneyTools {
   }
 
   /** YYYY-MM of `date` when it is a string long enough to have one. */
-  private static monthOf(date: unknown): string[] {
-    return typeof date === 'string' && date.length >= 7 ? [date.slice(0, 7)] : [];
+  private static monthOf(date: string | undefined): string[] {
+    return date !== undefined && date.length >= 7 ? [date.slice(0, 7)] : [];
   }
 
   /** Whether this server has recorded `id` as a split parent (#822, #842). */
@@ -3974,7 +3981,7 @@ export class CopilotMoneyTools {
       };
     } catch (e) {
       // No id exists to find the row by, so its month is named outright (#832).
-      this.invalidateAfterFailedWrite([], [date.slice(0, 7)]);
+      this.invalidateAfterFailedWrite([], CopilotMoneyTools.monthOf(date));
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }

@@ -699,6 +699,18 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   ]),
   responseShape('addTransactionToRecurring'),
   appliesSurface('addTransactionToRecurring'),
+  {
+    surface: 'Mutation.addTransactionToRecurring:marksPaymentPaid',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'ASSUMED (#832 review): linking a transaction to a recurring can mark one of the ' +
+      "recurring's payments as made (a payments[].isPaid flip and a nextPaymentDate move). " +
+      'Not probed. Acted on conservatively: every transaction write drops the recurring and ' +
+      'upcoming-recurrings snapshots (LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS), ' +
+      'which costs one request each if the assumption is wrong.',
+  },
 
   operation('splitTransaction', [
     'split_transaction.transaction_id',

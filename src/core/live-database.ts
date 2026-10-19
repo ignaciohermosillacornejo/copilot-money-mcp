@@ -788,19 +788,39 @@ export class LiveCopilotDatabase {
    *  - `networth`: a sum of account balances;
    *  - `monthly_spend`: the daily spend series, a function of each row's
    *    amount, date, type and category;
-   *  - `upcoming_recurrings`: linking a transaction to a recurring can mark
-   *    a payment as made.
-   * Each is cached for an hour and would keep serving the pre-write figures.
-   * Not included: `categories`, whose budget rollovers derive from past
-   * spending but which is reference data cached for a day (a refetch there
-   * costs the category list; refresh_cache covers it).
+   *  - `upcoming_recurrings` (1 h) and `recurring` (6 h): linking a
+   *    transaction to a recurring can mark a payment as made, which is a
+   *    `payments[].isPaid` flip and a `nextPaymentDate` move on the recurring
+   *    (unverified: Mutation.addTransactionToRecurring:marksPaymentPaid).
+   * Each would keep serving the pre-write figures until its TTL. Every other
+   * refresh_cache scope is listed, with its reason, in
+   * NOT_TRANSACTION_DERIVED_SNAPSHOTS; a test requires each scope to be in
+   * exactly one of the two lists, so a new cache must be classified.
    */
   static readonly TRANSACTION_DERIVED_SNAPSHOTS = [
     'accounts',
     'networth',
     'monthly_spend',
     'upcoming_recurrings',
+    'recurring',
   ] as const;
+
+  /** refresh_cache scopes a transaction write leaves alone, and why. */
+  static readonly NOT_TRANSACTION_DERIVED_SNAPSHOTS: Readonly<Record<string, string>> = {
+    transactions: 'the window cache, kept coherent by each write itself',
+    categories:
+      'reference data; budget rollovers derive from spending, but a day-old list is accepted',
+    budgets: 'served from the categories list (same reason)',
+    tags: 'reference data',
+    user: 'account settings',
+    holdings: 'priced from market data, not transactions',
+    investment_allocation: 'priced from market data',
+    top_movers: 'priced from market data',
+    aggregated_holdings: 'priced from market data',
+    investment_balance: 'priced from market data',
+    investment_prices: 'market data',
+    balance_history: "daily history held by its own tool; today's point lags until its TTL",
+  };
 
   /**
    * Drop every snapshot a transaction write can make stale (see
@@ -819,6 +839,7 @@ export class LiveCopilotDatabase {
       networth: this.networthCache,
       monthly_spend: this.monthlySpendCache,
       upcoming_recurrings: this.upcomingRecurringsCache,
+      recurring: this.recurringCache,
     };
     for (const key of LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS) byKey[key].invalidate();
   }

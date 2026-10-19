@@ -402,6 +402,24 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/tools/write-reference-validation.test.ts',
   },
   {
+    name: 'a failed transaction write drops its live months',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'A transport error or timeout can follow a write the server already applied. A ' +
+      "transaction write's catch must drop the cached months holding its target, or the cold " +
+      'tier serves the pre-write row for up to a week while the user retries a write that ' +
+      'already landed (#832).',
+    mutation: {
+      kind: 'remove',
+      find: wholeLines(
+        '      // mutation-guard: a failed transaction write drops its live months',
+        '      this.liveDb?.invalidateLiveTransactionMonths(ids);'
+      ),
+    },
+    expectFailingTests: ['the mutation throws, and the cached month is refetched'],
+    expectFails: 'tests/tools/live-write-coherence.test.ts',
+  },
+  {
     name: 'create_transaction writes through to the live cache',
     file: 'src/tools/tools.ts',
     invariant:

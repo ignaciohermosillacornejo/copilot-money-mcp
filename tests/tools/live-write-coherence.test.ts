@@ -40,6 +40,10 @@ import * as transactionRegistry from '../../src/tools/registry/transactions.js';
 import type { LiveToolContext, ToolContext } from '../../src/tools/registry/types.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
 import type { AccountNode } from '../../src/core/graphql/queries/accounts.js';
+import type { NetworthHistoryNode } from '../../src/core/graphql/queries/networth.js';
+import type { DailySpendNode } from '../../src/core/graphql/queries/monthly-spend.js';
+import type { UpcomingRecurringNode } from '../../src/core/graphql/queries/upcoming-recurrings.js';
+import type { RecurringNode } from '../../src/core/graphql/queries/recurrings.js';
 import type {
   CreatedTransaction,
   EditTransactionInput,
@@ -865,38 +869,70 @@ describe('a transaction write that throws leaves the next read to the server (#8
 
 type SnapshotKey = (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number];
 
-/** How to reach each named snapshot. A key added to the list without a getter here fails to compile. */
-const SNAPSHOT_GETTERS: Record<
+/**
+ * How to warm and inspect each named snapshot, typed per cache so a getter
+ * returning the wrong cache, or a key added to the list without an entry
+ * here, fails to compile.
+ */
+const SNAPSHOT_PROBES: Record<
   SnapshotKey,
-  (db: LiveCopilotDatabase) => {
-    read(l: () => Promise<unknown[]>): Promise<unknown>;
-    peek(): unknown;
-  }
+  { warm(db: LiveCopilotDatabase): Promise<unknown>; peek(db: LiveCopilotDatabase): unknown }
 > = {
-  accounts: (db) => db.getAccountsCache() as never,
-  networth: (db) => db.getNetworthCache() as never,
-  monthly_spend: (db) => db.getMonthlySpendCache() as never,
-  upcoming_recurrings: (db) => db.getUpcomingRecurringsCache() as never,
+  accounts: {
+    warm: (db) => db.getAccountsCache().read(async () => [{ id: ACCOUNT_ID } as AccountNode]),
+    peek: (db) => db.getAccountsCache().peek(),
+  },
+  networth: {
+    warm: (db) =>
+      db.getNetworthCache().read(async () => [{ date: SEED_DATE } as NetworthHistoryNode]),
+    peek: (db) => db.getNetworthCache().peek(),
+  },
+  monthly_spend: {
+    warm: (db) => db.getMonthlySpendCache().read(async () => [{ id: 'd1' } as DailySpendNode]),
+    peek: (db) => db.getMonthlySpendCache().peek(),
+  },
+  upcoming_recurrings: {
+    warm: (db) =>
+      db
+        .getUpcomingRecurringsCache()
+        .read(async () => [{ id: RECURRING_ID } as UpcomingRecurringNode]),
+    peek: (db) => db.getUpcomingRecurringsCache().peek(),
+  },
+  recurring: {
+    warm: (db) => db.getRecurringCache().read(async () => [{ id: RECURRING_ID } as RecurringNode]),
+    peek: (db) => db.getRecurringCache().peek(),
+  },
 };
 
 /** Warm every transaction-derived snapshot so a drop is observable. */
 async function warmSnapshots(liveDb: LiveCopilotDatabase): Promise<void> {
   for (const key of LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS) {
-    const cache = SNAPSHOT_GETTERS[key](liveDb);
-    await cache.read(async () => [{ id: ACCOUNT_ID } as AccountNode]);
-    expect(cache.peek()).toBeDefined();
+    await SNAPSHOT_PROBES[key].warm(liveDb);
+    expect(SNAPSHOT_PROBES[key].peek(liveDb)).toBeDefined();
   }
 }
 
 function expectSnapshotsDropped(liveDb: LiveCopilotDatabase): void {
   for (const key of LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS) {
-    expect({ key, rows: SNAPSHOT_GETTERS[key](liveDb).peek() }).toEqual({ key, rows: undefined });
+    expect({ key, rows: SNAPSHOT_PROBES[key].peek(liveDb) }).toEqual({ key, rows: undefined });
   }
 }
 
 describe('a transaction write drops the transaction-derived snapshots (#825)', () => {
-  test('the dropped set covers at least the accounts snapshot', () => {
-    expect(LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS).toContain('accounts');
+  test('every refresh_cache scope is classified: dropped by a transaction write, or exempt with a reason', () => {
+    // The scope enum lists every live cache; a new one fails here until it is
+    // put in one of the two lists.
+    const scopeSchema = TOOL_REGISTRY.get('refresh_cache')!.schema.inputSchema.properties as {
+      scope: { enum: string[] };
+    };
+    const scopes = scopeSchema.scope.enum.filter((sc) => sc !== 'all').sort();
+    const dropped: readonly string[] = LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS;
+    const exempt = Object.keys(LiveCopilotDatabase.NOT_TRANSACTION_DERIVED_SNAPSHOTS);
+    expect(dropped.filter((k) => exempt.includes(k))).toEqual([]);
+    expect([...dropped, ...exempt].sort()).toEqual(scopes);
+    for (const reason of Object.values(LiveCopilotDatabase.NOT_TRANSACTION_DERIVED_SNAPSHOTS)) {
+      expect(reason.length).toBeGreaterThan(0);
+    }
   });
 
   test.each(Object.keys(CASES))('%s: success drops them', async (toolName) => {

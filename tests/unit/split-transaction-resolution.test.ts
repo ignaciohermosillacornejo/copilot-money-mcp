@@ -124,7 +124,7 @@ function stubLiveDb(overrides: {
     invalidateTransactionDerivedSnapshots: () => {},
     invalidateLiveTransactionMonths: () => {},
     patchLiveTransactionDelete: () => {},
-    // Reached only when mapping a drifted split response throws.
+    // Reached when a split throws (#832), and when mapping a drifted response does.
     invalidateLiveMonthKeys: () => {},
   } as unknown as LiveCopilotDatabase;
   return { liveDb, getTransactions, indexTransactionMeta, upsertLiveTransaction };
