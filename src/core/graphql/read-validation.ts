@@ -81,10 +81,27 @@ const mutationRowSchema = transactionNodeSchema.omit({
   itemId: true,
 });
 
+/**
+ * The top-level fields of a mutation's returned transaction row that fail
+ * {@link mutationRowSchema}; empty when the row is usable. Field NAMES only,
+ * never values.
+ */
+export function invalidMutationRowFields(node: unknown): string[] {
+  const parsed = mutationRowSchema.safeParse(node);
+  if (parsed.success) return [];
+  return [
+    ...new Set(parsed.error.issues.map((i) => (i.path[0] != null ? String(i.path[0]) : '<root>'))),
+  ];
+}
+
 /** Whether a mutation's returned transaction row passes {@link mutationRowSchema}. */
 export function isUsableMutationTransactionRow(node: unknown): boolean {
-  return mutationRowSchema.safeParse(node).success;
+  return invalidMutationRowFields(node).length === 0;
 }
+
+/** Ledger surface for the assumption {@link mutationRowSchema} rests on. */
+export const MUTATION_ROW_READ_SCHEMA_SURFACE =
+  'Mutation.TransactionFields:read-schema-parity' as const;
 
 /**
  * Return the page with invalid nodes removed. Valid nodes are returned as
@@ -121,6 +138,24 @@ const warned = new Set<string>();
 /** Test hook — dedupe state is module-level. */
 export function __resetReadShapeWarnDedupe(): void {
   warned.clear();
+}
+
+/**
+ * The write-side counterpart of {@link warnReadShapeDrift} (#864): a row a
+ * mutation returned was refused by the live cache. Warn once per failed-field
+ * set, naming the fields and never their values, so a systematic drift that
+ * turns every write into a month refetch is visible rather than silent.
+ */
+export function warnMutationRowRefused(info: InvalidNodeInfo): void {
+  const key = `mutation-row:${[...info.fields].sort().join(',')}`;
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(
+    `[copilot-money-mcp] mutation-row drift: transaction ${info.id ?? '<unreadable id>'} not ` +
+      `stored in the live cache (invalid ${info.fields.join(', ')}); its months are refetched ` +
+      `instead — see ${MUTATION_ROW_READ_SCHEMA_SURFACE} in the conformance ledger ` +
+      `(src/conformance/ledger.ts). Further identical refusals this session are not logged.`
+  );
 }
 
 export function warnReadShapeDrift(op: string, info: InvalidNodeInfo): void {

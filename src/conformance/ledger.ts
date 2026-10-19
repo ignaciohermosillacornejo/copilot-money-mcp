@@ -1080,9 +1080,27 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     evidence:
       'Per-node Zod validation at fetchTransactionsPage (warn-and-skip, #512): ' +
       'invalid nodes are dropped from rows and all cache/index feeds, counted, and ' +
-      'surfaced via _dropped_invalid_rows + a deduped stderr warning. The same schema ' +
-      '(minus parentId, isoCurrencyCode and the routing ids, see mutationRowSchema) gates ' +
-      'which mutation-returned rows the live window cache may store (#864).',
+      'surfaced via _dropped_invalid_rows + a deduped stderr warning. The write side reuses ' +
+      'this schema; that assumption is its own entry, Mutation.TransactionFields:read-schema-parity.',
+  },
+  {
+    surface: 'Mutation.TransactionFields:read-schema-parity',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'Inferred, not observed (#864): a row a transaction mutation returns (the TransactionFields ' +
+      "fragment) satisfies the read path's transactionNodeSchema minus parentId, isoCurrencyCode, " +
+      'accountId and itemId (mutationRowSchema in read-validation.ts), so the live window cache ' +
+      'may store it. Basis: a field-for-field comparison of the fragment against the read ' +
+      'schema (the fragment selects every required field except parentId and isoCurrencyCode, ' +
+      'which upsert defaults), and the Mutation.*:response zod-warn schemas ' +
+      '(CreatedTransactionSchema), which require the same fields at runtime but only warn. No ' +
+      'probe has compared a just-written row with a Transactions-query row. WHAT DRIFT WOULD ' +
+      'LOOK LIKE: a field such as suggestedCategoryIds, createdAt or tipAmount missing or ' +
+      'null on mutation rows only. Every transaction write would then refuse its row and ' +
+      'refetch the month (correct data, one extra request per write, no live write-through), ' +
+      'and stderr would carry one "mutation-row drift" warning per failed-field set.',
   },
   // ----- Synthesized transaction row fields (#604) ---------------------------
   // Not fields Copilot returns: fields this repo INVENTS on live rows so both

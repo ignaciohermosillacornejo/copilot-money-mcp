@@ -31,7 +31,12 @@ import {
   type TransactionNode,
   type TransactionSortInput,
 } from './graphql/queries/transactions.js';
-import { isUsableMutationTransactionRow, warnReadShapeDrift } from './graphql/read-validation.js';
+import {
+  invalidMutationRowFields,
+  isUsableMutationTransactionRow,
+  warnMutationRowRefused,
+  warnReadShapeDrift,
+} from './graphql/read-validation.js';
 import { getMonthRange, isCalendarDate, isCalendarMonth, monthsCovered } from '../utils/date.js';
 import { pLimit } from '../utils/concurrency.js';
 import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache/index.js';
@@ -791,6 +796,11 @@ export class LiveCopilotDatabase {
     // sits in, are dropped so the next read refetches (#864 review).
     // mutation-guard: a malformed returned row is never cached
     if (!LiveCopilotDatabase.isCacheableRow(node)) {
+      // Not silent (#864 review): name the failed fields, once per set. The
+      // schema passing means the calendar-date check failed, the only other
+      // clause.
+      const fields = invalidMutationRowFields(node);
+      warnMutationRowRefused({ id: node.id, fields: fields.length > 0 ? fields : ['date'] });
       const months = new Set<string>();
       // The cached copy's month is dropped too: the row is not stored, so a
       // write that moved or changed it must not leave that month serving the

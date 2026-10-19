@@ -1,5 +1,6 @@
-import { describe, test, expect, mock } from 'bun:test';
+import { describe, test, expect, mock, spyOn } from 'bun:test';
 import { LiveCopilotDatabase, preflightLiveAuth } from '../../src/core/live-database.js';
+import { __resetReadShapeWarnDedupe } from '../../src/core/graphql/read-validation.js';
 import { GraphQLError } from '../../src/core/graphql/client.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { CopilotDatabase } from '../../src/core/database.js';
@@ -603,6 +604,30 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
       expect(wc.hasMonth('2024-01')).toBe(false);
     }
   );
+
+  test('a refused row warns exactly once per failed-field set, naming the field and not the value (#864)', () => {
+    __resetReadShapeWarnDedupe();
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const live = mkLive();
+      const wc = live.getTransactionsWindowCache();
+      const drifted = mutationRow({ name: 98765 as unknown as string });
+
+      wc.ingestMonth('2024-01', [queryRow()], Date.now());
+      live.upsertLiveTransaction(drifted);
+      wc.ingestMonth('2024-01', [queryRow()], Date.now());
+      live.upsertLiveTransaction(drifted);
+
+      const lines = warn.mock.calls.map((c) => String(c[0]));
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain('mutation-row drift');
+      expect(lines[0]).toContain('invalid name');
+      expect(lines[0]).not.toContain('98765');
+    } finally {
+      warn.mockRestore();
+      __resetReadShapeWarnDedupe();
+    }
+  });
 
   test('a non-string routing id never overwrites the cached one (#864)', () => {
     const live = mkLive();
