@@ -617,6 +617,46 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/unit/split-target-refusal.test.ts',
   },
   {
+    name: 'bulk_edit_transactions does not retype a split parent',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'A type change on a split parent has the same unverified balance effect through ' +
+      'bulkEditTransactions as through editTransaction, so a bulk edit setting a type refuses ' +
+      'the whole call when any target is a known split parent (#836).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '        // mutation-guard: bulk_edit_transactions does not retype a split parent\n' +
+        '        if (evidence.isParent) {',
+      with:
+        '        // mutation-guard: bulk_edit_transactions does not retype a split parent\n' +
+        '        if (false) {',
+    },
+    expectFailingTests: ['a type change targeting a parent refuses the whole call, nothing sent'],
+    expectFails: 'tests/unit/split-target-refusal.test.ts',
+  },
+  {
+    name: 'an unchecked split target is not written',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'When the window fetch fails, an id cannot be shown not to be a split parent. The ' +
+      '#836 writes, whose effect on a split is unverified, are refused then rather than sent ' +
+      'on partial evidence (delete_transaction alone proceeds, as documented).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: an unchecked split target is not written\n' +
+        '    if (evidence.windowChecked === false) {',
+      with:
+        '    // mutation-guard: an unchecked split target is not written\n' + '    if (false) {',
+    },
+    expectFailingTests: [
+      'an amount edit is refused when the window cannot be loaded',
+      'add_transaction_to_recurring and split_transaction are refused too',
+    ],
+    expectFails: 'tests/unit/split-target-refusal.test.ts',
+  },
+  {
     name: 'a fresh row never retires a split record',
     file: 'src/tools/tools.ts',
     invariant:

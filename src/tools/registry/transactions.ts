@@ -766,7 +766,8 @@ export const bulkEditTransactionsTool = defineTool({
       'name/note/date/amount edits, use update_transactions instead. Tags are add/remove ' +
       "only, never replace (to set a row's whole tag list use update_transaction tag_ids). " +
       'type INCOME/INTERNAL_TRANSFER clears the category server-side — cannot be combined ' +
-      'with category_id. Max 500 targets per call. All ids are validated before the write ' +
+      'with category_id; a type change on a known split parent is refused. Max 500 targets ' +
+      'per call. All ids are validated before the write ' +
       'because Copilot does NOT validate them server-side; if any row is rejected or ' +
       'silently skipped the call throws and names it.',
     inputSchema: {

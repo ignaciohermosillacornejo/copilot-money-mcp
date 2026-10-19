@@ -1261,8 +1261,10 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     evidence:
       "UNKNOWN: what changing a split parent's amount, date or type does to the account " +
       "balance. The children already replaced the parent's amount, so the balance could " +
-      'move twice. update_transaction(s) refuse those edits on a known split parent; name, ' +
-      'category, note, tags and reviewed stay allowed (no balance effect). Never probed.',
+      'move twice. update_transaction(s) refuse those edits on a known split parent, and ' +
+      'bulk_edit_transactions refuses a type change on one (the same field through ' +
+      'bulkEditTransactions); name, category, note, tags and reviewed stay allowed (no ' +
+      'balance effect). Never probed.',
   },
   {
     surface: 'Mutation.addTransactionToRecurring:splitParent',

@@ -563,6 +563,9 @@ const CASES: Record<string, Case> = {
         });
       }
     },
+    // A type change on rows: the split-parent check (#836) loads the
+    // write-resolve window.
+    expectedWriteFetches: writeResolveWindowMonthCount(),
   },
 
   delete_transaction: {

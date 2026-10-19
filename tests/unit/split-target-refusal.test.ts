@@ -33,7 +33,11 @@ import type {
   CreatedTransaction,
   EditTransactionInput,
 } from '../../src/core/graphql/transactions.js';
-import { createMockGraphQLClient, type MockResponsesByOp } from '../helpers/mock-graphql.js';
+import {
+  bulkEditEcho,
+  createMockGraphQLClient,
+  type MockResponsesByOp,
+} from '../helpers/mock-graphql.js';
 import { monthsCovered } from '../../src/utils/date.js';
 
 // Firestore-shaped opaque ids.
@@ -130,6 +134,7 @@ const MUTATIONS: MockResponsesByOp = {
     })),
   },
   User: { user: { id: 'Cv6bN9mQ2wE5rT8yU1iO', budgetingConfig: null } },
+  BulkEditTransactions: bulkEditEcho,
 };
 
 /**
@@ -138,8 +143,8 @@ const MUTATIONS: MockResponsesByOp = {
  * (the Transactions query omits the parent itself). PLAIN_ID is an ordinary
  * cached row.
  */
-function setup() {
-  const client = createMockGraphQLClient(MUTATIONS);
+function setup(overrides: MockResponsesByOp = {}) {
+  const client = createMockGraphQLClient({ ...MUTATIONS, ...overrides });
   const db = new CopilotDatabase('/nonexistent');
   (db as any).dbPath = '/fake';
   (db as any)._transactions = [];
@@ -326,5 +331,102 @@ describe('split_transaction on a split parent or child (#836)', () => {
       ],
     });
     expect(sent('SplitTransaction')).toHaveLength(1);
+  });
+});
+
+describe('bulk_edit_transactions with a type on a split parent (#836)', () => {
+  test('a type change targeting a parent refuses the whole call, nothing sent', async () => {
+    const { tools, sent } = setup();
+    await expect(
+      tools.bulkEditTransactions({
+        rows: [PLAIN_ID, PARENT_ID].map((transaction_id) => ({ transaction_id, ...routing })),
+        type: 'INCOME',
+      })
+    ).rejects.toThrow(/split parent.*unverified/s);
+    expect(sent('BulkEditTransactions')).toHaveLength(0);
+  });
+
+  test('a category change targeting a parent still goes through', async () => {
+    const { tools, sent } = setup();
+    await tools.bulkEditTransactions({
+      rows: [PLAIN_ID, PARENT_ID].map((transaction_id) => ({ transaction_id, ...routing })),
+      category_id: CAT_B,
+    });
+    expect(sent('BulkEditTransactions')).toHaveLength(1);
+  });
+
+  test('a type change on ordinary rows still goes through', async () => {
+    const { tools, sent } = setup();
+    await tools.bulkEditTransactions({
+      rows: [PLAIN_ID, CHILD_1].map((transaction_id) => ({ transaction_id, ...routing })),
+      type: 'INTERNAL_TRANSFER',
+    });
+    expect(sent('BulkEditTransactions')).toHaveLength(1);
+  });
+});
+
+describe('an unchecked split target is not written (#836)', () => {
+  // The window fetch fails, so an ordinary-looking id cannot be shown not to
+  // be a split parent. delete_transaction proceeds on what it holds; these
+  // writes refuse.
+  const failingWindow = { Transactions: new Error('synthetic network failure') };
+
+  test('an amount edit is refused when the window cannot be loaded', async () => {
+    const { tools, sent } = setup(failingWindow);
+    await expect(
+      tools.updateTransaction({ transaction_id: PLAIN_ID, ...routing, amount: 30 })
+    ).rejects.toThrow(/could not check.*nothing was sent/s);
+    expect(sent('EditTransaction')).toHaveLength(0);
+  });
+
+  test('add_transaction_to_recurring and split_transaction are refused too', async () => {
+    const { tools, sent } = setup(failingWindow);
+    await expect(
+      tools.addTransactionToRecurring({
+        transaction_id: PLAIN_ID,
+        ...routing,
+        recurring_id: RECURRING_ID,
+      })
+    ).rejects.toThrow(/could not check/);
+    await expect(
+      tools.splitTransaction({
+        transaction_id: PLAIN_ID,
+        ...routing,
+        splits: [
+          { name: 'A', date: '2025-03-12', amount: 10, category_id: CAT_A },
+          { name: 'B', date: '2025-03-12', amount: 15, category_id: CAT_B },
+        ],
+      })
+    ).rejects.toThrow(/could not check/);
+    expect(sent('AddTransactionToRecurring')).toHaveLength(0);
+    expect(sent('SplitTransaction')).toHaveLength(0);
+  });
+
+  test('an edit that needs no split check is unaffected', async () => {
+    const { tools, sent } = setup(failingWindow);
+    await tools.updateTransaction({ transaction_id: PLAIN_ID, ...routing, note: 'n' });
+    expect(sent('EditTransaction')).toHaveLength(1);
+  });
+});
+
+describe('resolution and the split check share one window load (#836)', () => {
+  test('update_transaction without routing ids: one load resolves the id and checks it', async () => {
+    // The id is not indexed, so resolution loads the window; the split check
+    // must reuse that load instead of refetching the live-tier months.
+    const today = new Date().toISOString().slice(0, 10);
+    const target = { ...node('Ux2iO5pA8sD1fG4hJ7kL', 25), date: today };
+    const { tools, sent } = setup({
+      Transactions: {
+        transactions: {
+          edges: [{ cursor: 'c-1', node: target }],
+          pageInfo: { endCursor: null, hasNextPage: false },
+        },
+      },
+    });
+    await tools.updateTransaction({ transaction_id: target.id, amount: 30 });
+    expect(sent('Transactions')).toHaveLength(
+      monthsCovered(CopilotMoneyTools.writeResolveWindow()).length
+    );
+    expect(sent('EditTransaction')).toHaveLength(1);
   });
 });
