@@ -4869,7 +4869,7 @@ export class CopilotMoneyTools {
       // holds for remove_tag_ids too, so removal is validated as well. Whether
       // removing a tag the app deleted is ever needed depends on whether
       // Copilot strips a deleted tag from its transactions, which is
-      // unverified (ledger: Mutation.deleteTag:cascadesToTransactions); if it
+      // unverified (ledger: Mutation.deleteTag:cascades-to-transactions); if it
       // does not, the remove direction should get an exemption like
       // set_budget's clear.
       await this.validateTagIds(tagIds);

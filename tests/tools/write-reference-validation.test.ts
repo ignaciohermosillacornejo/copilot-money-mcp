@@ -245,6 +245,20 @@ describe('tag ids are validated on every write that takes them (#846)', () => {
     }
   );
 
+  test('bulk_edit_transactions: an unknown tag in remove_tag_ids is rejected too', async () => {
+    // Removal is validated like addition today (ledger:
+    // Mutation.deleteTag:cascades-to-transactions). If that entry settles that
+    // Copilot keeps deleted tags on rows, this is the test to change.
+    const { call, mutationsSent } = setup();
+    await expect(
+      call('bulk_edit_transactions', {
+        rows: [{ ...routing, transaction_id: TX_ID }],
+        remove_tag_ids: [TAG_UNKNOWN],
+      })
+    ).rejects.toThrow(`Tag not found: ${TAG_UNKNOWN}`);
+    expect(mutationsSent()).toEqual([]);
+  });
+
   test.each(Object.keys(TAG_CASES))(
     '%s: control — a known tag id reaches the mutation',
     async (tool) => {
@@ -291,6 +305,7 @@ function referenceSetup() {
       return { tags: tags.map((id) => ({ id, name: `Tag ${id}`, colorName: 'BLUE1' })) };
     },
     EditTransaction: new Error('synthetic: mutation reached the server'),
+    EditBudget: new Error('synthetic: mutation reached the server'),
   });
   const db = new CopilotDatabase('/nonexistent');
   (db as any).dbPath = '/fake';
@@ -338,10 +353,10 @@ describe('reference lists: a miss on a cached list refetches once (#846)', () =>
     const r = referenceSetup();
     spyOn(Date, 'now').mockReturnValue(Date.now());
     await expect(r.edit({ category_id: CAT_KNOWN })).rejects.toThrow(/mutation reached/);
-    // The clear reaches the mutation (unmocked here, so it throws there).
+    // The clear reaches the mutation.
     await expect(
       r.tools.setBudget({ category_id: 'Dd4fG7hJ0kL3zX6cV9bN', amount: '0' })
-    ).rejects.toThrow(/No mock response for operation: EditBudget/);
+    ).rejects.toThrow(/mutation reached/);
     expect(r.fetches.categories).toBe(1);
     // A category created in the app right after is still accepted.
     r.categories.push(CAT_UNKNOWN);
