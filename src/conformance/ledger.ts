@@ -117,6 +117,15 @@
  *                      re-read (not just echoed). Verified by the Tier-2
  *                      round-trip smoke (B4, issue #438).
  *
+ * Aspect case: an aspect of an OPERATION or a whole TYPE is kebab-case
+ * (`Mutation.bulkEditTransactions:silent-skip`, `Query.transactions:response`,
+ * `BulkEditTransactionInput:closed-field-set`); an aspect of a FIELD
+ * (`<Type>.<field>:<aspect>`, which includes `Firestore<Collection>.<field>`
+ * and `<Service>.<path>`) is camelCase, like the field it qualifies
+ * (`Transaction.excluded:synthesized`, `AccountNode.name:resolvesNickname`).
+ * One spelling per shape, so a grep for an aspect finds every mention of it;
+ * tests/conformance/ledger.test.ts enforces it.
+ *
  * How to update:
  * - Adding a write-tool param? Add (or extend) an entry whose `toolParams`
  *   includes the new `<tool>.<param>` path, classed `unverified` until a
@@ -1395,7 +1404,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'observation, not a contract.',
   },
   {
-    surface: 'UnpaidUpcomingRecurrings:horizonAbout14Days',
+    surface: 'UnpaidUpcomingRecurrings:horizon-about-14-days',
     kind: 'response-shape',
     oracle: null,
     class: 'unverified',

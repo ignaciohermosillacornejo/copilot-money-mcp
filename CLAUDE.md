@@ -9,7 +9,7 @@ bun install          # Install dependencies
 bun test             # Run tests
 bun run build        # Build for production
 bun run pack:mcpb    # Create .mcpb bundle for Claude Desktop
-bun run check        # typecheck + lint + format:check + check:version-sync + check:server-json + check:deps-pinned + check:tool-counts + check:privacy-endpoints + check:concealment + check:workflows + check:tracked-files + check:action-pins + check:mutation-guards + bun test --bail
+bun run check        # typecheck + lint + format:check + check:version-sync + check:server-json + check:deps-pinned + check:docs (check:tool-counts, check:bug-corpus, check:privacy-endpoints) + check:concealment + check:workflows + check:tracked-files + check:action-pins + check:mutation-guards + bun test --bail
 bun run fix          # Run lint:fix + format
 ```
 
@@ -19,11 +19,6 @@ bun run fix          # Run lint:fix + format
 > `pull_request` job in `test.yml` (with `fetch-depth: 0`) and can be run by
 > hand with `bun run check:ghost-lines`. With no range it prints `SKIPPED` and
 > exits 0 locally, and exits 1 in CI.
-
-> `check:bug-corpus` (docs/bugs/README.md's counts and index against the entry
-> files) is not in the `check` chain by name, but `bun run check` runs it: its
-> test, `tests/scripts/check-bug-corpus.test.ts`, runs the gate on the real tree
-> under `bun test`. CI also runs it as its own step.
 
 > `bun run check` does NOT run `check:skills` (the `skills/` linter). Run
 > `bun run check:skills` separately when touching anything under `skills/`.

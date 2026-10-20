@@ -209,12 +209,19 @@ describe('conformance ledger', () => {
     expect(dupes).toEqual([]);
   });
 
-  test('every Mutation.* aspect after the colon is kebab-case', () => {
-    // One spelling, so a grep for an aspect finds every mention of it.
-    // Several #836/#848/#825 aspects landed camelCase and were renamed.
+  test('aspect case: operation and type aspects are kebab-case, field aspects camelCase', () => {
+    // One spelling per shape, so a grep for an aspect finds every mention of
+    // it (see the surface-naming docblock in ledger.ts). Several #836/#848/#825
+    // Mutation.* aspects landed camelCase and were renamed.
+    const KEBAB = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+    const CAMEL = /^[a-z][a-zA-Z0-9]*$/;
     const offenders = CONFORMANCE_LEDGER.map((entry) => entry.surface).filter((surface) => {
-      const m = /^Mutation\.[^:]+:(.+)$/.exec(surface);
-      return m !== null && !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(m[1]!);
+      const m = /^([^:]+):(.+)$/.exec(surface);
+      if (m === null) return false;
+      const subject = m[1]!;
+      const ofOperationOrType =
+        subject.startsWith('Mutation.') || subject.startsWith('Query.') || !subject.includes('.');
+      return ofOperationOrType ? !KEBAB.test(m[2]!) : !CAMEL.test(m[2]!);
     });
     expect(offenders).toEqual([]);
   });

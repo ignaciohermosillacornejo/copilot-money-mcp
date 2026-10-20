@@ -19,15 +19,15 @@
  *      token in use has a row;
  *   3. each index class section's count equals its `class:` tally, and its
  *      rows are exactly that class's entries;
- *   4. every entry file is linked from exactly one index row, and every index
- *      row links an existing entry;
+ *   4. every entry file is linked from exactly one index row, every index
+ *      row links an existing entry, and each row's `#id`, found-by and date
+ *      cells match that entry's `id:`, `detected:` and `date:`;
  *   5. every chart bar is count − 1 full blocks (`▌` for a count of 1);
  *   6. every `detected:` value is in TEMPLATE.md's vocabulary, and every
  *      `class:` value is defined in the README's class tables.
  *
- * Runs in CI as its own step, and under `bun run check` through its test
- * (tests/scripts/check-bug-corpus.test.ts runs it on the real tree): the
- * `check` chain itself is at check-concealment's line-length limit.
+ * Run as part of `bun run check` (through `check:docs`), and in CI as its own
+ * step.
  */
 
 import { readdirSync, readFileSync } from 'fs';
@@ -46,8 +46,10 @@ const problems: string[] = [];
 
 interface Entry {
   file: string;
+  id: string | null;
   cls: string | null;
   detected: string | null;
+  date: string | null;
 }
 
 const NON_ENTRIES = new Set(['README.md', 'MINOR.md', 'TEMPLATE.md']);
@@ -59,9 +61,11 @@ const entries: Entry[] = readdirSync(bugsDir)
     const front = /^---\n([\s\S]*?)\n---/.exec(text)?.[1] ?? '';
     const cls = /^class:\s*([\w-]+)/m.exec(front)?.[1] ?? null;
     const detected = /^detected:\s*([\w-]+)/m.exec(front)?.[1] ?? null;
+    const id = /^id:\s*(\d+)/m.exec(front)?.[1] ?? null;
+    const date = /^date:\s*(\d{4}-\d{2}-\d{2})/m.exec(front)?.[1] ?? null;
     if (cls === null) problems.push(`${file}: no \`class:\` in its frontmatter`);
     if (detected === null) problems.push(`${file}: no \`detected:\` in its frontmatter`);
-    return { file, cls, detected };
+    return { file, id, cls, detected, date };
   });
 
 function tally(key: 'cls' | 'detected'): Map<string, number> {
@@ -80,10 +84,15 @@ const template = readFileSync(join(bugsDir, 'TEMPLATE.md'), 'utf8');
 
 // ── 6. Vocabularies ─────────────────────────────────────────────────────────
 
-// TEMPLATE.md's `detected:` comment lists the tokens as `#   a | b | c` lines.
+// TEMPLATE.md lists the `detected:` tokens as `#   a | b | c` comment lines
+// directly under the `detected:` key. Only that run of comment lines is read:
+// a pipe list under another key must not widen the vocabulary.
 const templateFront = /^---\n([\s\S]*?)\n---/.exec(template)?.[1] ?? '';
 const detectedVocab = new Set<string>();
-for (const line of templateFront.split('\n')) {
+const frontLines = templateFront.split('\n');
+const detectedAt = frontLines.findIndex((l) => l.startsWith('detected:'));
+for (const line of detectedAt === -1 ? [] : frontLines.slice(detectedAt + 1)) {
+  if (!line.startsWith('#')) break;
   const m = /^#\s+([\w-]+(?:\s*\|\s*[\w-]+)+)\s*$/.exec(line);
   if (m) for (const t of m[1]!.split('|')) detectedVocab.add(t.trim());
 }
@@ -120,7 +129,9 @@ const chartRows = [
 ];
 const charted = new Set<string>();
 for (const m of chartRows) {
-  const [, token, countText, barCell] = m as unknown as [string, string, string, string];
+  const token = m[1]!;
+  const countText = m[2]!;
+  const barCell = m[3]!;
   charted.add(token);
   const count = Number(countText);
   const actual = byDetected.get(token) ?? 0;
@@ -151,9 +162,12 @@ const sectioned = new Set<string>();
 for (const part of indexSection.split(/^(?=\*\*`[\w-]+`\*\* — \d+$)/m)) {
   const head = /^\*\*`([\w-]+)`\*\* — (\d+)$/m.exec(part);
   if (!head) continue;
-  const [, cls, countText] = head as unknown as [string, string, string];
+  const cls = head[1]!;
+  const countText = head[2]!;
   sectioned.add(cls);
-  const rows = [...part.matchAll(/^\| #\d+ \| \[[^\]]*\]\(([^)]+\.md)\) \|/gm)].map((m) => m[1]!);
+  // `| #id | [title](file.md) | \`found-by\` | YYYY-MM-DD |`
+  const rowMatches = [...part.matchAll(/^\| #(\d+) \| \[[^\]]*\]\(([^)]+\.md)\) \|(.*)$/gm)];
+  const rows = rowMatches.map((m) => m[2]!);
   const actual = byClass.get(cls) ?? 0;
   if (Number(countText) !== actual) {
     problems.push(`index \`${cls}\`: heading says ${countText}, entries say ${actual}`);
@@ -169,6 +183,32 @@ for (const part of indexSection.split(/^(?=\*\*`[\w-]+`\*\* — \d+$)/m)) {
     if (!entry) problems.push(`index \`${cls}\`: links ${file}, which is not an entry file`);
     else if (entry.cls !== cls) {
       problems.push(`index \`${cls}\`: lists ${file}, whose class is \`${entry.cls ?? '(none)'}\``);
+    }
+  }
+  // The row's other derived cells: #id, found-by and date, against frontmatter.
+  for (const m of rowMatches) {
+    const file = m[2]!;
+    const entry = entries.find((e) => e.file === file);
+    if (!entry) continue;
+    const cells = /^ `([\w-]+)` \| (\d{4}-\d{2}-\d{2}) \|$/.exec(m[3]!);
+    if (!cells) {
+      problems.push(`index row for ${file}: the found-by and date cells are unreadable`);
+      continue;
+    }
+    if (m[1] !== entry.id) {
+      problems.push(
+        `index row for ${file}: says #${m[1]!}, the entry's id is ${entry.id ?? '(none)'}`
+      );
+    }
+    if (cells[1] !== entry.detected) {
+      problems.push(
+        `index row for ${file}: found-by \`${cells[1]!}\`, the entry's detected is \`${entry.detected ?? '(none)'}\``
+      );
+    }
+    if (cells[2] !== entry.date) {
+      problems.push(
+        `index row for ${file}: date ${cells[2]!}, the entry's date is ${entry.date ?? '(none)'}`
+      );
     }
   }
 }

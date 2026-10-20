@@ -70,8 +70,8 @@ need it.
   rows as SKIP; SKILL.md now keeps unrun rows, How to extend gained the Last-run
   convention (partial results, findings, the single `not re-run` stamp), P-07
   was scoped to transaction dates, and REC-07 was added for the upcoming horizon.
-- 2026-10-19: #854, #858 and #860 changed behaviour that fourteen rows tested
-  (#863). Their Expected column now states the new behaviour, and their Last run
+- 2026-10-19: #854, #858 and #860 changed behaviour that some rows tested
+  (#863). Those rows' Expected column now states the new behaviour, and their Last run
   keeps the old result with `; fixed by PR #N, needs re-run` (the fix targets that
   row's FAIL) or `; expectation changed by PR #N, needs re-run` (the old result no
   longer tests what the row says). A run that repeats such a row replaces the

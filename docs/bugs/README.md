@@ -126,6 +126,10 @@ this corpus actually says, across all 61 entries:
 | `code-review` | 5 | ████ |
 | **`ci-gate`** — **a checked-in invariant failed** | **0** | |
 
+Each bar is count − 1 full blocks (`▌` for a count of one). `bun run check:bug-corpus` derives
+every count here, the bars and the index below from the entries' frontmatter, and fails on a
+mismatch.
+
 **No bug in this corpus was first caught by a CI gate.** That is the single most useful
 thing this directory says, and it is worth sitting with rather than explaining away.
 

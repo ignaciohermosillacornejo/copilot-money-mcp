@@ -155,4 +155,44 @@ describe('check:bug-corpus', () => {
       }
     );
   });
+
+  test("an index row's found-by or date cell that disagrees with the entry fails", async () => {
+    await withCorpus(
+      (bugs) =>
+        editReadme(bugs, (t) =>
+          t.replace(
+            /^(\| #661 \|[^\n]*\| )`dogfooding` \| (\d{4}-\d{2}-\d{2}) \|$/m,
+            '$1`code-review` | 1999-01-01 |'
+          )
+        ),
+      (r) => {
+        expect(r.code).toBe(1);
+        expect(r.stderr).toContain(
+          `index row for ${ENTRY}: found-by \`code-review\`, the entry's detected is \`dogfooding\``
+        );
+        expect(r.stderr).toContain(`index row for ${ENTRY}: date 1999-01-01`);
+      }
+    );
+  });
+
+  test("a pipe list under another TEMPLATE key does not widen detected:'s vocabulary", async () => {
+    await withCorpus(
+      async (bugs) => {
+        const tpl = join(bugs, 'TEMPLATE.md');
+        const text = await readFile(tpl, 'utf8');
+        const widened = text.replace(/^(status: .*)$/m, '$1\n#   fixed | open | wont-fix');
+        if (widened === text) throw new Error('fixture edit changed nothing');
+        await writeFile(tpl, widened);
+        const path = join(bugs, ENTRY);
+        const entry = await readFile(path, 'utf8');
+        await writeFile(path, entry.replace(/^detected: dogfooding/m, 'detected: open'));
+      },
+      (r) => {
+        expect(r.code).toBe(1);
+        expect(r.stderr).toContain(
+          `${ENTRY}: detected \`open\` is not in TEMPLATE.md's vocabulary`
+        );
+      }
+    );
+  });
 });

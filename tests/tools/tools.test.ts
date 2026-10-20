@@ -3849,12 +3849,14 @@ describe('getHoldings', () => {
   // in the model. Each field alone must be enough, and a sleeve with neither
   // must not be widened — so the flag is load-bearing, not decoration.
   test.each([
-    ['type: cash only', { type: 'cash', is_cash_equivalent: undefined }, true],
-    ['is_cash_equivalent only', { type: undefined, is_cash_equivalent: true }, true],
-    ['neither', { type: 'equity', is_cash_equivalent: false }, false],
+    // [label, matches, fields]: the name binds the first two placeholders;
+    // the fields object stays out of it.
+    ['type: cash only', true, { type: 'cash', is_cash_equivalent: undefined }],
+    ['is_cash_equivalent only', true, { type: undefined, is_cash_equivalent: true }],
+    ['neither', false, { type: 'equity', is_cash_equivalent: false }],
   ] as const)(
-    'a CUR:USD security with %s (%p) is matched by a bare USD filter: %p',
-    async (_label, fields, matches) => {
+    'a CUR:USD security with %s is matched by a bare USD filter: %p',
+    async (_label, matches, fields) => {
       (db as any)._securities = mockSecurities.map((sec) =>
         sec.security_id === 'sec_usd' ? { ...sec, ...fields } : sec
       );
