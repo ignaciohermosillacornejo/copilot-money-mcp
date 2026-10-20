@@ -19,6 +19,7 @@ import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import { isVisibleAccountNode } from '../../models/account.js';
 import { fetchAccounts } from '../../core/graphql/queries/accounts.js';
 import { roundAmount } from '../../utils/round.js';
+import { rejectRemovedArgs, REMOVED_ACCOUNT_ARGS } from '../errors.js';
 import type { ToolSchema } from '../tools.js';
 import {
   DEFAULT_ACCOUNT_LIVE_FIELDS,
@@ -123,6 +124,8 @@ export class LiveAccountsTools {
   constructor(private readonly live: LiveCopilotDatabase) {}
 
   async getAccounts(args: GetAccountsLiveArgs): Promise<GetAccountsLiveResult> {
+    // v3 removed `include_logos` (#597); same migration hint as cache mode.
+    rejectRemovedArgs(args as Record<string, unknown>, REMOVED_ACCOUNT_ARGS);
     const { account_type, include_hidden = false } = args;
 
     const cache = this.live.getAccountsCache();

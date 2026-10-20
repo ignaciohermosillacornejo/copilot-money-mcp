@@ -72,6 +72,14 @@ jobs:
       - name: Mutation-guard registry check
         run: bun run check:mutation-guards
 
+      # Since #845 every tool call is validated against its inputSchema at
+      # dispatch, so a skill that names an argument a tool does not declare is a
+      # runtime error mid-workflow rather than a silent drop. check:skills is the
+      # gate that cross-checks skill arguments against the real schemas; it was
+      # run by hand until now (#877 review).
+      - name: Skills lint
+        run: bun run check:skills
+
       # Free here and nowhere else: CI checks out clean, so the tree must be
       # byte-identical after a step whose whole job is to edit tracked source
       # and put it back. Deliberately NOT a precondition locally — `bun run

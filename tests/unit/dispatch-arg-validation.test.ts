@@ -128,6 +128,33 @@ describe('dispatch validates every tool call against its inputSchema (#845)', ()
     expect(text(city)).toContain("Parameter 'city' is not supported in live mode");
   });
 
+  test('create_category parent_id and get_accounts_live include_logos keep their own messages', async () => {
+    const { server: s } = server();
+    const parent = await s.handleCallTool('create_category', {
+      name: 'Synthetic',
+      color_name: 'BLUE1',
+      emoji: '🛒',
+      parent_id: 'Pq3mW8nR2tV6xL9sK4dB',
+    });
+    expect(text(parent)).toContain('parent_id is not supported on create_category');
+    const logos = await s.handleCallTool('get_accounts_live', { include_logos: true });
+    expect(text(logos)).toContain('`include_logos` was removed in v3.0.0');
+  });
+
+  test('every problem in a call is reported at once', async () => {
+    const { server: s, client } = server();
+    const result = await s.handleCallTool('get_investment_balance_live', {
+      time_frame: '1W',
+      history_limit: 'ten',
+      bogus: true,
+    });
+    const message = text(result);
+    expect(message).toContain("Argument 'time_frame' must be one of");
+    expect(message).toContain("Argument 'history_limit' must be an integer");
+    expect(message).toContain("Unknown argument 'bogus'");
+    expect(client.query).not.toHaveBeenCalled();
+  });
+
   test('a well-formed call is not rejected', () => {
     for (const def of ALL_TOOL_DEFS) {
       expect(validateToolArgs(def, {}), def.name).toBeNull();
@@ -173,12 +200,12 @@ describe('validateToolArgs details', () => {
       { limit: 1.5 },
       "Argument 'limit' must be an integer (a whole number)",
     ],
-    ['null where a value is expected', { limit: null }, 'got null null'],
+    ['null where a value is expected', { limit: null }, '; got null.'],
     ['an array item out of its enum', { tags: ['a', 'c'] }, "Argument 'tags[1]' must be one of"],
     [
       'an unknown key in a closed nested object',
       { edits: [{ id: 'x', extra: 1 }] },
-      "Unknown argument 'edits[0].extra'",
+      "Unknown key 'edits[0].extra'",
     ],
     ['a non-object argument bag', 'nope', 'expected an object of named arguments'],
   ] as const)('%s is rejected', (_label, args, message) => {

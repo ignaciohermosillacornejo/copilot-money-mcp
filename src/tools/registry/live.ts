@@ -13,7 +13,7 @@
  */
 
 import { defineTool } from './types.js';
-import { REMOVED_TRANSACTION_ARGS } from '../errors.js';
+import { REMOVED_ACCOUNT_ARGS, REMOVED_TRANSACTION_ARGS } from '../errors.js';
 import {
   createLiveTransactionsToolSchema,
   type LiveTransactionsTools,
@@ -73,6 +73,9 @@ export const getAccountsLiveTool = defineTool({
   schema: createLiveAccountsToolSchema(),
   readOnly: true,
   requiresLiveReads: true,
+  // The v3 migration hint, as on cache-mode get_accounts: --write implies
+  // --live-reads, so this is the accounts tool most callers reach (#877 review).
+  argsRejectedByHandler: Object.keys(REMOVED_ACCOUNT_ARGS),
   handler: (ctx, args) =>
     ctx.live!.accounts.getAccounts((args as Parameters<LiveAccountsTools['getAccounts']>[0]) ?? {}),
 });

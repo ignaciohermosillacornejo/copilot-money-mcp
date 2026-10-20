@@ -99,6 +99,9 @@ export const createCategoryTool = defineTool({
     },
   },
   readOnly: false,
+  // The handler explains why a parent cannot be set (the API does not accept
+  // parentId on create); dispatch would only call it unknown (#877 review).
+  argsRejectedByHandler: ['parent_id'],
   handler: (ctx, args) => ctx.tools.createCategory(args as ToolMethodArgs<'createCategory'>),
 });
 

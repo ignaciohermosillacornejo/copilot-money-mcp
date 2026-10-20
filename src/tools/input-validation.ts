@@ -74,17 +74,26 @@ function matchesType(value: unknown, type: string): boolean {
 
 function describe(value: unknown): string {
   const text = JSON.stringify(value);
+  // `undefined` here means a value JSON cannot carry (undefined, a function),
+  // which only an in-process caller can pass; JSON-RPC arguments never do.
   return text === undefined ? String(value) : text.length > 60 ? `${text.slice(0, 57)}...` : text;
 }
 
-/** Validate one value against its property schema; returns an error or null. */
+/** "got null", "got string \"x\"": the type is not repeated when it is the value. */
+function got(value: unknown): string {
+  return value === null || value === undefined
+    ? `got ${String(value)}`
+    : `got ${typeOf(value)} ${describe(value)}`;
+}
+
+/** Validate one value against its property schema; returns its first error or null. */
 function checkValue(path: string, value: unknown, schema: PropertySchema): string | null {
   if (schema.type !== undefined && !matchesType(value, schema.type)) {
     const article = /^[aeiou]/.test(schema.type) ? 'an' : 'a';
     return (
       `Argument '${path}' must be ${article} ${schema.type}` +
       (schema.type === 'integer' ? ' (a whole number)' : '') +
-      `; got ${typeOf(value)} ${describe(value)}.`
+      `; ${got(value)}.`
     );
   }
   if (schema.enum !== undefined && !schema.enum.includes(value)) {
@@ -105,42 +114,55 @@ function checkValue(path: string, value: unknown, schema: PropertySchema): strin
     value !== null &&
     !Array.isArray(value)
   ) {
-    const error = checkObject(
+    const errors = checkObject(
       path,
       value as Record<string, unknown>,
       schema.properties,
       schema.additionalProperties === false,
       []
     );
-    if (error) return error;
+    if (errors.length > 0) return errors[0] ?? null;
   }
   return null;
 }
 
+/**
+ * Every problem in one object, in argument order, so a caller who sent two bad
+ * arguments learns about both in one round trip (#877 review).
+ */
 function checkObject(
   path: string,
   value: Record<string, unknown>,
   properties: Record<string, PropertySchema>,
   rejectUnknown: boolean,
   passThrough: readonly string[]
-): string | null {
+): string[] {
   const accepted = Object.keys(properties);
+  const errors: string[] = [];
   for (const [key, child] of Object.entries(value)) {
     const childPath = path ? `${path}.${key}` : key;
+    // Own-property lookup on purpose: JSON.parse creates an own `__proto__`
+    // key, and `properties[key]` would read Object.prototype for it instead of
+    // reporting it as the unknown argument it is.
     const childSchema = Object.prototype.hasOwnProperty.call(properties, key)
       ? properties[key]
       : undefined;
     if (childSchema === undefined) {
       if (!rejectUnknown || passThrough.includes(key)) continue;
-      return accepted.length === 0
-        ? `Unknown argument '${childPath}': ${path ? `'${path}'` : 'this tool'} takes no arguments.`
-        : `Unknown argument '${childPath}'. Accepted ${path ? `keys of '${path}'` : 'arguments'}: ` +
-            `${accepted.join(', ')}.`;
+      errors.push(
+        accepted.length === 0
+          ? path
+            ? `Unknown key '${childPath}': '${path}' accepts no keys.`
+            : `Unknown argument '${childPath}': this tool takes no arguments.`
+          : `Unknown ${path ? 'key' : 'argument'} '${childPath}'. Accepted ` +
+              `${path ? `keys of '${path}'` : 'arguments'}: ${accepted.join(', ')}.`
+      );
+      continue;
     }
     const error = checkValue(childPath, child, childSchema);
-    if (error) return error;
+    if (error) errors.push(error);
   }
-  return null;
+  return errors;
 }
 
 /**
@@ -153,12 +175,12 @@ export function validateToolArgs(tool: ValidatableTool, args: unknown): string |
   if (typeof args !== 'object' || args === null || Array.isArray(args)) {
     return `Invalid arguments for ${tool.name}: expected an object of named arguments.`;
   }
-  const error = checkObject(
+  const errors = checkObject(
     '',
     args as Record<string, unknown>,
     tool.schema.inputSchema.properties as Record<string, PropertySchema>,
     true,
     tool.argsRejectedByHandler ?? []
   );
-  return error === null ? null : `Invalid arguments for ${tool.name}: ${error}`;
+  return errors.length === 0 ? null : `Invalid arguments for ${tool.name}: ${errors.join(' ')}`;
 }
