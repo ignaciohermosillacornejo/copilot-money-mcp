@@ -3378,7 +3378,8 @@ export class CopilotMoneyTools {
     // with a clear error rather than sending a request the server will refuse.
     // First, before the other checks, so a caller asking for a parent always
     // learns that it cannot be done (it is in argsRejectedByHandler, #877).
-    if (args.parent_id !== undefined) {
+    // Presence, not value, like the dispatch pass-through that sends it here.
+    if (Object.prototype.hasOwnProperty.call(args, 'parent_id')) {
       throw new Error(
         "parent_id is not supported on create_category: Copilot's GraphQL API " +
           'does not accept parentId on CreateCategoryInput. Create the category ' +

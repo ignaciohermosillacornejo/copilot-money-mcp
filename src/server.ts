@@ -285,12 +285,16 @@ export class CopilotMoneyServer {
     // that failed to throw would hit the unavailable cache and error anyway;
     // tests/unit/dispatch-arg-validation.test.ts walks every such argument with
     // and without a cache to keep that from happening.
-    const carriesHandlerRejectedArg =
-      typedArgs !== undefined &&
-      (toolDef.argsRejectedByHandler ?? []).some((key) =>
-        Object.prototype.hasOwnProperty.call(typedArgs, key)
-      );
-    if (availability && !availability.available && !carriesHandlerRejectedArg) {
+    if (
+      availability &&
+      !availability.available &&
+      !(
+        typedArgs !== undefined &&
+        (toolDef.argsRejectedByHandler ?? []).some((key) =>
+          Object.prototype.hasOwnProperty.call(typedArgs, key)
+        )
+      )
+    ) {
       // "Could not look" is not "absent" (#774): when the check failed to read,
       // say so rather than telling an installed, synced user to install.
       // This message names an errno and no path (`missingDatabaseError`); the

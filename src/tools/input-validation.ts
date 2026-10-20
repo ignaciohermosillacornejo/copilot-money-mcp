@@ -11,7 +11,8 @@
  * covered by being registered.
  *
  * What it checks, at the top level and recursively through array items and
- * object properties:
+ * object properties, collecting every problem rather than stopping at the
+ * first (#877):
  *   - an argument the schema does not declare is an error naming it and listing
  *     the accepted ones (for a nested object, only when its schema says
  *     `additionalProperties: false`);
@@ -24,12 +25,24 @@
  * says what to do (a date range for a lookup, a calendar date), and those
  * messages are better than a generic one.
  *
- * One tolerance: a tool may name arguments its handler rejects itself, with a
- * more specific message than "unknown argument" — the v3 migration errors for
- * `compact` / `include_logos`, and get_transactions_live's "not supported in
- * live mode" for the location filters. Those keys pass through to the handler
- * (`argsRejectedByHandler`).
+ * Reporting: problems that differ only by array index are collapsed into one
+ * line naming how many items share it (a wrong key repeated across a 200-row
+ * batch is one sentence, not 200), and at most MAX_REPORTED distinct problems
+ * are listed, then a count of the rest (#881 review).
+ *
+ * One tolerance: a tool may name top-level arguments its handler rejects
+ * itself, with a more specific message than "unknown argument"
+ * (`argsRejectedByHandler`). Three kinds today: the v3 migration errors for
+ * `compact` / `include_logos`; get_transactions_live's "not supported in live
+ * mode" for the location filters; and a capability Copilot's API lacks
+ * (`parent_id` on create_category). Those keys pass through to the handler, and
+ * such a call also skips the local-cache gate in src/server.ts so the message
+ * arrives without a cache. tests/unit/dispatch-arg-validation.test.ts walks
+ * every entry, with and without a cache, and requires the handler's own error.
  */
+
+/** Distinct problems listed before the rest are only counted. */
+export const MAX_REPORTED = 15;
 
 /** The subset of a JSON Schema this validator reads. */
 interface PropertySchema {
@@ -188,5 +201,28 @@ export function validateToolArgs(tool: ValidatableTool, args: unknown): string |
     true,
     tool.argsRejectedByHandler ?? []
   );
-  return errors.length === 0 ? null : `Invalid arguments for ${tool.name}: ${errors.join(' ')}`;
+  return errors.length === 0 ? null : `Invalid arguments for ${tool.name}: ${summarize(errors)}`;
+}
+
+/**
+ * Collapse problems that differ only by array index, then cap the list. A
+ * collapsed line reads with `[*]` in place of the indices and says how many
+ * occurrences share it, in first-seen order.
+ */
+function summarize(errors: readonly string[]): string {
+  const groups = new Map<string, { first: string; count: number }>();
+  for (const error of errors) {
+    const key = error.replace(/\[\d+\]/g, '[*]');
+    const group = groups.get(key);
+    if (group) group.count++;
+    else groups.set(key, { first: error, count: 1 });
+  }
+  const lines = [...groups.entries()].map(([key, { first, count }]) =>
+    count === 1 ? first : `${key.replace(/\.$/, '')} (in ${count} items).`
+  );
+  const shown = lines.slice(0, MAX_REPORTED);
+  const hidden = lines.length - shown.length;
+  return hidden > 0
+    ? `${shown.join(' ')} ...and ${hidden} more problem${hidden === 1 ? '' : 's'}; fix these first.`
+    : shown.join(' ');
 }

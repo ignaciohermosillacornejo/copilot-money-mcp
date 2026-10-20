@@ -17,7 +17,7 @@ import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotMoneyServer } from '../../src/server.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import { ALL_TOOL_DEFS } from '../../src/tools/registry/index.js';
-import { validateToolArgs } from '../../src/tools/input-validation.js';
+import { MAX_REPORTED, validateToolArgs } from '../../src/tools/input-validation.js';
 
 const NO_CACHE_PATH = '/nonexistent/no-native-app-installed';
 
@@ -193,17 +193,23 @@ describe('dispatch validates every tool call against its inputSchema (#845)', ()
     const entries = ALL_TOOL_DEFS.flatMap((def) =>
       (def.argsRejectedByHandler ?? []).map((name) => ({ def, name }))
     );
-    expect(entries.length).toBeGreaterThanOrEqual(10);
+    // The exact count, so an entry cannot disappear silently.
+    expect(entries.length).toBe(11);
     for (const { def, name } of entries) {
       // A declared argument needs no tolerance; listing one hides a schema bug.
       expect(Object.keys(props(def)), `${def.name}.${name}`).not.toContain(name);
     }
     for (const make of [serverWithCache, server]) {
       const { server: s, client } = make();
-      for (const { def, name } of entries) {
-        const result = await s.handleCallTool(def.name, { [name]: true });
+      // `false` too: the tolerance is about PRESENCE (compact: false is still
+      // a removed argument), so a handler reading the value would fail here.
+      for (const { def, name, value } of entries.flatMap((e) => [
+        { ...e, value: true },
+        { ...e, value: false },
+      ])) {
+        const result = await s.handleCallTool(def.name, { [name]: value });
         const message = text(result);
-        const where = `${def.name}.${name} (${make.name})`;
+        const where = `${def.name}.${name}=${String(value)} (${make.name})`;
         expect(result.isError, where).toBe(true);
         expect(message, where).not.toContain('Unknown argument');
         expect(message, where).not.toContain('Database not available');
@@ -213,6 +219,22 @@ describe('dispatch validates every tool call against its inputSchema (#845)', ()
       expect(client.query).not.toHaveBeenCalled();
       expect(client.mutate).not.toHaveBeenCalled();
     }
+  });
+
+  test('a problem repeated across a batch is one line, and the list is capped', () => {
+    const def = ALL_TOOL_DEFS.find((d) => d.name === 'update_transactions')!;
+    const repeated = validateToolArgs(def, {
+      edits: Array.from({ length: 200 }, (_, i) => ({ id: `row-${i}` })),
+    })!;
+    expect(repeated).toContain("Unknown key 'edits[*].id'");
+    expect(repeated).toContain('(in 200 items)');
+    expect(repeated.length).toBeLessThan(400);
+
+    const many = validateToolArgs(def, {
+      edits: Array.from({ length: 30 }, (_, i) => ({ [`k${i}`]: 1 })),
+    })!;
+    expect(many).toContain('...and 15 more problems; fix these first.');
+    expect(many.match(/Unknown key/g)?.length).toBe(MAX_REPORTED);
   });
 
   test('every problem inside a nested object is reported too', () => {
