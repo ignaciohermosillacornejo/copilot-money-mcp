@@ -224,6 +224,7 @@
     "tests/tools/bulk-edit-transactions.test.ts",
     "tests/tools/live-write-coherence.test.ts",
     "tests/tools/optimistic-cache.test.ts",
+    "tests/tools/read-date-validation.test.ts",
     "tests/tools/review-transactions-batching.test.ts",
     "tests/tools/update-transactions-batching.test.ts",
     "tests/tools/tools.test.ts",

@@ -82,7 +82,14 @@ import {
   REMOVED_ACCOUNT_ARGS,
   REMOVED_TRANSACTION_ARGS,
 } from './errors.js';
-import { isCalendarDate, isCalendarMonth, parsePeriod, validateDateArg } from '../utils/date.js';
+import {
+  isCalendarDate,
+  isCalendarMonth,
+  parsePeriod,
+  // Read-filter dates: `YYYY-MM-DD` and a real calendar day, one message in
+  // both modes (#825).
+  validateDateArg as validateDate,
+} from '../utils/date.js';
 import {
   readScheduledSmokeStatus,
   type ScheduledSmokeStatus,
@@ -396,14 +403,6 @@ function validateLimit(
  */
 function formatAmountForMessage(n: number): string {
   return String(Number(n.toFixed(6)));
-}
-
-/**
- * Validate a read-filter date: `YYYY-MM-DD` and a real calendar day (#825).
- * The shared validateDateArg, so cache and live tools refuse the same way.
- */
-function validateDate(date: string | undefined, paramName: string): string | undefined {
-  return validateDateArg(date, paramName);
 }
 
 /**
@@ -3086,8 +3085,8 @@ export class CopilotMoneyTools {
     const validatedLimit = validateLimit(options.limit, DEFAULT_QUERY_LIMIT);
     const validatedOffset = validateOffset(options.offset);
 
-    if (start_date) validateDate(start_date, 'start_date');
-    if (end_date) validateDate(end_date, 'end_date');
+    validateDate(start_date, 'start_date');
+    validateDate(end_date, 'end_date');
 
     const prices = await this.db.getInvestmentPrices({
       tickerSymbol: ticker_symbol,
@@ -6353,8 +6352,8 @@ export class CopilotMoneyTools {
         `Invalid granularity: ${granularity}. Must be one of: ${BALANCE_HISTORY_GRANULARITIES.join(', ')}`
       );
     }
-    if (start_date) validateDate(start_date, 'start_date');
-    if (end_date) validateDate(end_date, 'end_date');
+    validateDate(start_date, 'start_date');
+    validateDate(end_date, 'end_date');
 
     const raw = await this.db.getBalanceHistory({
       accountId: account_id,

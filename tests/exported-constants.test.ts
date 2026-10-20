@@ -596,12 +596,12 @@ const PINNED: Record<string, readonly string[]> = {
   PERIODS: [
     'this_month',
     'last_month',
-    'this_year',
-    'last_year',
     'last_7_days',
     'last_30_days',
     'last_90_days',
     'ytd',
+    'this_year',
+    'last_year',
   ],
   // src/models/investment-price.ts
   PRICE_TYPES: ['daily', 'hf'],

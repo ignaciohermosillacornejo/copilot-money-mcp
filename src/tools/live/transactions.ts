@@ -36,7 +36,7 @@ import {
   resolveCategoryFilter,
   type CategoryFilterNode,
 } from '../category-filter.js';
-import { parsePeriod, validateDateArg } from '../../utils/date.js';
+import { parsePeriod, PERIODS, validateDateArg } from '../../utils/date.js';
 
 /**
  * Subset of `TRANSACTION_TYPE_FILTERS` supported in live mode (`foreign` and
@@ -551,10 +551,6 @@ export class LiveTransactionsTools {
 
   private validate(opts: GetTransactionsLiveOptions): void {
     const o = opts as Record<string, unknown>;
-    // Same check and message as the cache tools (#825): a malformed or
-    // impossible date must not reach the server as a filter.
-    validateDateArg(opts.start_date, 'start_date');
-    validateDateArg(opts.end_date, 'end_date');
     const supported = `start_date, end_date, period, account_id (+ item_id), category, merchant, query, tag, min_amount, max_amount, limit, offset, pending, exclude_transfers, exclude_deleted, exclude_excluded, transaction_type (${LIVE_TRANSACTION_TYPES.join(', ')}), transaction_id (+ account_id + item_id), fields`;
 
     for (const key of UNSUPPORTED_KEYS) {
@@ -566,6 +562,12 @@ export class LiveTransactionsTools {
         );
       }
     }
+
+    // Same check and message as the cache tools (#825): a malformed or
+    // impossible date must not reach the server as a filter. After the
+    // unsupported-argument check, whose message is the more actionable.
+    validateDateArg(opts.start_date, 'start_date');
+    validateDateArg(opts.end_date, 'end_date');
 
     if (
       opts.transaction_type !== undefined &&
@@ -665,8 +667,7 @@ export function createLiveTransactionsToolSchema(): ToolSchema {
       properties: {
         period: {
           type: 'string',
-          description:
-            'Period shorthand: this_month, last_month, last_7_days, last_30_days, last_90_days, ytd, this_year, last_year',
+          description: `Period shorthand: ${PERIODS.join(', ')}`,
         },
         start_date: {
           type: 'string',

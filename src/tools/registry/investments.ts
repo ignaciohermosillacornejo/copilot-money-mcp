@@ -26,8 +26,8 @@ export const getInvestmentPricesTool = defineTool({
           type: 'string',
           description: 'Filter by ticker symbol (e.g., "AAPL", "BTC-USD", "VTSAX")',
         },
-        start_date: { type: 'string', description: 'Start date (YYYY-MM-DD or YYYY-MM)' },
-        end_date: { type: 'string', description: 'End date (YYYY-MM-DD or YYYY-MM)' },
+        start_date: { type: 'string', description: 'Start date (YYYY-MM-DD)' },
+        end_date: { type: 'string', description: 'End date (YYYY-MM-DD)' },
         price_type: {
           type: 'string',
           enum: [...PRICE_TYPES],

@@ -3,6 +3,7 @@
  */
 
 import { defineTool, type ToolMethodArgs } from './types.js';
+import { PERIODS } from '../../utils/date.js';
 import { RECURRING_FREQUENCIES, RECURRING_STATE_VALUES } from '../../core/graphql/recurrings.js';
 import { RECURRING_CACHE_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
 
@@ -35,10 +36,7 @@ export const getRecurringTransactionsTool = defineTool({
         },
         period: {
           type: 'string',
-          description:
-            'Period to analyze (default: last_90_days). ' +
-            'Options: this_month, last_month, last_7_days, last_30_days, ' +
-            'last_90_days, ytd, this_year, last_year',
+          description: `Period to analyze (default: last_90_days). Options: ${PERIODS.join(', ')}`,
         },
         start_date: {
           type: 'string',

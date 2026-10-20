@@ -25,8 +25,11 @@ export function computeTotalReturnPercent(
   costBasis: number
 ): number | undefined {
   if (costBasis === 0) return undefined;
-  // `+ 0` folds -0 to 0, so a tiny loss does not print as "-0".
-  return Math.trunc((totalReturn / Math.abs(costBasis)) * 10000) / 100 + 0;
+  // Snapped to 9 places before truncating, so float error (0.57% computing
+  // as 56.99999999999999 hundredths) does not cost a hundredth; `+ 0` folds
+  // -0 to 0, so a tiny loss does not print as "-0".
+  const hundredths = Number(((totalReturn / Math.abs(costBasis)) * 10000).toFixed(9));
+  return Math.trunc(hundredths) / 100 + 0;
 }
 
 /**

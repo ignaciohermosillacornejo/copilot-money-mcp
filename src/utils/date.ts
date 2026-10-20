@@ -73,16 +73,19 @@ export function getMonthRange(year: number, month: number): [string, string] {
   return [start, end];
 }
 
-/** Every period parsePeriod accepts, in the order its error lists them. */
+/**
+ * Every period parsePeriod accepts, in the order its error and the tool
+ * descriptions list them (the descriptions are built from this list).
+ */
 export const PERIODS = [
   'this_month',
   'last_month',
-  'this_year',
-  'last_year',
   'last_7_days',
   'last_30_days',
   'last_90_days',
   'ytd',
+  'this_year',
+  'last_year',
 ] as const;
 
 /**

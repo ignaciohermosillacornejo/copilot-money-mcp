@@ -50,6 +50,11 @@ describe('computeTotalReturnPercent truncates toward zero (#825)', () => {
     expect(computeTotalReturnPercent(8.379, 100)).toBe(8.37);
   });
 
+  test('float error does not cost a hundredth', () => {
+    // (0.57 / 100) * 10000 is 56.99999999999999 in floating point.
+    expect(computeTotalReturnPercent(0.57, 100)).toBe(0.57);
+  });
+
   test('a tiny loss is 0, not -0', () => {
     expect(Object.is(computeTotalReturnPercent(-0.001, 100), 0)).toBe(true);
   });

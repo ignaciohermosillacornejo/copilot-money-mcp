@@ -41,7 +41,7 @@ Promote a row to a full entry if a later instance turns out to be user-visible.
 | #350 | Compaction could delete an `.ldb` between `readdir` and `stat`/`copy` | `stale-cache-semantics` | #352 |
 | #357 | Category flattening discarded parent linkage, making the hierarchy unrecoverable — the enabler for #363 | `aggregation-double-count` | #357 |
 | #360 | Charge cards returned `limit: 0` instead of `null`, risking divide-by-zero utilization | `external-api-drift` | #360 |
-| #379 | `total_return_percent` rounded half-up while the app floors — off by 0.01 vs the UI | `ui-parity` | #379 |
+| #379 | `total_return_percent` rounded half-up while the app floors — off by 0.01 vs the UI (later corrected: the app truncates toward zero, so floor was still off for losses; see ledger `CopilotWebUi.totalReturnPercent:truncatedTowardZero`, #825) | `ui-parity` | #379 |
 | #414 | `update_transaction` couldn't rename: `name` writability was assumed absent, never probed | `external-api-drift` | #414 |
 | #448 | Repo instructions had drifted from the code, steering agents with wrong facts | `doc-reality-drift` | #448 |
 | #514 | `split_transaction` read parents from the cache only, failing for out-of-window parents | `stale-cache-semantics` | #514 |

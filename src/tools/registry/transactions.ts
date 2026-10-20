@@ -3,6 +3,7 @@
  */
 
 import { defineTool, type ToolMethodArgs } from './types.js';
+import { PERIODS } from '../../utils/date.js';
 import { TRANSACTION_TYPE_FILTERS } from '../constants.js';
 import { TRANSACTION_TYPES } from '../../core/graphql/transactions.js';
 import { TRANSACTION_FIELDS_PARAM_SCHEMA } from '../field-selection.js';
@@ -54,10 +55,7 @@ export const getTransactionsTool = defineTool({
         // Date filters
         period: {
           type: 'string',
-          description:
-            'Period shorthand: this_month, last_month, ' +
-            'last_7_days, last_30_days, last_90_days, ytd, ' +
-            'this_year, last_year',
+          description: `Period shorthand: ${PERIODS.join(', ')}`,
         },
         start_date: {
           type: 'string',
