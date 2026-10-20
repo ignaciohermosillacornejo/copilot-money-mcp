@@ -277,7 +277,20 @@ export class CopilotMoneyServer {
     // a second call would pay the retry bound twice on exactly the slow path,
     // and could disagree with the first.
     const availability = needsLocalCache ? this.db.availability() : undefined;
-    if (availability && !availability.available) {
+    // A call carrying an argument the handler rejects itself (a v3-removed
+    // argument such as `compact` / `include_logos`) skips the cache gate: the
+    // handler throws its own, more useful message before it reads anything, so
+    // a pre-v3 caller with no readable cache hears "this argument was removed,
+    // pass X instead", not "Database not available" (#877 review). A handler
+    // that failed to throw would hit the unavailable cache and error anyway;
+    // tests/unit/dispatch-arg-validation.test.ts walks every such argument with
+    // and without a cache to keep that from happening.
+    const carriesHandlerRejectedArg =
+      typedArgs !== undefined &&
+      (toolDef.argsRejectedByHandler ?? []).some((key) =>
+        Object.prototype.hasOwnProperty.call(typedArgs, key)
+      );
+    if (availability && !availability.available && !carriesHandlerRejectedArg) {
       // "Could not look" is not "absent" (#774): when the check failed to read,
       // say so rather than telling an installed, synced user to install.
       // This message names an errno and no path (`missingDatabaseError`); the

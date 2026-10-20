@@ -86,26 +86,31 @@ function got(value: unknown): string {
     : `got ${typeOf(value)} ${describe(value)}`;
 }
 
-/** Validate one value against its property schema; returns its first error or null. */
-function checkValue(path: string, value: unknown, schema: PropertySchema): string | null {
+/**
+ * Validate one value against its property schema; returns every error, through
+ * array items and nested objects, so a nested problem costs no extra round
+ * trip either (#877 review). A type mismatch stops at that value: its enum,
+ * items and keys are meaningless once the type is wrong.
+ */
+function checkValue(path: string, value: unknown, schema: PropertySchema): string[] {
   if (schema.type !== undefined && !matchesType(value, schema.type)) {
     const article = /^[aeiou]/.test(schema.type) ? 'an' : 'a';
-    return (
+    return [
       `Argument '${path}' must be ${article} ${schema.type}` +
-      (schema.type === 'integer' ? ' (a whole number)' : '') +
-      `; ${got(value)}.`
-    );
+        (schema.type === 'integer' ? ' (a whole number)' : '') +
+        `; ${got(value)}.`,
+    ];
   }
   if (schema.enum !== undefined && !schema.enum.includes(value)) {
-    return (
+    return [
       `Argument '${path}' must be one of ${schema.enum.map((v) => describe(v)).join(', ')}; ` +
-      `got ${describe(value)}.`
-    );
+        `got ${describe(value)}.`,
+    ];
   }
+  const errors: string[] = [];
   if (Array.isArray(value) && schema.items !== undefined) {
     for (let i = 0; i < value.length; i++) {
-      const error = checkValue(`${path}[${i}]`, value[i], schema.items);
-      if (error) return error;
+      errors.push(...checkValue(`${path}[${i}]`, value[i], schema.items));
     }
   }
   if (
@@ -114,16 +119,17 @@ function checkValue(path: string, value: unknown, schema: PropertySchema): strin
     value !== null &&
     !Array.isArray(value)
   ) {
-    const errors = checkObject(
-      path,
-      value as Record<string, unknown>,
-      schema.properties,
-      schema.additionalProperties === false,
-      []
+    errors.push(
+      ...checkObject(
+        path,
+        value as Record<string, unknown>,
+        schema.properties,
+        schema.additionalProperties === false,
+        []
+      )
     );
-    if (errors.length > 0) return errors[0] ?? null;
   }
-  return null;
+  return errors;
 }
 
 /**
@@ -148,6 +154,7 @@ function checkObject(
       ? properties[key]
       : undefined;
     if (childSchema === undefined) {
+      // mutation-guard: handler-rejected arguments pass dispatch
       if (!rejectUnknown || passThrough.includes(key)) continue;
       errors.push(
         accepted.length === 0
@@ -159,8 +166,7 @@ function checkObject(
       );
       continue;
     }
-    const error = checkValue(childPath, child, childSchema);
-    if (error) errors.push(error);
+    errors.push(...checkValue(childPath, child, childSchema));
   }
   return errors;
 }

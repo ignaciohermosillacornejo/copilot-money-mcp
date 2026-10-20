@@ -8,13 +8,42 @@
  * and before any handler, which the untouched GraphQL mock proves.
  */
 
-import { describe, test, expect, mock } from 'bun:test';
+import { describe, test, expect, mock, afterAll } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { CopilotDatabase } from '../../src/core/database.js';
+import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotMoneyServer } from '../../src/server.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import { ALL_TOOL_DEFS } from '../../src/tools/registry/index.js';
 import { validateToolArgs } from '../../src/tools/input-validation.js';
 
 const NO_CACHE_PATH = '/nonexistent/no-native-app-installed';
+
+// A directory with a dummy .ldb, so availability() reports a cache and the
+// cache-mode handlers run (#877 review: the no-cache server never reaches them).
+const CACHE_DIR = mkdtempSync(join(tmpdir(), 'copilot-dispatch-'));
+writeFileSync(join(CACHE_DIR, 'dummy.ldb'), '');
+afterAll(() => rmSync(CACHE_DIR, { recursive: true, force: true }));
+
+function serverWithCache(): ReturnType<typeof server> {
+  const client = {
+    query: mock(() => Promise.reject(new Error('a handler ran'))),
+    mutate: mock(() => Promise.reject(new Error('a handler ran'))),
+  };
+  const s = new CopilotMoneyServer(
+    CACHE_DIR,
+    undefined,
+    true,
+    true,
+    client as unknown as GraphQLClient
+  );
+  const db = new CopilotDatabase(CACHE_DIR);
+  db._injectDataForTesting({ transactions: [], accounts: [], userCategories: [] });
+  s._injectForTesting(db, new CopilotMoneyTools(db, client as unknown as GraphQLClient));
+  return { server: s, client };
+}
 
 function server(): {
   server: CopilotMoneyServer;
@@ -153,6 +182,50 @@ describe('dispatch validates every tool call against its inputSchema (#845)', ()
     expect(message).toContain("Argument 'history_limit' must be an integer");
     expect(message).toContain("Unknown argument 'bogus'");
     expect(client.query).not.toHaveBeenCalled();
+  });
+
+  // #877 review: argsRejectedByHandler is a hole by construction — a listed
+  // argument skips validation — so an entry whose handler does NOT reject it
+  // is the #845 silent drop again. Walk every entry, with and without a local
+  // cache, and require the handler's own error, naming the argument, before any
+  // network call. A tool added with a tolerance is covered by being registered.
+  test('every argsRejectedByHandler entry is rejected by its own handler, with or without a cache', async () => {
+    const entries = ALL_TOOL_DEFS.flatMap((def) =>
+      (def.argsRejectedByHandler ?? []).map((name) => ({ def, name }))
+    );
+    expect(entries.length).toBeGreaterThanOrEqual(10);
+    for (const { def, name } of entries) {
+      // A declared argument needs no tolerance; listing one hides a schema bug.
+      expect(Object.keys(props(def)), `${def.name}.${name}`).not.toContain(name);
+    }
+    for (const make of [serverWithCache, server]) {
+      const { server: s, client } = make();
+      for (const { def, name } of entries) {
+        const result = await s.handleCallTool(def.name, { [name]: true });
+        const message = text(result);
+        const where = `${def.name}.${name} (${make.name})`;
+        expect(result.isError, where).toBe(true);
+        expect(message, where).not.toContain('Unknown argument');
+        expect(message, where).not.toContain('Database not available');
+        expect(message, where).not.toContain('a handler ran');
+        expect(message, where).toContain(name);
+      }
+      expect(client.query).not.toHaveBeenCalled();
+      expect(client.mutate).not.toHaveBeenCalled();
+    }
+  });
+
+  test('every problem inside a nested object is reported too', () => {
+    const def = ALL_TOOL_DEFS.find((d) => d.name === 'update_transactions')!;
+    const message = validateToolArgs(def, {
+      edits: [
+        { transaction_id: 1, bogus: 2 },
+        { transaction_id: 'Pq3mW8nR2tV6xL9sK4dB', nonsense: 3 },
+      ],
+    });
+    expect(message).toContain("Argument 'edits[0].transaction_id' must be a string");
+    expect(message).toContain("Unknown key 'edits[0].bogus'");
+    expect(message).toContain("Unknown key 'edits[1].nonsense'");
   });
 
   test('a well-formed call is not rejected', () => {

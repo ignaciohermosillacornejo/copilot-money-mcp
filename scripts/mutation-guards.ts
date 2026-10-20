@@ -968,6 +968,28 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     ],
     expectFails: 'tests/unit/dispatch-arg-validation.test.ts',
   },
+  {
+    name: 'handler-rejected arguments pass dispatch',
+    file: 'src/tools/input-validation.ts',
+    invariant:
+      'An argument a tool lists in argsRejectedByHandler must reach that handler, which ' +
+      'explains it better than dispatch can: a v3 migration hint, "not supported in live ' +
+      'mode", or why Copilot cannot do it (#877). Without the pass-through the caller gets a ' +
+      'bare "unknown argument" and, for a removed argument, no hint of what to pass instead.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '      // mutation-guard: handler-rejected arguments pass dispatch\n' +
+        '      if (!rejectUnknown || passThrough.includes(key)) continue;',
+      with:
+        '      // mutation-guard: handler-rejected arguments pass dispatch\n' +
+        '      if (!rejectUnknown) continue;',
+    },
+    expectFailingTests: [
+      'every argsRejectedByHandler entry is rejected by its own handler, with or without a cache',
+    ],
+    expectFails: 'tests/unit/dispatch-arg-validation.test.ts',
+  },
 ];
 
 // ---------------------------------------------------------------------------

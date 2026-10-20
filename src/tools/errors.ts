@@ -55,12 +55,13 @@ export function graphQLErrorToMcpError(e: GraphQLError): string {
 
 /**
  * Arguments removed in v3, mapped to the migration hint for each. Consumed
- * by {@link rejectRemovedArgs}; `get_accounts`' retired `include_logos` is
- * the only entry (#597 Tier 2). Tool-scoped on purpose: `get_transactions`'
- * retired `compact` reuses {@link rejectRemovedArgs}, the generic half, and
- * carries its own {@link REMOVED_TRANSACTION_ARGS} rather than widening this
- * map, whose name would then be a lie about what a caller of `get_accounts`
- * can trip over.
+ * by {@link rejectRemovedArgs}; the accounts tools' retired `include_logos` is
+ * the only entry (#597 Tier 2). It backs both `get_accounts` and, since #877,
+ * `get_accounts_live`. Scoped to the accounts tools on purpose:
+ * `get_transactions`' retired `compact` reuses {@link rejectRemovedArgs}, the
+ * generic half, and carries its own {@link REMOVED_TRANSACTION_ARGS} rather
+ * than widening this map, whose name would then be a lie about what a caller
+ * of the accounts tools can trip over.
  */
 export const REMOVED_ACCOUNT_ARGS = {
   // Covers BOTH audiences, because the guard fires on PRESENCE: a caller

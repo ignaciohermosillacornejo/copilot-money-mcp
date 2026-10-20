@@ -75,14 +75,6 @@ jobs:
       - name: Mutation-guard registry check
         run: bun run check:mutation-guards
 
-      # Since #845 every tool call is validated against its inputSchema at
-      # dispatch, so a skill that names an argument a tool does not declare is a
-      # runtime error mid-workflow rather than a silent drop. check:skills is the
-      # gate that cross-checks skill arguments against the real schemas; it was
-      # run by hand until now (#877 review).
-      - name: Skills lint
-        run: bun run check:skills
-
       # Free here and nowhere else: CI checks out clean, so the tree must be
       # byte-identical after a step whose whole job is to edit tracked source
       # and put it back. Deliberately NOT a precondition locally — `bun run
@@ -109,6 +101,15 @@ jobs:
             echo "$left"
             exit 1
           fi
+
+      # Since #845 every tool call is validated against its inputSchema at
+      # dispatch, so a skill that names an argument a tool does not declare is a
+      # runtime error mid-workflow rather than a silent drop. check:skills is the
+      # gate that cross-checks skill arguments against the real schemas (#877).
+      # After the tree check on purpose, so that check's message stays about the
+      # mutation-guard run alone.
+      - name: Skills lint
+        run: bun run check:skills
 
       # Fork PRs only — a same-repo branch already required push access, so
       # there is no identity to forge. Reads public commit metadata with the

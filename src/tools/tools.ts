@@ -3371,17 +3371,13 @@ export class CopilotMoneyTools {
     is_excluded?: boolean;
     parent_id?: string;
   }): Promise<{ success: true; category_id: string; name: string; color_name: string }> {
-    const client = this.getGraphQLClient();
-    if (!args.name?.trim()) throw new Error('Category name must not be empty');
-    if (!args.color_name?.trim()) throw new Error('color_name is required');
-    if (!args.emoji?.trim()) throw new Error('emoji is required');
-    const colorName = validateColorName(args.color_name);
-
     // Copilot's GraphQL schema does not accept parentId on CreateCategoryInput
     // (nor on EditCategoryInput). Parent/child category hierarchies exist in
     // the local cache and can be read via get_categories(parent_id=...), but
     // they are not writable through the web app's GraphQL mutations. Reject
     // with a clear error rather than sending a request the server will refuse.
+    // First, before the other checks, so a caller asking for a parent always
+    // learns that it cannot be done (it is in argsRejectedByHandler, #877).
     if (args.parent_id !== undefined) {
       throw new Error(
         "parent_id is not supported on create_category: Copilot's GraphQL API " +
@@ -3390,6 +3386,11 @@ export class CopilotMoneyTools {
           'mutation to re-parent categories.'
       );
     }
+    const client = this.getGraphQLClient();
+    if (!args.name?.trim()) throw new Error('Category name must not be empty');
+    if (!args.color_name?.trim()) throw new Error('color_name is required');
+    if (!args.emoji?.trim()) throw new Error('emoji is required');
+    const colorName = validateColorName(args.color_name);
 
     try {
       const result = await gqlCreateCategory(client, {

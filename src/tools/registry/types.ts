@@ -117,10 +117,18 @@ export interface ToolDefinition {
   /**
    * Arguments the schema does not declare but the handler deliberately
    * receives, to reject them itself with a more specific message than the
-   * dispatch check's "unknown argument" (src/tools/input-validation.ts): the v3
-   * migration errors for removed arguments, and live mode's "not supported in
-   * live mode" for cache-only filters. Every other undeclared argument is
-   * rejected at dispatch (#845).
+   * dispatch check's "unknown argument" (src/tools/input-validation.ts).
+   * Three kinds today:
+   *   - v3-removed arguments (`compact`, `include_logos`): a migration hint;
+   *   - cache-only filters on get_transactions_live: "not supported in live
+   *     mode";
+   *   - a capability Copilot's API does not have (`parent_id` on
+   *     create_category): why it cannot be done.
+   * Every other undeclared argument is rejected at dispatch (#845). Such a
+   * call also skips the local-cache gate, so the message arrives without a
+   * cache. An entry the handler does not actually reject would be the #845
+   * silent drop again: tests/unit/dispatch-arg-validation.test.ts walks every
+   * entry, with and without a cache, and requires the handler's own error.
    */
   argsRejectedByHandler?: readonly string[];
 }

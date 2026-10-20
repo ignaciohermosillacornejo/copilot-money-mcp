@@ -208,6 +208,9 @@ describe('LiveHoldingsTools.getHoldings', () => {
     const whole = await tools.getHoldings({ fields: ['default'] });
     const plain = await tools.getHoldings({});
     expect(whole.holdings).toEqual(plain.holdings);
+    // "all" takes a different branch in projectRows (no projection at all).
+    const all = await tools.getHoldings({ fields: ['all'] });
+    expect(all.holdings).toEqual(plain.holdings);
   });
 
   test('pagination: limit + offset produce correct count / total_count / has_more', async () => {
