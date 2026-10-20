@@ -82,7 +82,7 @@ import {
   REMOVED_ACCOUNT_ARGS,
   REMOVED_TRANSACTION_ARGS,
 } from './errors.js';
-import { isCalendarDate, isCalendarMonth, parsePeriod } from '../utils/date.js';
+import { isCalendarDate, isCalendarMonth, parsePeriod, validateDateArg } from '../utils/date.js';
 import {
   readScheduledSmokeStatus,
   type ScheduledSmokeStatus,
@@ -390,19 +390,20 @@ function validateLimit(
 }
 
 /**
- * Validates a date string is in YYYY-MM-DD format.
- *
- * @param date - The date string to validate
- * @param paramName - Parameter name for error messages
- * @returns The validated date string
- * @throws Error if date format is invalid
+ * An amount in an error message without float noise (#825): `100.00999999999999`
+ * reads as 100.01. Rounded to six places rather than to cents, so a sub-cent
+ * difference that still fails a check is not printed as 0.00.
+ */
+function formatAmountForMessage(n: number): string {
+  return String(Number(n.toFixed(6)));
+}
+
+/**
+ * Validate a read-filter date: `YYYY-MM-DD` and a real calendar day (#825).
+ * The shared validateDateArg, so cache and live tools refuse the same way.
  */
 function validateDate(date: string | undefined, paramName: string): string | undefined {
-  if (date === undefined) return undefined;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    throw new Error(`Invalid ${paramName} format. Expected YYYY-MM-DD, got: ${date}`);
-  }
-  return date;
+  return validateDateArg(date, paramName);
 }
 
 /**
@@ -410,8 +411,8 @@ function validateDate(date: string | undefined, paramName: string): string | und
  * exists. A well-formed impossible date (`2026-02-30`) otherwise reaches the
  * server, whose 400 is reported as possible API drift. `formatMessage` keeps
  * each tool's existing wording for a malformed string; only the impossible
- * date gets the new message. Write paths only: read filters keep
- * validateDate.
+ * date gets the new message. Read filters use validateDate, which applies
+ * the same calendar check.
  */
 function validateWriteDate(date: string, label: string, formatMessage: string): void {
   if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
@@ -433,6 +434,9 @@ function validateMonth(month: string | undefined, paramName: string): void {
   if (month === undefined) return;
   if (!/^\d{4}-\d{2}$/.test(month)) {
     throw new Error(`Invalid ${paramName}: "${month}". Expected format: YYYY-MM`);
+  }
+  if (!isCalendarMonth(month)) {
+    throw new Error(`Invalid ${paramName}: ${month} is not a real month (01-12)`);
   }
 }
 
@@ -2405,6 +2409,8 @@ export class CopilotMoneyTools {
   }> {
     const { min_occurrences = 2 } = options;
     let { period, start_date, end_date } = options;
+    start_date = validateDate(start_date, 'start_date');
+    end_date = validateDate(end_date, 'end_date');
 
     // Default to last 90 days if no period specified
     if (!period && !start_date && !end_date) {
@@ -5067,7 +5073,8 @@ export class CopilotMoneyTools {
       if (Math.abs(diff) > 1e-6) {
         throw new Error(
           `Split amounts must sum to parent amount. ` +
-            `Parent=${parentAmount}, sum=${sum}, diff=${diff}`
+            `Parent=${formatAmountForMessage(parentAmount)}, ` +
+            `sum=${formatAmountForMessage(sum)}, diff=${formatAmountForMessage(diff)}`
         );
       }
     }

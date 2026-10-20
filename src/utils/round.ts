@@ -8,9 +8,12 @@ export function roundAmount(value: number): number {
 
 /**
  * Compute total-return percentage matching Copilot's web UI display
- * convention (Math.floor on the signed percent — verified empirically
- * against META 8.37% and DASH -22.86%). Returns undefined when costBasis
- * is zero (no meaningful percentage) so callers can omit the field.
+ * convention: truncated toward zero at two decimals. The #825 release pass
+ * saw -12.446% shown as -12.44%, where the earlier Math.floor gave -12.45; a
+ * positive value truncates the same either way (META 8.37%). Ledger:
+ * `CopilotWebUi.totalReturnPercent:truncatedTowardZero`. Returns undefined
+ * when costBasis is zero (no meaningful percentage) so callers can omit the
+ * field.
  *
  * Math.abs in the denominator preserves the sign of totalReturn for
  * negative basis (short positions / margin accounts), so a short that
@@ -22,7 +25,8 @@ export function computeTotalReturnPercent(
   costBasis: number
 ): number | undefined {
   if (costBasis === 0) return undefined;
-  return Math.floor((totalReturn / Math.abs(costBasis)) * 10000) / 100;
+  // `+ 0` folds -0 to 0, so a tiny loss does not print as "-0".
+  return Math.trunc((totalReturn / Math.abs(costBasis)) * 10000) / 100 + 0;
 }
 
 /**

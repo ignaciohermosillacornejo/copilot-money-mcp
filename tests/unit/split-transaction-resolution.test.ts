@@ -457,6 +457,33 @@ describe('splitTransaction out-of-window bypass — unresolvable parent, explici
     expect(client._calls).toHaveLength(0);
   });
 
+  test('the sum-mismatch message carries no float noise (#825)', async () => {
+    const client = createMockGraphQLClient(SPLIT_RESPONSE);
+    const { liveDb } = stubLiveDb({
+      cachedNodes: [node('parent-1', 120, '2025-10-05', 'Cached Parent')],
+    });
+    const tools = new CopilotMoneyTools(makeDb(), client, liveDb);
+
+    // 70.1 + 49.91 is 120.00999999999999 in floating point.
+    const err = await tools
+      .splitTransaction({
+        transaction_id: 'parent-1',
+        account_id: 'acct-P',
+        item_id: 'item-P',
+        splits: [
+          { name: 'Hotel', date: '2025-10-05', amount: 70.1, category_id: 'catA' },
+          { name: 'Car', date: '2025-10-06', amount: 49.91, category_id: 'catB' },
+        ],
+      })
+      .then(
+        () => null,
+        (e: unknown) => (e instanceof Error ? e.message : String(e))
+      );
+    expect(err).toContain('Parent=120, sum=120.01, diff=0.01');
+    expect(err).not.toMatch(/\d{8,}/);
+    expect(client._calls).toHaveLength(0);
+  });
+
   test('resolved parent keeps the client-side sum check (bypass does not weaken it)', async () => {
     const client = createMockGraphQLClient(SPLIT_RESPONSE);
     const { liveDb } = stubLiveDb({

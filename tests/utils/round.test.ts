@@ -10,7 +10,7 @@
  */
 
 import { describe, test, expect } from 'bun:test';
-import { parseAmount } from '../../src/utils/round.js';
+import { parseAmount, computeTotalReturnPercent } from '../../src/utils/round.js';
 
 describe('parseAmount', () => {
   test('parses a numeric-string amount (Apollo-canonical form)', () => {
@@ -38,5 +38,19 @@ describe('parseAmount', () => {
     expect(parseAmount(Number.NaN)).toBeNull();
     expect(parseAmount(Number.POSITIVE_INFINITY)).toBeNull();
     expect(parseAmount(Number.NEGATIVE_INFINITY)).toBeNull();
+  });
+});
+
+describe('computeTotalReturnPercent truncates toward zero (#825)', () => {
+  test('the #825 observation: -12.446% shows as -12.44%, not -12.45%', () => {
+    expect(computeTotalReturnPercent(-12.446, 100)).toBe(-12.44);
+  });
+
+  test('a positive value truncates too', () => {
+    expect(computeTotalReturnPercent(8.379, 100)).toBe(8.37);
+  });
+
+  test('a tiny loss is 0, not -0', () => {
+    expect(Object.is(computeTotalReturnPercent(-0.001, 100), 0)).toBe(true);
   });
 });

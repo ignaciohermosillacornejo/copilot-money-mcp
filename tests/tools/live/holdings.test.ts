@@ -491,7 +491,7 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(result._cache_oldest_fetched_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  test('total_return_percent floors at the 2-decimal-place position (positive case)', async () => {
+  test('total_return_percent truncates at the 2-decimal-place position (positive case)', async () => {
     // 100 / 1191 * 100 = 8.3963...
     //   Math.floor → 8.39 (locked in by this test)
     //   Math.round → 8.40 (would fail under the previous round-half-up rule)
@@ -509,11 +509,10 @@ describe('LiveHoldingsTools.getHoldings', () => {
     expect(result.holdings[0]?.total_return_percent).toBe(8.39);
   });
 
-  test('total_return_percent floors toward negative infinity (negative case)', async () => {
+  test('total_return_percent truncates toward zero (negative case)', async () => {
     // -100 / 437 * 100 = -22.8833...
-    //   Math.floor → -22.89 (further from zero, locked in by this test)
-    //   Math.round → -22.88 (would fail under round-half-up)
-    // Confirms floor toward negative infinity, not toward zero.
+    //   Math.trunc → -22.88 (the web's convention, #825: -12.446 shows -12.44)
+    //   Math.floor → -22.89 (the earlier convention, now wrong)
     const flooredNegative = {
       ...equityHolding,
       id: 'h-floor-neg',
@@ -524,7 +523,7 @@ describe('LiveHoldingsTools.getHoldings', () => {
 
     const result = await tools.getHoldings({});
 
-    expect(result.holdings[0]?.total_return_percent).toBe(-22.89);
+    expect(result.holdings[0]?.total_return_percent).toBe(-22.88);
   });
 
   test('degenerate cost_basis=0 does not produce Infinity/NaN total_return_percent', async () => {

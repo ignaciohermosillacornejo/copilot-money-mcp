@@ -36,7 +36,7 @@ import {
   resolveCategoryFilter,
   type CategoryFilterNode,
 } from '../category-filter.js';
-import { parsePeriod } from '../../utils/date.js';
+import { parsePeriod, validateDateArg } from '../../utils/date.js';
 
 /**
  * Subset of `TRANSACTION_TYPE_FILTERS` supported in live mode (`foreign` and
@@ -551,6 +551,10 @@ export class LiveTransactionsTools {
 
   private validate(opts: GetTransactionsLiveOptions): void {
     const o = opts as Record<string, unknown>;
+    // Same check and message as the cache tools (#825): a malformed or
+    // impossible date must not reach the server as a filter.
+    validateDateArg(opts.start_date, 'start_date');
+    validateDateArg(opts.end_date, 'end_date');
     const supported = `start_date, end_date, period, account_id (+ item_id), category, merchant, query, tag, min_amount, max_amount, limit, offset, pending, exclude_transfers, exclude_deleted, exclude_excluded, transaction_type (${LIVE_TRANSACTION_TYPES.join(', ')}), transaction_id (+ account_id + item_id), fields`;
 
     for (const key of UNSUPPORTED_KEYS) {

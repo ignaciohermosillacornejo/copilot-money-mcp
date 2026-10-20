@@ -10,6 +10,8 @@ import {
   monthAge,
   isCalendarDate,
   isCalendarMonth,
+  PERIODS,
+  validateDateArg,
 } from '../../src/utils/date.js';
 
 describe('isCalendarDate / isCalendarMonth (#825)', () => {
@@ -73,6 +75,37 @@ beforeEach(() => {
 
 afterEach(() => {
   restoreDate();
+});
+
+describe('validateDateArg (#825)', () => {
+  test('passes a real calendar date and undefined through', () => {
+    expect(validateDateArg('2024-02-29', 'start_date')).toBe('2024-02-29');
+    expect(validateDateArg(undefined, 'start_date')).toBeUndefined();
+  });
+
+  test('rejects a malformed date, naming the parameter', () => {
+    expect(() => validateDateArg('2026-3-1', 'end_date')).toThrow(
+      'Invalid end_date format. Expected YYYY-MM-DD, got: 2026-3-1'
+    );
+  });
+
+  test('rejects a well-formed day that does not exist', () => {
+    expect(() => validateDateArg('2025-02-29', 'start_date')).toThrow(
+      'Invalid start_date: 2025-02-29 is not a real calendar date'
+    );
+  });
+});
+
+describe('parsePeriod lists the valid periods when it rejects one (#825)', () => {
+  test('the message names every period it accepts', () => {
+    expect(() => parsePeriod('last_week')).toThrow(
+      `Unknown period: last_week. Valid periods: ${PERIODS.join(', ')}.`
+    );
+  });
+
+  test('every listed period parses', () => {
+    for (const period of PERIODS) expect(parsePeriod(period)).toHaveLength(2);
+  });
 });
 
 describe('parsePeriod', () => {

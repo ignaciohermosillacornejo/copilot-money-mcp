@@ -3873,11 +3873,10 @@ describe('getHoldings', () => {
     }
   });
 
-  test('total_return_percent floors at the 2-decimal-place position (positive + negative)', async () => {
-    // Verifies the floor-toward-negative-infinity rounding convention that
-    // mirrors Copilot's web UI display of "Total return" percent.
-    //   Positive: (100 / 1191) * 100 = 8.3963... → floor = 8.39 (round → 8.40)
-    //   Negative: (-100 / 437) * 100 = -22.8833... → floor = -22.89 (round → -22.88)
+  test('total_return_percent truncates toward zero at 2 decimals (positive + negative)', async () => {
+    // The web UI's "Total return" percent convention (#825): truncate toward zero.
+    //   Positive: (100 / 1191) * 100 = 8.3963... → 8.39 (round → 8.40)
+    //   Negative: (-100 / 437) * 100 = -22.8833... → -22.88 (floor → -22.89)
     (db as any)._accounts = [
       {
         account_id: 'inv_floor_pos',
@@ -3919,7 +3918,7 @@ describe('getHoldings', () => {
     const pos = result.holdings.find((h) => h.account_id === 'inv_floor_pos');
     const neg = result.holdings.find((h) => h.account_id === 'inv_floor_neg');
     expect(pos?.total_return_percent).toBe(8.39);
-    expect(neg?.total_return_percent).toBe(-22.89);
+    expect(neg?.total_return_percent).toBe(-22.88);
   });
 });
 

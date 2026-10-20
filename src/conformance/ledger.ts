@@ -978,6 +978,20 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       '(Known caveats), for the schema budget. Nothing re-checks it.',
   },
   {
+    surface: 'CopilotWebUi.totalReturnPercent:truncatedTowardZero',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'v3.0 release test pass 2026-10-14 (#825): a holding whose total return was -12.446% ' +
+      'showed as -12.44% in the web app, where computeTotalReturnPercent (Math.floor) gave ' +
+      '-12.45. So the web truncates toward zero; for a positive value floor and truncation ' +
+      'agree (the META 8.37% the floor version was checked against). The earlier DASH -22.86% ' +
+      'check did not record the raw value, so it cannot tell the two apart. ' +
+      'computeTotalReturnPercent now truncates, for get_holdings and get_holdings_live. ' +
+      'Nothing re-checks it.',
+  },
+  {
     surface: 'AccountNode.hiddenAccounts:returnedUnfiltered',
     kind: 'response-shape',
     oracle: null,

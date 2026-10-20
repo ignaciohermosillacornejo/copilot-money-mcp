@@ -30,6 +30,24 @@ export function isCalendarDate(value: string): boolean {
   return day <= lastDay;
 }
 
+/**
+ * Validate an optional read-filter date (`start_date`, `end_date`, ...): it
+ * must be `YYYY-MM-DD` and a day that exists (#825). One function and one
+ * message per failure for every read tool in both modes, so `2026-02-30` is
+ * refused the same way everywhere instead of matching nothing (cache) or
+ * reaching the server (live).
+ */
+export function validateDateArg(date: string | undefined, paramName: string): string | undefined {
+  if (date === undefined) return undefined;
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(`Invalid ${paramName} format. Expected YYYY-MM-DD, got: ${String(date)}`);
+  }
+  if (!isCalendarDate(date)) {
+    throw new Error(`Invalid ${paramName}: ${date} is not a real calendar date`);
+  }
+  return date;
+}
+
 /** True when `value` is `YYYY-MM` with a month from 01 to 12 (#825). */
 export function isCalendarMonth(value: string): boolean {
   const m = /^\d{4}-(\d{2})$/.exec(value);
@@ -54,6 +72,18 @@ export function getMonthRange(year: number, month: number): [string, string] {
 
   return [start, end];
 }
+
+/** Every period parsePeriod accepts, in the order its error lists them. */
+export const PERIODS = [
+  'this_month',
+  'last_month',
+  'this_year',
+  'last_year',
+  'last_7_days',
+  'last_30_days',
+  'last_90_days',
+  'ytd',
+] as const;
 
 /**
  * Parse a period string into (start_date, end_date).
@@ -123,7 +153,7 @@ export function parsePeriod(period: string): [string, string] {
     }
 
     default:
-      throw new Error(`Unknown period: ${period}`);
+      throw new Error(`Unknown period: ${period}. Valid periods: ${PERIODS.join(', ')}.`);
   }
 }
 
