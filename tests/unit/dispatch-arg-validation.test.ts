@@ -17,7 +17,7 @@ import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotMoneyServer } from '../../src/server.js';
 import type { GraphQLClient } from '../../src/core/graphql/client.js';
 import { ALL_TOOL_DEFS } from '../../src/tools/registry/index.js';
-import { MAX_REPORTED, validateToolArgs } from '../../src/tools/input-validation.js';
+import { MAX_COLLECTED, MAX_REPORTED, validateToolArgs } from '../../src/tools/input-validation.js';
 
 const NO_CACHE_PATH = '/nonexistent/no-native-app-installed';
 
@@ -226,8 +226,8 @@ describe('dispatch validates every tool call against its inputSchema (#845)', ()
     const repeated = validateToolArgs(def, {
       edits: Array.from({ length: 200 }, (_, i) => ({ id: `row-${i}` })),
     })!;
-    expect(repeated).toContain("Unknown key 'edits[*].id'");
-    expect(repeated).toContain('(in 200 items)');
+    expect(repeated).toContain("In 200 items of 'edits' (0, 1, 2, …): Unknown key 'edits[*].id'");
+    expect(repeated).toContain("Accepted keys of 'edits[*]'");
     expect(repeated.length).toBeLessThan(400);
 
     const many = validateToolArgs(def, {
@@ -235,6 +235,54 @@ describe('dispatch validates every tool call against its inputSchema (#845)', ()
     })!;
     expect(many).toContain('...and 15 more problems; fix these first.');
     expect(many.match(/Unknown key/g)?.length).toBe(MAX_REPORTED);
+  });
+
+  // #881 review: the realistic batch mistake carries a DIFFERENT value in every
+  // row (a stringified amount). Grouping on shape, not text, still collapses it.
+  test('a batch with a different wrong value in each row is one line', () => {
+    const def = ALL_TOOL_DEFS.find((d) => d.name === 'update_transactions')!;
+    const message = validateToolArgs(def, {
+      edits: Array.from({ length: 200 }, (_, i) => ({
+        transaction_id: 'Pq3mW8nR2tV6xL9sK4dB',
+        amount: `${i}.00`,
+      })),
+    })!;
+    expect(message).toBe(
+      "Invalid arguments for update_transactions: In 200 items of 'edits' (0, 1, 2, …): " +
+        "Argument 'edits[*].amount' must be a number; for example, 'edits[0].amount' got " +
+        'string "0.00".'
+    );
+  });
+
+  test('a collapsed line names example items, and counts items, not occurrences', () => {
+    const def = ALL_TOOL_DEFS.find((d) => d.name === 'update_transactions')!;
+    // Rows 3 and 7 are bad; row 7 has three bad tags. Two items, four problems.
+    const edits = Array.from({ length: 10 }, () => ({ transaction_id: 'Pq3mW8nR2tV6xL9sK4dB' }));
+    (edits[3] as Record<string, unknown>).tag_ids = [1];
+    (edits[7] as Record<string, unknown>).tag_ids = [1, 2, 3];
+    const message = validateToolArgs(def, { edits })!;
+    expect(message).toContain(
+      "In 2 items of 'edits' (3, 7): Argument 'edits[*].tag_ids[*]' must be a string"
+    );
+    expect(message).toContain("for example, 'edits[3].tag_ids[0]' got number 1.");
+  });
+
+  test('a single occurrence is reported as itself, with its own path', () => {
+    const def = ALL_TOOL_DEFS.find((d) => d.name === 'update_transactions')!;
+    const message = validateToolArgs(def, {
+      edits: [{ transaction_id: 'Pq3mW8nR2tV6xL9sK4dB', amount: 'ten' }],
+    })!;
+    expect(message).toContain('Argument \'edits[0].amount\' must be a number; got string "ten".');
+    expect(message).not.toContain('[*]');
+  });
+
+  test('collection stops at MAX_COLLECTED and says so', () => {
+    const def = ALL_TOOL_DEFS.find((d) => d.name === 'update_transactions')!;
+    const message = validateToolArgs(def, {
+      edits: Array.from({ length: MAX_COLLECTED + 50 }, () => ({ id: 'x' })),
+    })!;
+    expect(message).toContain(`Stopped checking after ${MAX_COLLECTED} problems.`);
+    expect(message).toContain(`In ${MAX_COLLECTED} items of 'edits'`);
   });
 
   test('every problem inside a nested object is reported too', () => {

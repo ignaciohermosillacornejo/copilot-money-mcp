@@ -554,7 +554,9 @@ export class LiveTransactionsTools {
     const supported = `start_date, end_date, period, account_id (+ item_id), category, merchant, query, tag, min_amount, max_amount, limit, offset, pending, exclude_transfers, exclude_deleted, exclude_excluded, transaction_type (${LIVE_TRANSACTION_TYPES.join(', ')}), transaction_id (+ account_id + item_id), fields`;
 
     for (const key of UNSUPPORTED_KEYS) {
-      if (o[key] !== undefined) {
+      // Presence, like the dispatch pass-through that sends these keys here:
+      // a value test would let {city: undefined} through as a silent drop.
+      if (Object.prototype.hasOwnProperty.call(o, key)) {
         throw new Error(
           `Parameter '${key}' is not supported in live mode. Retry without '${key}'. Supported filters: ${supported}.`
         );

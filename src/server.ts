@@ -285,16 +285,7 @@ export class CopilotMoneyServer {
     // that failed to throw would hit the unavailable cache and error anyway;
     // tests/unit/dispatch-arg-validation.test.ts walks every such argument with
     // and without a cache to keep that from happening.
-    if (
-      availability &&
-      !availability.available &&
-      !(
-        typedArgs !== undefined &&
-        (toolDef.argsRejectedByHandler ?? []).some((key) =>
-          Object.prototype.hasOwnProperty.call(typedArgs, key)
-        )
-      )
-    ) {
+    if (availability && !availability.available && !carriesHandlerRejectedArg(toolDef, typedArgs)) {
       // "Could not look" is not "absent" (#774): when the check failed to read,
       // say so rather than telling an installed, synced user to install.
       // This message names an errno and no path (`missingDatabaseError`); the
@@ -388,6 +379,23 @@ export class CopilotMoneyServer {
       void this.server.close().then(() => process.exit(0));
     });
   }
+}
+
+/**
+ * Whether a call carries an argument its tool's handler rejects itself
+ * (`argsRejectedByHandler`), by presence. Such a call skips the local-cache
+ * gate so that handler's message arrives without a cache (#877).
+ */
+function carriesHandlerRejectedArg(
+  toolDef: { argsRejectedByHandler?: readonly string[] },
+  args: Record<string, unknown> | undefined
+): boolean {
+  return (
+    args !== undefined &&
+    (toolDef.argsRejectedByHandler ?? []).some((key) =>
+      Object.prototype.hasOwnProperty.call(args, key)
+    )
+  );
 }
 
 /**
