@@ -135,13 +135,14 @@ describe('RefreshCacheTool', () => {
       /Invalid month format/
     );
 
+    // Well-formed but no such month: the range message, not a format one (#825).
     await expect(tool.refresh({ scope: 'transactions', months: ['2026-13'] })).rejects.toThrow(
-      /Invalid month format/
+      'Invalid months: 2026-13 is not a real month (01-12)'
     );
 
     await expect(
       tool.refresh({ scope: 'transactions', months: ['2026-04', '2026-00'] })
-    ).rejects.toThrow(/Invalid month format/);
+    ).rejects.toThrow('Invalid months: 2026-00 is not a real month (01-12)');
   });
 
   test('accepts well-formed YYYY-MM month strings', async () => {

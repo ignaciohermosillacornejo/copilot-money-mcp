@@ -96,9 +96,7 @@ function text(result: CallToolResult): string {
 const IMPOSSIBLE = { day: '2026-02-30', month: '2026-13' } as const;
 const REFUSAL = {
   day: (arg: string) => `Invalid ${arg}: 2026-02-30 is not a real calendar date`,
-  // A month filter's own check, or refresh_cache's stricter format check
-  // (its pattern already limits the month to 01-12); either names the value.
-  month: () => '2026-13',
+  month: (arg: string) => `Invalid ${arg}: 2026-13 is not a real month (01-12)`,
 } as const;
 
 const ARGS = [...dateArgs(READ_TOOL_DEFS, 'cache'), ...dateArgs(LIVE_TOOL_DEFS, 'live')];
@@ -118,6 +116,28 @@ describe('every read-filter date is a real calendar date, in both modes (#825)',
     }
   });
 
+  test('every date- or month-named read argument is in the walk, or excused', () => {
+    // The walk finds arguments by their description; this finds them by name,
+    // so one described without the YYYY-MM token cannot escape the gate.
+    const EXCUSED: Record<string, string> = {};
+    const walked = new Set(ARGS.map((d) => `${d.tool}.${d.arg}`));
+    const missing: string[] = [];
+    for (const def of [...READ_TOOL_DEFS, ...LIVE_TOOL_DEFS]) {
+      const props = (def.schema.inputSchema.properties ?? {}) as Record<
+        string,
+        { type?: string; items?: { type?: string } }
+      >;
+      for (const [arg, prop] of Object.entries(props)) {
+        const stringish =
+          prop.type === 'string' || (prop.type === 'array' && prop.items?.type === 'string');
+        if (!stringish || !/(^|_)(date|month)s?$/.test(arg)) continue;
+        const key = `${def.schema.name}.${arg}`;
+        if (!walked.has(key) && !(key in EXCUSED)) missing.push(key);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+
   test.each(CASES)(
     '%s: an impossible value is refused with the shared message, nothing sent',
     async (_name, d) => {
@@ -126,7 +146,8 @@ describe('every read-filter date is a real calendar date, in both modes (#825)',
       const result = await s.handleCallTool(d.tool, { ...REQUIRED[d.tool], [d.arg]: value });
       expect(result.isError).toBe(true);
       expect(text(result)).toContain(REFUSAL[d.shape](d.arg));
-      expect(requests()).toBe(0);
+      // Only live mode has a client to send on; cache reads never do.
+      if (d.mode === 'live') expect(requests()).toBe(0);
     }
   );
 

@@ -12,6 +12,7 @@ import type { LiveCopilotDatabase } from '../../core/live-database.js';
 import type { LiveBalanceHistoryTools } from './balance-history.js';
 import type { LiveInvestmentPricesTools } from './investment-prices.js';
 import type { ToolSchema } from '../tools.js';
+import { isCalendarMonth } from '../../utils/date.js';
 
 const VALID_SCOPES = [
   'all',
@@ -34,7 +35,9 @@ const VALID_SCOPES = [
   'investment_prices',
 ] as const;
 
-const YEAR_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+// Shape only; the month's range is isCalendarMonth's, with its own message,
+// as in the cache tools' month filters (#825).
+const YEAR_MONTH_RE = /^\d{4}-\d{2}$/;
 
 type Scope = (typeof VALID_SCOPES)[number];
 
@@ -93,6 +96,10 @@ export class RefreshCacheTool {
         return Promise.reject(
           new Error(`Invalid month format '${bad}'. Expected YYYY-MM (e.g., '2026-04').`)
         );
+      }
+      const unreal = args.months.find((m) => !isCalendarMonth(m));
+      if (unreal !== undefined) {
+        return Promise.reject(new Error(`Invalid months: ${unreal} is not a real month (01-12)`));
       }
     }
 
