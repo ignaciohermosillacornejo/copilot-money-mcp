@@ -500,7 +500,7 @@ describe('RefreshCacheTool — validation', () => {
     const tool = new RefreshCacheTool(live);
 
     await expect(tool.refresh({ scope: 'transactions', months: ['26-04'] })).rejects.toThrow(
-      /Invalid month format/
+      /Invalid months format/
     );
   });
 

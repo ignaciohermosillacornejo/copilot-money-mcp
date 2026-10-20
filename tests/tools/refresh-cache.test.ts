@@ -132,7 +132,7 @@ describe('RefreshCacheTool', () => {
     const tool = new RefreshCacheTool(live);
 
     await expect(tool.refresh({ scope: 'transactions', months: ['bogus'] })).rejects.toThrow(
-      /Invalid month format/
+      /Invalid months format/
     );
 
     // Well-formed but no such month: the range message, not a format one (#825).

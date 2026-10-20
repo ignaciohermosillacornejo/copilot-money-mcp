@@ -94,7 +94,7 @@ export class RefreshCacheTool {
       const bad = args.months.find((m) => !YEAR_MONTH_RE.test(m));
       if (bad !== undefined) {
         return Promise.reject(
-          new Error(`Invalid month format '${bad}'. Expected YYYY-MM (e.g., '2026-04').`)
+          new Error(`Invalid months format. Expected YYYY-MM (e.g., '2026-04'), got: ${bad}`)
         );
       }
       const unreal = args.months.find((m) => !isCalendarMonth(m));

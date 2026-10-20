@@ -91,11 +91,7 @@ export const PERIODS = [
 /**
  * Parse a period string into (start_date, end_date).
  *
- * Supported periods:
- * - "this_month", "last_month"
- * - "this_year", "last_year"
- * - "last_7_days", "last_30_days", "last_90_days"
- * - "ytd" (year to date)
+ * Supported periods: {@link PERIODS} (`ytd` is year to date).
  *
  * @returns Tuple of [start_date, end_date] as "YYYY-MM-DD" strings
  * @throws Error if period is not recognized

@@ -158,7 +158,8 @@ describe('every read-filter date is a real calendar date, in both modes (#825)',
       [d.arg]: d.array ? [''] : '',
     });
     expect(result.isError).toBe(true);
-    expect(text(result)).toMatch(/Invalid/);
+    // Names the argument, so an unrelated refusal cannot satisfy it.
+    expect(text(result)).toContain(`Invalid ${d.arg}`);
   });
 
   test('get_transactions_live: a malformed date gets the cache tools’ format message', async () => {
