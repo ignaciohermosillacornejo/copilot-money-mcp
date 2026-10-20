@@ -111,32 +111,64 @@ function got(value: unknown): string {
 interface Problem {
   /** Concrete path, e.g. `edits[3].amount`. */
   path: string;
-  /** Renders the rule broken for a path (concrete or `[*]` pattern), without the value. */
+  /**
+   * The same path with every ARRAY index replaced by `[*]`, built by the walker
+   * as it descends, never by rewriting the text: a literal key that happens to
+   * contain brackets (`{"edits[0]": 1}`) keeps its brackets (#884 review).
+   */
+  pattern: string;
+  /**
+   * The outermost array this problem sits in and its index there, recorded by
+   * the walker; undefined for a problem outside any array.
+   */
+  item?: { outer: string; index: number };
+  /** Renders the rule broken for a path (concrete or pattern), without the value. */
   rule: (path: string) => string;
   /** The offending value's part, e.g. `got string "12.00"`; empty when there is none. */
   detail: string;
 }
 
+/** Where the walker is: concrete path, its pattern, and the outermost array item. */
+interface Location {
+  path: string;
+  pattern: string;
+  item?: { outer: string; index: number };
+}
+
 /**
  * Collects problems up to a budget, so a huge malformed call cannot build an
- * unbounded list only to have most of it discarded (#881 review): once the
- * budget is spent the walk stops recording and the report says so.
+ * unbounded list only to have most of it discarded (#881 review). Once a
+ * problem past the budget is attempted the walk stops recording, and
+ * `overflowed` (one flag, read by the walker and the report alike) says so.
  */
 class ProblemSink {
   readonly problems: Problem[] = [];
-  truncated = false;
+  overflowed = false;
   constructor(private readonly budget: number) {}
   add(problem: Problem): void {
     if (this.problems.length < this.budget) this.problems.push(problem);
-    else this.truncated = true;
-  }
-  get full(): boolean {
-    return this.truncated;
+    else this.overflowed = true;
   }
 }
 
 /** Problems recorded before the walk stops collecting. */
 export const MAX_COLLECTED = 1000;
+
+function child(at: Location, key: string): Location {
+  return {
+    path: at.path ? `${at.path}.${key}` : key,
+    pattern: at.pattern ? `${at.pattern}.${key}` : key,
+    ...(at.item && { item: at.item }),
+  };
+}
+
+function element(at: Location, index: number): Location {
+  return {
+    path: `${at.path}[${index}]`,
+    pattern: `${at.pattern}[*]`,
+    item: at.item ?? { outer: at.path, index },
+  };
+}
 
 /**
  * Validate one value against its property schema, recording every problem
@@ -144,13 +176,13 @@ export const MAX_COLLECTED = 1000;
  * round trip either (#877 review). A type mismatch stops at that value: its
  * enum, items and keys are meaningless once the type is wrong.
  */
-function checkValue(path: string, value: unknown, schema: PropertySchema, sink: ProblemSink): void {
-  if (sink.full) return;
+function checkValue(at: Location, value: unknown, schema: PropertySchema, sink: ProblemSink): void {
+  if (sink.overflowed) return;
   if (schema.type !== undefined && !matchesType(value, schema.type)) {
     const type = schema.type;
     const article = /^[aeiou]/.test(type) ? 'an' : 'a';
     sink.add({
-      path,
+      ...at,
       rule: (p) =>
         `Argument '${p}' must be ${article} ${type}` +
         (type === 'integer' ? ' (a whole number)' : ''),
@@ -161,15 +193,15 @@ function checkValue(path: string, value: unknown, schema: PropertySchema, sink: 
   if (schema.enum !== undefined && !schema.enum.includes(value)) {
     const allowed = schema.enum.map((v) => describe(v)).join(', ');
     sink.add({
-      path,
+      ...at,
       rule: (p) => `Argument '${p}' must be one of ${allowed}`,
       detail: `got ${describe(value)}`,
     });
     return;
   }
   if (Array.isArray(value) && schema.items !== undefined) {
-    for (let i = 0; i < value.length && !sink.full; i++) {
-      checkValue(`${path}[${i}]`, value[i], schema.items, sink);
+    for (let i = 0; i < value.length && !sink.overflowed; i++) {
+      checkValue(element(at, i), value[i], schema.items, sink);
     }
   }
   if (
@@ -179,7 +211,7 @@ function checkValue(path: string, value: unknown, schema: PropertySchema, sink: 
     !Array.isArray(value)
   ) {
     checkObject(
-      path,
+      at,
       value as Record<string, unknown>,
       schema.properties,
       schema.additionalProperties === false,
@@ -194,7 +226,7 @@ function checkValue(path: string, value: unknown, schema: PropertySchema, sink: 
  * arguments learns about both in one round trip (#877 review).
  */
 function checkObject(
-  path: string,
+  at: Location,
   value: Record<string, unknown>,
   properties: Record<string, PropertySchema>,
   rejectUnknown: boolean,
@@ -202,9 +234,9 @@ function checkObject(
   sink: ProblemSink
 ): void {
   const accepted = Object.keys(properties);
-  for (const [key, child] of Object.entries(value)) {
-    if (sink.full) return;
-    const childPath = path ? `${path}.${key}` : key;
+  for (const [key, childValue] of Object.entries(value)) {
+    if (sink.overflowed) return;
+    const childAt = child(at, key);
     // Own-property lookup on purpose: JSON.parse creates an own `__proto__`
     // key, and `properties[key]` would read Object.prototype for it instead of
     // reporting it as the unknown argument it is.
@@ -214,23 +246,24 @@ function checkObject(
     if (childSchema === undefined) {
       // mutation-guard: handler-rejected arguments pass dispatch
       if (!rejectUnknown || passThrough.includes(key)) continue;
-      // The parent path is the child path minus its last `.key`, so a `[*]`
-      // pattern of the child renders a matching pattern of the parent.
+      // The parent of a rendered path is that path minus its last `.key`, so a
+      // pattern of the child renders the matching pattern of the parent.
       const parentOf = (p: string) => p.slice(0, p.length - key.length - 1);
+      const nested = at.path !== '';
       sink.add({
-        path: childPath,
+        ...childAt,
         rule: (p) =>
           accepted.length === 0
-            ? path
+            ? nested
               ? `Unknown key '${p}': '${parentOf(p)}' accepts no keys`
               : `Unknown argument '${p}': this tool takes no arguments`
-            : `Unknown ${path ? 'key' : 'argument'} '${p}'. Accepted ` +
-              `${path ? `keys of '${parentOf(p)}'` : 'arguments'}: ${accepted.join(', ')}`,
+            : `Unknown ${nested ? 'key' : 'argument'} '${p}'. Accepted ` +
+              `${nested ? `keys of '${parentOf(p)}'` : 'arguments'}: ${accepted.join(', ')}`,
         detail: '',
       });
       continue;
     }
-    checkValue(childPath, child, childSchema, sink);
+    checkValue(childAt, childValue, childSchema, sink);
   }
 }
 
@@ -246,7 +279,7 @@ export function validateToolArgs(tool: ValidatableTool, args: unknown): string |
   }
   const sink = new ProblemSink(MAX_COLLECTED);
   checkObject(
-    '',
+    { path: '', pattern: '' },
     args as Record<string, unknown>,
     tool.schema.inputSchema.properties as Record<string, PropertySchema>,
     true,
@@ -255,64 +288,71 @@ export function validateToolArgs(tool: ValidatableTool, args: unknown): string |
   );
   return sink.problems.length === 0
     ? null
-    : `Invalid arguments for ${tool.name}: ${summarize(sink.problems, sink.truncated)}`;
+    : `Invalid arguments for ${tool.name}: ${summarize(sink.problems, sink.overflowed)}`;
 }
 
-function sentence(problem: Problem, path: string): string {
-  return problem.detail ? `${problem.rule(path)}; ${problem.detail}.` : `${problem.rule(path)}.`;
+function sentence(problem: Problem): string {
+  const rule = problem.rule(problem.path);
+  return problem.detail ? `${rule}; ${problem.detail}.` : `${rule}.`;
 }
 
 /** Example items named in a collapsed line before the rest are elided. */
 const EXAMPLE_ITEMS = 3;
 
 /**
- * Group problems by shape (path pattern + rule), then cap the list.
+ * Group problems by shape (pattern + rule), then cap the list.
  *
  * A group of one is reported as itself. A larger group leads with where it
  * applies — how many ITEMS of the outermost array share it, with a few example
- * indices — then states the rule once on the `[*]` path, and gives the first
+ * indices — then states the rule once on the `[*]` pattern, and gives the first
  * occurrence's value as an example: "In 200 items of 'edits' (0, 1, 2, …):
  * Argument 'edits[*].amount' must be a number; for example, 'edits[0].amount'
  * got string "12.00"." Items, not occurrences: three bad tags in one edit are
- * one item. Groups appear in first-seen order, and at most MAX_REPORTED are
- * listed before the rest are counted.
+ * one item ("In item 0 of 'edits'"). Groups appear in first-seen order, and at
+ * most MAX_REPORTED are listed before the rest are counted.
  */
-function summarize(problems: readonly Problem[], truncated: boolean): string {
+function summarize(problems: readonly Problem[], overflowed: boolean): string {
   const groups = new Map<string, Problem[]>();
   for (const problem of problems) {
-    const pattern = problem.path.replace(/\[\d+\]/g, '[*]');
-    const key = `${pattern}\u0000${problem.rule(pattern)}`;
+    const key = `${problem.pattern}\u0000${problem.rule(problem.pattern)}`;
     const group = groups.get(key);
     if (group) group.push(problem);
     else groups.set(key, [problem]);
   }
-  const lines = [...groups.values()].map((group) => {
+  const lines: string[] = [];
+  for (const group of groups.values()) {
     const [first] = group as [Problem, ...Problem[]];
-    if (group.length === 1) return sentence(first, first.path);
-    const pattern = first.path.replace(/\[\d+\]/g, '[*]');
-    // The outermost array: the path up to its first index, e.g. `edits`.
-    const outer = first.path.slice(0, first.path.indexOf('['));
-    const items: number[] = [];
-    for (const p of group) {
-      const index = Number(/\[(\d+)\]/.exec(p.path)?.[1]);
-      if (!items.includes(index)) items.push(index);
+    // A group outside any array cannot hold two problems today (the walker
+    // visits each value once and records one problem there), but the reporter
+    // does not lean on that: without an item to count, list each problem.
+    if (group.length === 1 || first.item === undefined) {
+      lines.push(...group.map(sentence));
+      continue;
     }
-    const examples =
-      items.slice(0, EXAMPLE_ITEMS).join(', ') + (items.length > EXAMPLE_ITEMS ? ', …' : '');
+    const seen = new Set<number>();
+    const examples: number[] = [];
+    for (const p of group) {
+      const index = p.item?.index;
+      if (index === undefined || seen.has(index)) continue;
+      seen.add(index);
+      if (examples.length < EXAMPLE_ITEMS) examples.push(index);
+    }
+    const shown = examples.join(', ') + (seen.size > EXAMPLE_ITEMS ? ', …' : '');
     const where =
-      items.length === 1
-        ? `In item ${examples} of '${outer}'`
-        : `In ${items.length} items of '${outer}' (${examples})`;
-    return (
-      `${where}: ${first.rule(pattern)}` +
-      (first.detail ? `; for example, '${first.path}' ${first.detail}.` : '.')
+      seen.size === 1
+        ? `In item ${shown} of '${first.item.outer}'`
+        : `In ${seen.size} items of '${first.item.outer}' (${shown})`;
+    lines.push(
+      `${where}: ${first.rule(first.pattern)}` +
+        (first.detail ? `; for example, '${first.path}' ${first.detail}.` : '.')
     );
-  });
-  const shown = lines.slice(0, MAX_REPORTED);
-  const hidden = lines.length - shown.length;
-  let report = shown.join(' ');
-  if (hidden > 0)
-    report += ` ...and ${hidden} more problem${hidden === 1 ? '' : 's'}; fix these first.`;
-  if (truncated) report += ` (Stopped checking after ${MAX_COLLECTED} problems.)`;
+  }
+  const listed = lines.slice(0, MAX_REPORTED);
+  const hidden = lines.length - listed.length;
+  let report = listed.join(' ');
+  if (hidden > 0) {
+    report += ` ...and ${hidden} more distinct problem${hidden === 1 ? '' : 's'}; fix these first.`;
+  }
+  if (overflowed) report += ` (Stopped checking after ${MAX_COLLECTED} problems.)`;
   return report;
 }

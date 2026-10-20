@@ -233,7 +233,7 @@ describe('dispatch validates every tool call against its inputSchema (#845)', ()
     const many = validateToolArgs(def, {
       edits: Array.from({ length: 30 }, (_, i) => ({ [`k${i}`]: 1 })),
     })!;
-    expect(many).toContain('...and 15 more problems; fix these first.');
+    expect(many).toContain('...and 15 more distinct problems; fix these first.');
     expect(many.match(/Unknown key/g)?.length).toBe(MAX_REPORTED);
   });
 
@@ -265,6 +265,27 @@ describe('dispatch validates every tool call against its inputSchema (#845)', ()
       "In 2 items of 'edits' (3, 7): Argument 'edits[*].tag_ids[*]' must be a string"
     );
     expect(message).toContain("for example, 'edits[3].tag_ids[0]' got number 1.");
+  });
+
+  test('one item with several occurrences reads "In item N"', () => {
+    const def = ALL_TOOL_DEFS.find((d) => d.name === 'update_transactions')!;
+    const message = validateToolArgs(def, {
+      edits: [{ transaction_id: 'Pq3mW8nR2tV6xL9sK4dB', tag_ids: [1, 2, 3] }],
+    });
+    expect(message).toBe(
+      "Invalid arguments for update_transactions: In item 0 of 'edits': Argument " +
+        "'edits[*].tag_ids[*]' must be a string; for example, 'edits[0].tag_ids[0]' got number 1."
+    );
+  });
+
+  // #884 review: the item is recorded by the walker, not read off the path
+  // text, so literal keys that merely look indexed are not taken for items.
+  test('literal argument names containing brackets are not grouped as array items', () => {
+    const def = ALL_TOOL_DEFS.find((d) => d.name === 'get_accounts_live')!;
+    const message = validateToolArgs(def, { 'edits[0]': 1, 'edits[1]': 2 })!;
+    expect(message).toContain("Unknown argument 'edits[0]'");
+    expect(message).toContain("Unknown argument 'edits[1]'");
+    expect(message).not.toContain('In 2 items');
   });
 
   test('a single occurrence is reported as itself, with its own path', () => {
