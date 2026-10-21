@@ -19,7 +19,12 @@ import { isAbortOrTimeout } from '../abort.js';
 import type { FirebaseAuth } from '../auth/firebase-auth.js';
 import { validateMutationResponse } from './response-validation.js';
 import { validateQueryResponse } from './read-response-validation.js';
-import { GraphQLError, type GraphQLErrorCode, type GraphQLErrorMeta } from './graphql-error.js';
+import {
+  GraphQLError,
+  unusablePayloadError,
+  type GraphQLErrorCode,
+  type GraphQLErrorMeta,
+} from './graphql-error.js';
 
 // The error type lives in its own dependency-free module so the per-domain
 // mutation wrappers can construct it (committedPayload) without importing
@@ -27,6 +32,9 @@ import { GraphQLError, type GraphQLErrorCode, type GraphQLErrorMeta } from './gr
 export {
   GraphQLError,
   committedPayload,
+  committedRow,
+  unusablePayloadError,
+  MUTATION_NULL_PAYLOAD_SURFACE,
   type GraphQLErrorCode,
   type GraphQLErrorMeta,
 } from './graphql-error.js';
@@ -280,7 +288,12 @@ export class GraphQLClient {
     const maxAttempts = this.retryDelaysMs.length + 1;
     for (let attempt = 1; ; attempt++) {
       try {
-        const data = await this.requestOnce<TVariables, TResponse>(operationName, query, variables);
+        const data = await this.requestOnce<TVariables, TResponse>(
+          kind,
+          operationName,
+          query,
+          variables
+        );
         // Warn-mode response-shape validation: logs + counts drift against the
         // registered Zod schema, never throws, never alters the payload.
         // Mutations (#437) and reads (#537) have parallel registries. Reads
@@ -311,10 +324,13 @@ export class GraphQLClient {
    * `writeMayHaveApplied` flag so callers verify state before retrying.
    */
   private finalize(e: GraphQLError, kind: RequestKind, attempts: number): GraphQLError {
+    // writeApplied implies writeMayHaveApplied (the constructor derives it), so
+    // compare against what a rebuild would actually carry.
     const writeMayHaveApplied =
-      kind === 'mutation' &&
-      e.requestReachedServer !== false &&
-      (e.code === 'NETWORK' || e.code === 'SERVER_ERROR');
+      e.writeApplied ||
+      (kind === 'mutation' &&
+        e.requestReachedServer !== false &&
+        (e.code === 'NETWORK' || e.code === 'SERVER_ERROR'));
     if (attempts === e.attempts && writeMayHaveApplied === e.writeMayHaveApplied) return e;
     return new GraphQLError(e.code, e.message, e.operationName, e.httpStatus, e.serverErrors, {
       requestReachedServer: e.requestReachedServer,
@@ -327,6 +343,7 @@ export class GraphQLClient {
   }
 
   private async requestOnce<TVariables, TResponse>(
+    kind: RequestKind,
     operationName: string,
     query: string,
     variables: TVariables
@@ -429,6 +446,14 @@ export class GraphQLClient {
 
     if (!body.data) {
       this.logError(operationName, 'UNKNOWN', response.status);
+      // A MUTATION answered with no `errors` and no `data` is the same
+      // inference committedPayload makes one level down: the write has
+      // probably landed (ledger: Mutation.*:null-payload-means-applied), so it
+      // is classified writeApplied rather than as a plain failure (#887 review).
+      // mutation-guard: a mutation answered with no data is classified as applied
+      if (kind === 'mutation') {
+        throw unusablePayloadError(operationName, 'data', body.data, response.status);
+      }
       throw new GraphQLError(
         'UNKNOWN',
         'Response missing data field',

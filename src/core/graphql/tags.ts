@@ -1,5 +1,5 @@
 import type { GraphQLClient } from './client.js';
-import { committedPayload } from './graphql-error.js';
+import { committedRow } from './graphql-error.js';
 import type { ColorName } from './colors.js';
 import { CREATE_TAG, EDIT_TAG, DELETE_TAG } from './operations.generated.js';
 
@@ -25,7 +25,7 @@ export async function createTag(
     CREATE_TAG,
     args
   );
-  const created = committedPayload<CreateTagResponse['createTag']>(
+  const created = committedRow<CreateTagResponse['createTag']>(
     'CreateTag',
     (data as Partial<CreateTagResponse> | null)?.createTag,
     'createTag'
@@ -64,7 +64,7 @@ export async function editTag(
     EDIT_TAG,
     args
   );
-  const tag = committedPayload<EditTagResponse['editTag']>(
+  const tag = committedRow<EditTagResponse['editTag']>(
     'EditTag',
     (data as Partial<EditTagResponse> | null)?.editTag,
     'editTag'

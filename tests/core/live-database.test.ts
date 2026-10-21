@@ -770,10 +770,18 @@ describe('LiveCopilotDatabase split-parent and month-invalidation helpers (#822,
 
   test('invalidateLiveMonthKeys drops each named cached month and leaves the rest', () => {
     const { live, wc } = mkWarm();
-    live.invalidateLiveMonthKeys(['2024-02', '2024-02', '2023-12']);
+    const invalidate = spyOn(wc, 'invalidate');
+    try {
+      live.invalidateLiveMonthKeys(['2024-02', '2024-02', '2023-12']);
+      // One call naming the cached month once: the duplicate is collapsed and
+      // the uncached month is never passed on.
+      expect(invalidate).toHaveBeenCalledTimes(1);
+      expect(invalidate.mock.calls[0]![0]).toEqual(['2024-02']);
+    } finally {
+      invalidate.mockRestore();
+    }
     expect(wc.hasMonth('2024-02')).toBe(false);
-    // An uncached month is skipped, and an unnamed cached one survives.
-    expect(wc.hasMonth('2023-12')).toBe(false);
+    // An unnamed cached month survives.
     expect(wc.hasMonth('2024-01')).toBe(true);
   });
 

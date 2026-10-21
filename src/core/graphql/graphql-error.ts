@@ -1,8 +1,8 @@
 /**
  * The classified error every GraphQL failure surfaces as, and
  * {@link committedPayload}, the read every mutation wrapper makes of its
- * payload. Dependency-free on purpose: client.ts re-exports all of it, and the
- * wrappers import it from here, because client.ts's response validation
+ * payload. Dependency-free on purpose: client.ts re-exports the error type and
+ * the payload helpers, and the wrappers import them from here, because client.ts's response validation
  * imports the wrappers' modules (an import cycle otherwise).
  */
 
@@ -101,15 +101,57 @@ export const MUTATION_NULL_PAYLOAD_SURFACE = 'Mutation.*:null-payload-means-appl
  */
 export function committedPayload<T>(operationName: string, value: unknown, path: string): T {
   // mutation-guard: a committed write's unusable payload is classified as applied
-  if (value !== null && typeof value === 'object') return value as T;
-  const got = value === null ? 'null' : value === undefined ? 'missing' : `a ${typeof value}`;
-  throw new GraphQLError(
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value as T;
+  throw unusablePayloadError(operationName, path, value);
+}
+
+/**
+ * {@link committedPayload}, plus a non-empty string `id` on the payload: for a
+ * mutation whose caller keys a cache patch or its answer on the id the server
+ * returns (a create's new id, a returned transaction row). An id-less row is
+ * no more usable than a missing one, so it gets the same classification
+ * instead of a `null`-keyed cache entry (#887 review).
+ */
+export function committedRow<T extends { id: string }>(
+  operationName: string,
+  value: unknown,
+  path: string
+): T {
+  const row = committedPayload<{ id?: unknown }>(operationName, value, path);
+  // mutation-guard: a created row without a string id is classified, never cached
+  if (typeof row.id === 'string' && row.id !== '') return row as T;
+  throw unusablePayloadError(operationName, `${path}.id`, row.id);
+}
+
+/**
+ * The error for a mutation answered without `errors` whose payload (or `data`
+ * itself) is unusable: classified `writeApplied` — treat as possibly applied,
+ * see {@link MUTATION_NULL_PAYLOAD_SURFACE}. Names the path and the KIND of
+ * value, never the value.
+ */
+export function unusablePayloadError(
+  operationName: string,
+  path: string,
+  value: unknown,
+  httpStatus?: number
+): GraphQLError {
+  const got =
+    value === null
+      ? 'null'
+      : value === undefined
+        ? 'missing'
+        : Array.isArray(value)
+          ? 'an array'
+          : value === ''
+            ? 'empty'
+            : `a ${typeof value}`;
+  return new GraphQLError(
     'UNKNOWN',
     `Copilot accepted ${operationName} without errors but returned no ${path} (it was ` +
       `${got}), so the write has PROBABLY landed. Re-read the entity to confirm before ` +
       'retrying — retrying a create could duplicate it.',
     operationName,
-    undefined,
+    httpStatus,
     undefined,
     { requestReachedServer: true, writeApplied: true }
   );

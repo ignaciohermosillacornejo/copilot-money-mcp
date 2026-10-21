@@ -1,5 +1,5 @@
 import type { GraphQLClient } from './client.js';
-import { committedPayload } from './graphql-error.js';
+import { committedRow } from './graphql-error.js';
 import { EDIT_RECURRING, DELETE_RECURRING } from './operations.generated.js';
 
 /**
@@ -62,7 +62,7 @@ export async function createRecurring(
     CREATE_RECURRING_MINIMAL,
     args
   );
-  const created = committedPayload<CreateRecurringResponse['createRecurring']>(
+  const created = committedRow<CreateRecurringResponse['createRecurring']>(
     'CreateRecurring',
     (data as Partial<CreateRecurringResponse> | null)?.createRecurring,
     'createRecurring'
@@ -187,7 +187,7 @@ export async function editRecurring(
     },
     EditRecurringResponse
   >('EditRecurring', EDIT_RECURRING, { id: args.id, input: wireInput });
-  const recurring = committedPayload<EditRecurringResponse['editRecurring']['recurring']>(
+  const recurring = committedRow<EditRecurringResponse['editRecurring']['recurring']>(
     'EditRecurring',
     (data as Partial<EditRecurringResponse> | null)?.editRecurring?.recurring,
     'editRecurring.recurring'

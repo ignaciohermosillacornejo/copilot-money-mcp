@@ -1051,13 +1051,54 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'replace',
       find:
         "  // mutation-guard: a committed write's unusable payload is classified as applied\n" +
-        "  if (value !== null && typeof value === 'object') return value as T;",
+        "  if (value !== null && typeof value === 'object' && !Array.isArray(value)) return value as T;",
       with:
         "  // mutation-guard: a committed write's unusable payload is classified as applied\n" +
         '  return value as T;',
     },
     expectFailingTests: ['a split that landed with an unusable response still records the parent'],
     expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
+  {
+    name: 'a mutation answered with no data is classified as applied',
+    file: 'src/core/graphql/client.ts',
+    invariant:
+      'A mutation answered 200 with no `errors` and a null `data` has probably committed, ' +
+      'the same inference committedPayload makes one level down. Classified as a plain ' +
+      'failure instead, split_transaction would not record the parent it probably split, ' +
+      'and a later delete_transaction of that parent credits its amount back a second time ' +
+      '(#822, #887 review).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '      // mutation-guard: a mutation answered with no data is classified as applied\n' +
+        "      if (kind === 'mutation') {",
+      with:
+        '      // mutation-guard: a mutation answered with no data is classified as applied\n' +
+        "      if (kind === 'mutation' && false) {",
+    },
+    expectFailingTests: ['a mutation answered with data: null says it probably landed'],
+    expectFails: 'tests/core/graphql/mutation-payload.test.ts',
+  },
+  {
+    name: 'a created row without a string id is classified, never cached',
+    file: 'src/core/graphql/graphql-error.ts',
+    invariant:
+      'create_category, create_tag and create_recurring patch the local and live caches keyed ' +
+      'on the id the server returns, and every write tool answers with it. A payload present ' +
+      'but id-less would put a null-keyed row in both caches and hand the caller a null id ' +
+      'for a write that probably landed (#887 review).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '  // mutation-guard: a created row without a string id is classified, never cached\n' +
+        "  if (typeof row.id === 'string' && row.id !== '') return row as T;",
+      with:
+        '  // mutation-guard: a created row without a string id is classified, never cached\n' +
+        '  return row as T;',
+    },
+    expectFailingTests: ['a create answered with a row but no id is classified, not resolved'],
+    expectFails: 'tests/core/graphql/mutation-payload.test.ts',
   },
 ];
 

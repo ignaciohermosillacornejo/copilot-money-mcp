@@ -1183,9 +1183,11 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     oracle: null,
     class: 'unverified',
     evidence:
-      'Inferred, not observed (#875): when a mutation answers with no `errors` but its payload ' +
-      '(e.g. editTransaction.transaction, createTag, splitTransaction) is null or not an ' +
-      'object, the write is assumed to have PROBABLY been applied. Every mutation wrapper ' +
+      'Inferred, not observed (#875, #887): when a mutation answers with no `errors` but its ' +
+      'payload (e.g. editTransaction.transaction, createTag, splitTransaction) is null or ' +
+      'not an object, its `data` itself is null or missing (classified in the client, ' +
+      'requestOnce), or a returned row has no string id (committedRow), the write is ' +
+      'assumed to have PROBABLY been applied. Every mutation wrapper ' +
       'that reads into its payload goes through committedPayload (graphql-error.ts), which ' +
       'then raises a GraphQLError with writeApplied set: the caller drops the live months ' +
       'rather than patching them, split_transaction records the parent as split, and the ' +
@@ -1193,9 +1195,15 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'execution reports a failed resolver in `errors`, so a payload nulled with no error ' +
       'most plausibly comes from a resolver that ran. But GraphQL can also null a field for ' +
       'other reasons (a nullable payload a resolver chose to return empty, an error the ' +
-      'server swallowed), and no such response has ever been observed from Copilot. Both ' +
-      'reactions are safe if the write did NOT land: a dropped month is only refetched, and a ' +
-      'wrongly recorded split parent only refuses a delete. WHAT DRIFT WOULD LOOK LIKE: a ' +
+      'server swallowed), and no such response has ever been observed from Copilot. COST IF ' +
+      'WRONG: a dropped month is only refetched, but a wrongly recorded split parent is ' +
+      'persistent and uid-scoped (split-parent records are never retired, #842), so this ' +
+      'server refuses to delete that transaction indefinitely, and the refusal points at ' +
+      'children that do not exist. Clear-out route: remove its line from ' +
+      '~/.claude/copilot-money/split-parents.<uid>.jsonl and restart the server (the store ' +
+      'is skipped entirely with COPILOT_DISABLE_PERSISTENT_INDEX=1, though the in-memory ' +
+      'record still lasts the session). Accepted because the alternative, forgetting a real ' +
+      'split, double-credits an account (#822). WHAT DRIFT WOULD LOOK LIKE: a ' +
       'write tool reporting that Copilot "returned no <path>" and the re-read showing the ' +
       'write absent; the claim would then need narrowing to the operations it holds for.',
   },

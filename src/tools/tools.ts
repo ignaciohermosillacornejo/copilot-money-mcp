@@ -5172,8 +5172,12 @@ export class CopilotMoneyTools {
         // The server answered without errors but with an unusable payload
         // (#875), so the split has probably landed. Treat it as landed: record
         // and evict the parent as the success path does, or delete_transaction
-        // would accept it (#822). If it did not land, the cost is a refused
-        // delete of an unsplit row, the safe direction.
+        // would accept it (#822). If it did not land, the record is still
+        // persistent and uid-scoped (never retired, #842): this server refuses
+        // to delete that row until its line is removed from
+        // ~/.claude/copilot-money/split-parents.<uid>.jsonl. That is the price
+        // of never double-crediting a real split; see the ledger entry
+        // Mutation.*:null-payload-means-applied.
         this.recordSplitParent(transaction_id);
         this.db.patchCachedTransactionDelete(transaction_id);
         this.evictLiveTransaction(transaction_id);

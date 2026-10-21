@@ -1,5 +1,5 @@
 import type { GraphQLClient } from './client.js';
-import { committedPayload } from './graphql-error.js';
+import { committedPayload, committedRow } from './graphql-error.js';
 import {
   ADD_TRANSACTION_TO_RECURRING,
   BULK_EDIT_TRANSACTIONS,
@@ -83,7 +83,7 @@ export async function createTransaction(
     CREATE_TRANSACTION,
     args
   );
-  return committedPayload<CreatedTransaction>(
+  return committedRow<CreatedTransaction>(
     'CreateTransaction',
     (data as Partial<CreateTransactionResponse> | null)?.createTransaction,
     'createTransaction'
@@ -249,9 +249,11 @@ export async function bulkEditTransactions(
   // drifted `updated` or `failed` that is not an array is read as empty rather
   // than thrown on: its rows then surface as `skipped`, whose live months the
   // tool layer drops (#864 review).
-  const response = data.bulkEditTransactions as Partial<
-    BulkEditTransactionsResponse['bulkEditTransactions']
-  > | null;
+  // `data` itself is guarded too: a null `data` would otherwise be a bare
+  // TypeError here (#887 review). The client classifies a null `data` before
+  // this runs; the guard is for a caller that hands in its own client.
+  const response = (data as Partial<BulkEditTransactionsResponse> | null)
+    ?.bulkEditTransactions as Partial<BulkEditTransactionsResponse['bulkEditTransactions']> | null;
   // Elements too: an `updated` row without a string id, or a `failed` entry
   // that is not an object, is dropped here, so the ids it stood for land in
   // `skipped` instead of throwing in a caller's loop.
@@ -344,7 +346,7 @@ export async function addTransactionToRecurring(
     AddTransactionToRecurringArgs,
     AddTransactionToRecurringResponse
   >('AddTransactionToRecurring', ADD_TRANSACTION_TO_RECURRING, args);
-  return committedPayload<CreatedTransaction>(
+  return committedRow<CreatedTransaction>(
     'AddTransactionToRecurring',
     (data as Partial<AddTransactionToRecurringResponse> | null)?.addTransactionToRecurring
       ?.transaction,
@@ -438,7 +440,7 @@ export async function editTransaction(
   );
   // A null row after a committed edit is classified, not a TypeError (#875):
   // the caller's catch then drops the live months instead of patching them.
-  const tx = committedPayload<CreatedTransaction>(
+  const tx = committedRow<CreatedTransaction>(
     'EditTransaction',
     (data as Partial<EditTransactionResponse> | null)?.editTransaction?.transaction,
     'editTransaction.transaction'

@@ -1,5 +1,5 @@
 import type { GraphQLClient } from './client.js';
-import { committedPayload } from './graphql-error.js';
+import { committedRow } from './graphql-error.js';
 import type { ColorName } from './colors.js';
 import { CREATE_CATEGORY, EDIT_CATEGORY, DELETE_CATEGORY } from './operations.generated.js';
 
@@ -29,7 +29,7 @@ export async function createCategory(
     { input: CreateCategoryInput; spend: boolean; budget: boolean },
     CreateCategoryResponse
   >('CreateCategory', CREATE_CATEGORY, { spend: false, budget: false, input: args.input });
-  const created = committedPayload<CreateCategoryResponse['createCategory']>(
+  const created = committedRow<CreateCategoryResponse['createCategory']>(
     'CreateCategory',
     (data as Partial<CreateCategoryResponse> | null)?.createCategory,
     'createCategory'
@@ -81,7 +81,7 @@ export async function editCategory(
     budget: false,
     input: args.input,
   });
-  const cat = committedPayload<EditCategoryResponse['editCategory']['category']>(
+  const cat = committedRow<EditCategoryResponse['editCategory']['category']>(
     'EditCategory',
     (data as Partial<EditCategoryResponse> | null)?.editCategory?.category,
     'editCategory.category'
