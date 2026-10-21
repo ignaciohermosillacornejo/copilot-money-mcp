@@ -845,6 +845,38 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('EditCategoryBudgetMonthlyInput.month', ['set_budget.month']),
   responseShape('editCategoryBudgetMonthly'),
   appliesSurface('editCategoryBudgetMonthly'),
+  {
+    surface: 'CategoryBudget.current:zeroIsUnset',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'LIVE PROBE 2026-10-20 (#825), throwaway categories since deleted: a brand-new, ' +
+      'never-budgeted, non-excluded category returns `budget.current` as a full object ' +
+      '(amount, resolvedAmount, rolloverAmount and goalAmount all 0; child* and unassigned* ' +
+      'null), not null. set_budget amount "0" is itself the clear (the tool returns ' +
+      '`cleared: true`): a probe set to 50 then to 0 read back field-for-field identical to ' +
+      'the never-budgeted category, in `budget.current` and in all 61 `budget.histories` ' +
+      'entries, rollover wiped too. So "cleared" and "never set" are indistinguishable on ' +
+      'the wire, and get_categories_live keeps `budget_amount: 0` rather than mapping it to ' +
+      "null; its description and get_budgets_live's say 0 can mean no budget. Same probe: " +
+      '`budget.current.amount` includes rollover — a probe set to 50 read back amount 550 ' +
+      '(resolvedAmount 550, rolloverAmount 500, goalAmount 0) — so `budget_amount` is not ' +
+      'just the amount set, and the descriptions say so. One run; nothing re-checks it.',
+  },
+  {
+    surface: 'CategoryBudget.current:hiddenWhileExcluded',
+    kind: 'response-shape',
+    oracle: null,
+    class: 'verified-once',
+    evidence:
+      'LIVE PROBE 2026-10-20 (#825, same run as `CategoryBudget.current:zeroIsUnset`): only ' +
+      'an EXCLUDED category returns `budget.current: null`. set_budget on an excluded ' +
+      'category returns success, but reads still return `budget.current: null` for it; ' +
+      'after un-excluding the category its budget appeared, with rollover accumulated. The ' +
+      'write is stored but invisible while the category is excluded, which the set_budget ' +
+      'description now states. One run; nothing re-checks it.',
+  },
 
   // ----- Recurrings ---------------------------------------------------------
   // No top-level args beyond the input object (covered by CreateRecurringInput.*).

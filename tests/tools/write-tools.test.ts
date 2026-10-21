@@ -659,7 +659,7 @@ describe('createTransaction', () => {
     const result = await tools.createTransaction({ ...validArgs, note: 'reimbursable' });
 
     expect((client._calls[0].variables as any).input.userNotes).toBe('reimbursable');
-    expect(result.transaction.user_note).toBe('reimbursable');
+    expect(result.transaction.user_notes).toBe('reimbursable');
   });
 
   test('create_transaction with tag_ids:[] sends empty tagIds and skips existence check', async () => {

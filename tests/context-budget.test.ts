@@ -338,7 +338,12 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // headroom). Disclosure required by the #597 convention, not bloat.
   get_categories_live: 2_555,
   get_tags_live: 530,
-  get_budgets_live: 905,
+  // Raised 905 -> 1_070 by #825's budget-zero probe (2026-10-20): `amount`
+  // includes rollover, 0 can mean no budget (cleared and never set read the
+  // same on the wire), and an excluded category has none. Ledger:
+  // CategoryBudget.current:zeroIsUnset / :hiddenWhileExcluded. Measured 973
+  // (~10% headroom).
+  get_budgets_live: 1_070,
   // Raised from 755 by #606: adds the `fields` param (excludes `rule` — the
   // server-side matcher config — and `payments` — the next scheduled payment,
   // which duplicates get_transactions_live — together ~45% of a row, plus
@@ -419,7 +424,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   get_investment_balance_live: 1_855,
   refresh_cache: 1_335,
   // Write (--write) tools
-  create_transaction: 1_980,
+  // Raised 1_980 -> 2_190 by #825: the response is a get_transactions_live row
+  // now (`user_notes`, not the cache model's `user_note`), and the description
+  // says so, since a v2 caller reading `user_note` would get nothing. Measured
+  // 1_991 (~10% headroom).
+  create_transaction: 2_190,
   delete_transaction: 1_205,
   add_transaction_to_recurring: 1_305,
   split_transaction: 2_300,
@@ -566,6 +575,11 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // UNMOVED by #845's dispatch-validation PR (+216: get_holdings_live's
 // `fields` param). Measured 84_302 on main plus this PR (~0.7%), within the
 // 84_920 in force.
+//
+// UNMOVED by #825's write-vocabulary PR (create_transaction's row-shape
+// note, and the budget-zero/rollover/excluded caveats on get_categories_live,
+// get_budgets_live and set_budget). Measured 84_675 on main plus this PR
+// (~0.3%), within the 84_920 in force.
 const SCHEMA_TOTAL_BUDGET = 84_920;
 
 // ---------------------------------------------------------------------------

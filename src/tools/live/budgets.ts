@@ -162,7 +162,8 @@ export function createLiveBudgetsToolSchema(): ToolSchema {
       'powers get_categories_live populates this. Replaces get_budgets when --live-reads is on. ' +
       'Note: live mode does not include `name`, `period`, `start_date`, `end_date`, `is_active`, ' +
       "or `iso_currency_code` per budget — those fields aren't exposed on Copilot's GraphQL endpoint. " +
-      'Use cache-mode `get_budgets` if you need them.',
+      'Use cache-mode `get_budgets` if you need them. `amount` includes rollover; 0 can mean ' +
+      'no budget (cleared and never set read the same); an excluded category has none.',
     inputSchema: {
       type: 'object' as const,
       properties: {

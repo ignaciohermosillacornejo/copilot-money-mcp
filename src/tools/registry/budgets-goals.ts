@@ -46,7 +46,8 @@ export const setBudgetTool = defineTool({
       'Copilot → Settings → General, the budget write still succeeds on the server, but ' +
       'the value will not appear in the Copilot UI until those toggles are re-enabled. ' +
       'Rollover behavior also depends on the "Rollover categories" selection in the same ' +
-      'settings pane, which is not writable through this tool.',
+      'settings pane, which is not writable through this tool. On an excluded category the ' +
+      'write succeeds but reads hide the budget until the category is un-excluded.',
     inputSchema: {
       type: 'object' as const,
       properties: {

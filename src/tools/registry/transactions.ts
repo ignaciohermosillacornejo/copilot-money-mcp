@@ -210,7 +210,8 @@ export const createTransactionTool = defineTool({
       'account_id, item_id, name, date, amount, and type; category_id required for ' +
       'REGULAR, omit for INCOME/INTERNAL_TRANSFER. Optional tag_ids, note, and ' +
       'recurring_id. Formats, sign convention, and ID sources are documented per ' +
-      'parameter. Returns the newly-created transaction. On a manual account, a row ' +
+      'parameter. Returns the new transaction as a get_transactions_live row (note: ' +
+      'user_notes). On a manual account, a row ' +
       "dated before the account's last balance reset does not move its balance.",
     inputSchema: {
       type: 'object',

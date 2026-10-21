@@ -1,8 +1,10 @@
 # Migrating to v3.0.0
 
-v3 is a **response-shape release**. No tool was renamed, no tool was removed, and
-nothing about writes changed. What changed is how much each read tool hands back
-when you don't ask for anything in particular.
+v3 is a **response-shape release**. No tool was renamed and no tool was removed.
+What changed is how much each read tool hands back when you don't ask for
+anything in particular, and, for three write tools, the field names of the
+transaction row they return (see
+[Write responses use live field names](#write-responses-use-live-field-names)).
 
 One filter did change meaning: the transactions `category` filter takes an exact
 category id (a parent includes its children), and a name or substring that used
@@ -62,6 +64,7 @@ live rows do not carry identical field sets.
 | `_field_warning` names a field you know exists | The name exists on the *other* mode, or is misspelled | Check the tables below for the mode you are running |
 | `__typename` keys are gone from live responses | They are stripped from every response now | Nothing to do in almost every case. The one place it disambiguated anything was the icon union, and `{unicode}` vs `{id, src}` already tells those apart |
 | Responses are no longer pretty-printed | Responses serialize compactly | Nothing to do — the JSON is identical, only whitespace changed |
+| `user_note` or `is_manual` is missing from a `create_transaction`, `add_transaction_to_recurring` or `split_transaction` response | Write responses use `get_transactions_live`'s row names | Read `user_notes`. `is_manual` is gone: every `create_transaction` row was manual |
 | `get_investment_balance_live` returns ~30 history points | `history_limit` defaults to 30 | Pass `history_limit: 0` for the full series |
 | `get_investment_prices` rows lost their `prices` map | Replaced by a derived `latest_price` / `latest_at` | `fields: ["default", "prices"]` |
 | A `get_categories_live` row lost its `budget` object | Replaced by a derived `budget_amount` | `fields: ["default", "budget"]` |
@@ -177,12 +180,33 @@ caller is the one who has to change something.
   no upper bound. `0` remains the unlimited escape hatch, so nothing that
   wanted the full series is affected.
 
+## Write responses use live field names
+
+`--write` always turns on `--live-reads`, so a write caller reads transactions
+with `get_transactions_live`. The transaction row a write tool returns now uses
+that tool's field names, so a field read from one can be read from the other
+under the same key:
+
+| Tool | Returned row(s) | v2 | v3 |
+|---|---|---|---|
+| `create_transaction` | `transaction` | `user_note` | `user_notes` |
+| `create_transaction` | `transaction` | `is_manual: true` | removed |
+| `add_transaction_to_recurring` | `transaction` | `user_note` | `user_notes` |
+| `split_transaction` | `parent`, `children[]` | `user_note` | `user_notes` |
+
+`is_manual` was removed rather than kept because live rows have no such field
+and it carried no information: `create_transaction` only makes manual
+transactions, so it was always `true`. No other key changed. Cache-mode
+`get_transactions` rows still spell the note `user_note`, and `fields` accepts
+either spelling in both read modes.
+
 ## What did not change
 
 - Tool names, and which tools exist in which mode.
 - Every filter argument — dates, categories, accounts, amounts, text search,
   tags, location — and what they mean.
-- All write tools, and the `--write` / `--live-reads` flags.
+- Write tool arguments, and the `--write` / `--live-reads` flags. (Write tools
+  still take the note as `note`.)
 - Privacy posture: default-mode reads remain 100% local with zero network
   requests.
 - `category_name` is still resolved to a human-readable name for you.

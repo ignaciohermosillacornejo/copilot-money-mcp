@@ -34,7 +34,10 @@ import { monthsCovered } from '../../src/utils/date.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
 import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
-import { LiveTransactionsTools } from '../../src/tools/live/transactions.js';
+import {
+  LIVE_TRANSACTION_KNOWN_FIELDS,
+  LiveTransactionsTools,
+} from '../../src/tools/live/transactions.js';
 import { TOOL_REGISTRY, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.js';
 import * as transactionRegistry from '../../src/tools/registry/transactions.js';
 import type { LiveToolContext, ToolContext } from '../../src/tools/registry/types.js';
@@ -739,6 +742,72 @@ describe('the local cache agrees with the server after a write (#848)', () => {
             value: server.type === type,
           });
         }
+      }
+    }
+  );
+});
+
+// ── Write responses use live row field names (#825) ─────────────────────────
+//
+// `--write` implies `--live-reads`, so a write caller reads transactions from
+// get_transactions_live. A transaction row a write tool returns must use that
+// row's field names: v2 returned the cache model's `user_note` (and a
+// cache-only `is_manual`) beside live rows spelled `user_notes`, so a caller
+// copying a field from one to the other got nothing back. The allowed set is
+// LIVE_TRANSACTION_KNOWN_FIELDS, derived from the live row mapper itself, so
+// it cannot drift from what get_transactions_live returns.
+//
+// A transaction row is any object in the response carrying both
+// `transaction_id` and `amount`; summaries (`{ transaction_id, updated }`)
+// carry no amount. The expected row count per tool keeps the walk from being
+// vacuous, and its key set must equal the transaction write tools, so a new
+// tool, or one that starts returning rows, has to be classified here.
+
+/** How many transaction rows each transaction write tool's response carries. */
+const RESPONSE_ROWS: Record<string, number> = {
+  create_transaction: 1,
+  add_transaction_to_recurring: 1,
+  split_transaction: 3, // the parent and two children
+  update_transaction: 0,
+  update_transactions: 0,
+  review_transactions: 0,
+  bulk_edit_transactions: 0,
+  delete_transaction: 0,
+};
+
+function transactionRowsIn(value: unknown, out: Row[] = []): Row[] {
+  if (Array.isArray(value)) {
+    for (const v of value) transactionRowsIn(v, out);
+  } else if (value !== null && typeof value === 'object') {
+    const obj = value as Row;
+    if ('transaction_id' in obj && 'amount' in obj) out.push(obj);
+    for (const v of Object.values(obj)) transactionRowsIn(v, out);
+  }
+  return out;
+}
+
+describe('write responses use live row field names (#825)', () => {
+  test('every transaction write tool is classified', () => {
+    expect(Object.keys(RESPONSE_ROWS).sort()).toEqual(transactionWriteToolNames());
+  });
+
+  test.each(Object.keys(RESPONSE_ROWS))(
+    '%s: every returned transaction row key is a get_transactions_live field',
+    async (toolName) => {
+      const c = CASES[toolName]!;
+      const { call, read } = setup(c.mocks);
+      await read();
+      const response = await call(toolName, c.args);
+      const rows = transactionRowsIn(response);
+      expect(rows).toHaveLength(RESPONSE_ROWS[toolName]!);
+      for (const row of rows) {
+        // Object.keys keeps a key whose value is undefined, so a misnamed key
+        // is caught even when the fixture leaves that field empty.
+        const foreign = Object.keys(row).filter((k) => !LIVE_TRANSACTION_KNOWN_FIELDS.has(k));
+        expect({ id: row.transaction_id, foreign }).toEqual({
+          id: row.transaction_id,
+          foreign: [],
+        });
       }
     }
   );
