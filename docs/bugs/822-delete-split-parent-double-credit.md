@@ -94,9 +94,9 @@ retirement let its delete through, as described above. #842 removed the retireme
 the local cache as evidence. The ledger entry is replaced by
 `Transaction.parentId:childlessParentReappears`.
 
-There is no opt-in override. Both tool descriptions now state the rule, and the smoke harness deregisters the parent before it
-sends the split, so cleanup deletes only the children even when the split's response is
-lost.
+There is no opt-in override. Both tool descriptions now state the rule, and the smoke
+harness deregisters the parent before it sends the split, so cleanup deletes only the
+children even when the split's response is lost.
 
 Best-effort by construction: a parent split in the app, in a month neither cache holds, and
 not seen this session, is still accepted — after a server restart the session record is

@@ -147,8 +147,10 @@
     // are worth a compiler.
     "tests/scripts/smoke-cache.test.ts",
     // The phantom-row sweep (#797). `ROWS: Record<SweptRoute, ...> = ROUTE_ROWS`
-    // is a type-level assertion that the smoke compares exactly the routes the
-    // sweep covers; it only holds if something compiles it.
+    // is a type-level assertion that the smoke compares every route the sweep
+    // covers; it only holds if something compiles it. It proves one direction
+    // only — assigning an identifier skips the excess-property check — so the
+    // other half of "exactly" is the runtime coverage test in the same file.
     "tests/core/parent-pointer-documents.test.ts",
     // The run-wide teardown's own contract test (#642). `bun test` never fires
     // `process.on('exit')`, so the reader's exit sweep does not cover a test

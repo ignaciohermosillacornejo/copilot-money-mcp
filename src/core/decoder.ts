@@ -2623,7 +2623,7 @@ function processUserProfile(
   docId: string
 ): UserProfile | null {
   // Skip sentinel/parent-pointer docs that have no meaningful data.
-  // The literal `fields.size === 0` is pinned: this processor sits behind a
+  // The literal `if (fields.size === 0)` is pinned: this processor sits behind a
   // parent-pointer dispatch clause, and the clause scan in
   // tests/core/parent-pointer-documents.test.ts greps for exactly this text.
   // Hoisting it into a helper means updating that pattern, not loosening it.
@@ -2752,7 +2752,7 @@ function processAmazonIntegration(
   // Fieldless documents are Firestore parent pointers, not integrations.
   // Without this the function seeds `{ amazon_id: docId }` and would emit a
   // stub for every pointer its dispatch clause matches — the #627 shape.
-  // The literal `fields.size === 0` is pinned: this processor sits behind a
+  // The literal `if (fields.size === 0)` is pinned: this processor sits behind a
   // parent-pointer dispatch clause, and the clause scan in
   // tests/core/parent-pointer-documents.test.ts greps for exactly this text.
   // Hoisting it into a helper means updating that pattern, not loosening it.

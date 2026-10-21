@@ -69,7 +69,52 @@ describe('redactUserPaths', () => {
     const home = '/var/synthetic-root';
     expect(redactUserPaths(`${home}/x`, home)).toBe('~/x');
     expect(redactUserPaths(`${home}.bak/x`, home)).toBe('~.bak/x');
+  });
+
+  test('stated limit: outside /Users and /home, a sibling joined by a name character keeps the name', () => {
+    // The opposite outcome to the test above, pinned on its own so a failure
+    // names which half broke. `-` is a name character, so `${home}-backup`
+    // cannot be told apart from a different directory and is left alone.
+    const home = '/var/synthetic-root';
     expect(redactUserPaths(`${home}-backup/x`, home)).toBe(`${home}-backup/x`);
+  });
+
+  test('under /Users and /home, a home with spaces or odd characters leaves nothing behind at any terminator', () => {
+    // The class, not one instance: every home shape the literal match must
+    // cover, crossed with every way a path can end in an error message. The
+    // prefix rule stops at whitespace and quotes, so a terminator the strict
+    // boundary did not accept would leave the name's tail in the output.
+    const homes = [
+      '/Users/bob smith',
+      '/Users/bob  smith',
+      '/Users/bob\tsmith',
+      '/Users/bob.smith',
+      "/Users/o'brien",
+      '/Users/bob (work)',
+      '/Users/josé garcía',
+      '/home/bob smith',
+    ];
+    const terminators = ['/x', '', "'", '"', ',', ')', ' and more', '\tmore', '\nmore'];
+    for (const home of homes) {
+      const nameParts = (home.split('/')[2] ?? '')
+        .split(/[\s'.()]+/)
+        .filter((part) => part.length > 1);
+      for (const terminator of terminators) {
+        const out = redactUserPaths(`open ${home}${terminator}`, home);
+        expect({ home, terminator, out }).toEqual({ home, terminator, out: `open ~${terminator}` });
+        for (const part of nameParts) expect(out).not.toContain(part);
+      }
+    }
+  });
+
+  test('stated limit: under /Users, another user named after the home plus a space keeps the tail', () => {
+    // `/Users/bob smith` while the home is `/Users/bob`: the prefix rule cannot
+    // tell a spaced name from the prose after it, so the part after the space
+    // stays — with or without the home rule. Pinned so changing it is a decision.
+    expect(redactUserPaths('open /Users/bob smith/x', '/Users/bob')).toBe('open ~ smith/x');
+    expect(redactUserPaths('open /Users/bob smith/x', '/Users/carol')).toBe(
+      'open /Users/<user> smith/x'
+    );
   });
 
   test("under /Users, a home that is a prefix of another user's name never matches inside it", () => {

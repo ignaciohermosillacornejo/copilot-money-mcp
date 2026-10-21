@@ -9,8 +9,8 @@
  * For dates beyond today the response pads the full month with placeholder
  * rows (captured with both `totalAmount` and `comparisonAmount` null).
  * Filtering them out — every row with no `totalAmount` — is the projection
- * layer's job; this wrapper preserves
- * them verbatim so the cache can serve a faithful copy of the response.
+ * layer's job; this wrapper preserves them verbatim so the cache can serve a
+ * faithful copy of the response.
  *
  * The captured query at docs/graphql-capture/operations/queries/MonthlySpend.md
  * exposes only `id`, `date`, `totalAmount`, `comparisonAmount` per row and

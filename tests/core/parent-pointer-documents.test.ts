@@ -247,5 +247,12 @@ describe('no route builds a row from a fieldless document (#627, #778, #797)', (
     const rows = ROWS[route as SweptRoute](all);
 
     expect(rows).toBe(0);
+    // Every accessor, not only the route's own: a guard removed together with
+    // a dispatch change that pushes the row into a different array would pass
+    // the line above and fail here.
+    const everywhere = Object.entries(ROWS)
+      .filter(([, count]) => count(all) !== 0)
+      .map(([other]) => other);
+    expect(everywhere).toEqual([]);
   });
 });
