@@ -62,9 +62,9 @@
  * meets is a directory name directly under `/Users` or `/home`, and all six
  * are legal in a filename. It holds because such a directory is in practice a
  * home named after a short name; where it does not, see the last limit below.
- * `.` is deliberately in neither: it IS a
- * username character, so the prefix rule must run through it
- * (`/Users/bob.smith` is one user) and the boundary must not stop at it.
+ * `.` is deliberately in neither: it IS a username character, so the prefix
+ * rule must run through it (`/Users/bob.smith` is one user) and the boundary
+ * must not stop at it.
  *
  * What remains, stated:
  *   - For a home outside `/Users` and `/home`, a sibling joined by a name

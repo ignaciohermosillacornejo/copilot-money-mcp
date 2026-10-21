@@ -27,6 +27,14 @@
  * error` rather than as the file's real test count, so the count and the error
  * line are both compared against the unmutated baseline.
  *
+ * A mutation must also leave the file type-valid, not just parseable:
+ * `noUnusedLocals` and `noUnusedParameters` are on, so a mutation that drops the
+ * sole use of an import must keep the identifier referenced. The runner only
+ * shells `bun test <file>` today, but a typecheck step added later would turn
+ * such a row red for the wrong reason. The two `redactUserPaths` rows are the
+ * worked example: they replace the call with
+ * `((text: string, _keep = redactUserPaths) => text)(` rather than `String(`.
+ *
  * This is deliberately NOT full mutation testing. Stryker over this codebase
  * would be minutes per run and mostly noise; the point here is a ledger of the
  * handful of invariants whose violation writes wrong data to a real financial
