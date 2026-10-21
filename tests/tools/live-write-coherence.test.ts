@@ -41,6 +41,7 @@ import {
   liveRowFromMutation,
   mapMutationFields,
   writeRowMapperArities,
+  type WriteRowField,
 } from '../../src/tools/live/transactions.js';
 import { TOOL_REGISTRY, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.js';
 import * as transactionRegistry from '../../src/tools/registry/transactions.js';
@@ -825,7 +826,7 @@ describe('write responses use live row field names (#825)', () => {
   test('no write-row field mapper takes the category index', () => {
     const arities = writeRowMapperArities();
     expect(Object.keys(arities).length).toBeGreaterThan(0);
-    expect(Object.keys(arities).filter((field) => arities[field]! >= 2)).toEqual([]);
+    expect(Object.entries(arities).filter(([, arity]) => arity >= 2)).toEqual([]);
   });
 
   // Non-vacuity: the arity rule does tell the index-reading mappers apart.
@@ -843,16 +844,29 @@ describe('write responses use live row field names (#825)', () => {
     'mapping %s from a mutation response throws instead of guessing',
     (field) => {
       const tx = mutationNode(seedNode(TX_CREATED), { categoryId: CAT_OLD });
-      const excluded = [field] as unknown as Parameters<typeof mapMutationFields>[1];
+      const excluded = [field] as unknown as readonly WriteRowField[];
       expect(() => mapMutationFields(tx, excluded)).toThrow(/CategoryIndex/);
     }
   );
 
-  // Split children carry the parent id the split knows; the parent and the
-  // other tools' rows do not carry the key at all.
+  // parent_transaction_id is reachable only with a known parent: without a
+  // parentId the value would be a guess, so the type refuses the request.
+  test('mapMutationFields cannot request parent_transaction_id without a parentId', () => {
+    const tx = mutationNode(seedNode(TX_CHILD_1));
+    // @ts-expect-error parent_transaction_id needs tx.parentId (a split child's known parent)
+    mapMutationFields(tx, ['parent_transaction_id']);
+    expect(
+      mapMutationFields({ ...tx, parentId: TX_SPLIT_PARENT }, ['parent_transaction_id'])
+    ).toEqual({
+      parent_transaction_id: TX_SPLIT_PARENT,
+    });
+  });
+
+  // Split children carry the parent id the split knows; the parent and every
+  // other transaction write tool's rows do not carry the key at all.
   test('split children carry parent_transaction_id; no other returned row does', async () => {
     const results: Record<string, Row[]> = {};
-    for (const toolName of Object.keys(TWINNED_ROWS)) {
+    for (const toolName of Object.keys(RESPONSE_ROWS)) {
       const c = CASES[toolName]!;
       const { call, read } = setup(c.mocks);
       await read();

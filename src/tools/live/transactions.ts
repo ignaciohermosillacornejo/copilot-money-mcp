@@ -247,7 +247,10 @@ export const LIVE_TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set(
  * fields the mutations' TransactionFields fragment selects, and never the
  * category index. The second half is checked by mapper arity — a mapper that
  * takes the index has two parameters — in tests/tools/live-write-coherence.test.ts,
- * for every row shape rather than the fixture's.
+ * for every row shape rather than the fixture's. Arity is the SYNTACTIC half:
+ * `Function.length` stops at a defaulted or rest parameter, so a mapper can
+ * hide the read from it. The index is always passed positionally, so such a
+ * mapper still trips {@link NO_CATEGORY_INDEX} on any real read.
  *
  * Left out: `category_name` and `excluded` (need the category index),
  * `iso_currency_code` (the fragment does not select `isoCurrencyCode`),
@@ -293,8 +296,8 @@ type MappableWriteField = WriteRowField | typeof SPLIT_CHILD_FIELD;
  * reads the category index); a function rather than a constant so nothing
  * outside this module can mutate the list.
  */
-export function writeRowMapperArities(): Record<string, number> {
-  const out: Record<string, number> = {};
+export function writeRowMapperArities(): Record<MappableWriteField, number> {
+  const out = {} as Record<MappableWriteField, number>;
   const fields: readonly MappableWriteField[] = [...WRITE_ROW_FIELDS, SPLIT_CHILD_FIELD];
   for (const field of fields) {
     out[field] = ENRICHED_FIELD_MAPPERS[field].length;
@@ -327,7 +330,10 @@ const NO_CATEGORY_INDEX = new Proxy({} as CategoryIndex, {
  * Map a mutation's TransactionFields shape through the named live read
  * mappers. `K` is limited to the admitted fields, so the type system holds the
  * admission rule; the admission-rule test casts to reach an excluded field on
- * purpose. Production code calls {@link liveRowFromMutation}.
+ * purpose. The overloads also couple `parent_transaction_id` to its
+ * precondition: it is reachable only with a non-optional `parentId`, since
+ * without one the value would be a guess. Production code calls
+ * {@link liveRowFromMutation}.
  *
  * `parentId` and `isoCurrencyCode` are filled with null only to satisfy the
  * node type, and they come BEFORE the spread on purpose: they are defaults,
@@ -335,6 +341,14 @@ const NO_CATEGORY_INDEX = new Proxy({} as CategoryIndex, {
  * response carries either field (bulkEditTransactions does select
  * `parentId`), that value must win over the placeholder.
  */
+export function mapMutationFields<K extends WriteRowField>(
+  tx: CreatedTransaction,
+  fields: readonly K[]
+): Pick<EnrichedTransaction, K>;
+export function mapMutationFields<K extends MappableWriteField>(
+  tx: CreatedTransaction & { parentId: string },
+  fields: readonly K[]
+): Pick<EnrichedTransaction, K>;
 export function mapMutationFields<K extends MappableWriteField>(
   tx: CreatedTransaction & { parentId?: string | null },
   fields: readonly K[]
