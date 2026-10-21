@@ -699,7 +699,7 @@ function knownTransactionType(type: unknown): TransactionType | undefined {
  * field names").
  */
 export type WriteTransactionRow = Pick<EnrichedTransaction, WriteRowField> &
-  Partial<Pick<EnrichedTransaction, 'tag_ids'>>;
+  Partial<Pick<EnrichedTransaction, 'tag_ids' | 'parent_transaction_id'>>;
 
 /**
  * Map a mutation's TransactionFields shape to a {@link WriteTransactionRow}.
@@ -709,13 +709,15 @@ export type WriteTransactionRow = Pick<EnrichedTransaction, WriteRowField> &
  * `fallbackTagIds` when the response carries no usable tags array
  * (create_transaction passes the requested list, the best guess a create has;
  * a link or a split asked for no tags, so they pass nothing and the key is
- * absent).
+ * absent). `parentId` is passed for a split child only, which then carries
+ * `parent_transaction_id`.
  */
 function toWriteTransactionRow(
   tx: CreatedTransaction,
-  fallbackTagIds?: string[]
+  fallbackTagIds?: string[],
+  parentId?: string
 ): WriteTransactionRow {
-  const row: WriteTransactionRow = liveRowFromMutation(tx);
+  const row: WriteTransactionRow = liveRowFromMutation(tx, parentId);
   const tagIds = returnedTagIds(tx.tags) ?? fallbackTagIds;
   if (tagIds !== undefined) row.tag_ids = tagIds;
   return row;
@@ -5195,7 +5197,11 @@ export class CopilotMoneyTools {
     // The response rows, in get_transactions_live's field names (#825) — the
     // same mapper as create_transaction / add_to_recurring.
     const parent = toWriteTransactionRow(result.parentTransaction);
-    const children = result.splitTransactions.map((tx) => toWriteTransactionRow(tx));
+    // A child also carries parent_transaction_id: the split knows its parent,
+    // as the write-through below does (the fragment does not select parentId).
+    const children = result.splitTransactions.map((tx) =>
+      toWriteTransactionRow(tx, undefined, result.parentTransaction.id)
+    );
 
     // Feed the live meta index with the parent (it leaves the live cache
     // below, so the children's upserts are not its route in) — so a

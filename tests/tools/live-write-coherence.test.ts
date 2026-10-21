@@ -37,8 +37,10 @@ import { TransactionMetaStore } from '../../src/core/persistence/transaction-met
 import {
   LIVE_TRANSACTION_KNOWN_FIELDS,
   LiveTransactionsTools,
+  liveMapperArity,
   liveRowFromMutation,
   mapMutationFields,
+  writeRowMapperArities,
 } from '../../src/tools/live/transactions.js';
 import { TOOL_REGISTRY, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.js';
 import * as transactionRegistry from '../../src/tools/registry/transactions.js';
@@ -808,19 +810,64 @@ describe('write responses use live row field names (#825)', () => {
         .filter((name) => RESPONSE_ROWS[name]! > 0)
         .sort()
     );
+    // A tool whose returned rows are all hidden from reads would make its
+    // value comparison loop zero times; none is today, and a 0 must not pass.
+    for (const [name, count] of Object.entries(TWINNED_ROWS)) {
+      expect({ name, positive: count > 0 }).toEqual({ name, positive: true });
+    }
   });
 
-  // The WRITE_ROW_FIELDS admission rule: a field whose live mapper reads the
-  // category index cannot be computed from a mutation response. The index a
-  // write row is mapped with throws on any read, so such a field fails here
-  // instead of returning a plausible constant.
+  // The WRITE_ROW_FIELDS admission rule, fixture-independent: a live mapper
+  // that reads the category index takes it as a second parameter, so no field
+  // a write row may carry has a mapper of arity 2 or more. This holds for
+  // every row shape, including a read that only some rows trigger
+  // (`category_name` skips the index for an empty category).
+  test('no write-row field mapper takes the category index', () => {
+    const arities = writeRowMapperArities();
+    expect(Object.keys(arities).length).toBeGreaterThan(0);
+    expect(Object.keys(arities).filter((field) => arities[field]! >= 2)).toEqual([]);
+  });
+
+  // Non-vacuity: the arity rule does tell the index-reading mappers apart.
   test.each(['category_name', 'excluded'] as const)(
-    'a write row cannot carry %s, whose mapper reads the category index',
+    'the %s mapper takes the category index (arity 2)',
     (field) => {
-      const tx = mutationNode(seedNode(TX_CREATED), { categoryId: CAT_OLD });
-      expect(() => mapMutationFields(tx, [field])).toThrow(/CategoryIndex/);
+      expect(liveMapperArity(field)).toBe(2);
     }
   );
+
+  // The runtime backstop: the index a write row is mapped with throws on any
+  // read. The cast is deliberate — mapMutationFields' type admits only the
+  // write-row fields, and this test reaches past it on purpose.
+  test.each(['category_name', 'excluded'] as const)(
+    'mapping %s from a mutation response throws instead of guessing',
+    (field) => {
+      const tx = mutationNode(seedNode(TX_CREATED), { categoryId: CAT_OLD });
+      const excluded = [field] as unknown as Parameters<typeof mapMutationFields>[1];
+      expect(() => mapMutationFields(tx, excluded)).toThrow(/CategoryIndex/);
+    }
+  );
+
+  // Split children carry the parent id the split knows; the parent and the
+  // other tools' rows do not carry the key at all.
+  test('split children carry parent_transaction_id; no other returned row does', async () => {
+    const results: Record<string, Row[]> = {};
+    for (const toolName of Object.keys(TWINNED_ROWS)) {
+      const c = CASES[toolName]!;
+      const { call, read } = setup(c.mocks);
+      await read();
+      results[toolName] = transactionRowsIn(await call(toolName, c.args));
+    }
+    const carrying = Object.entries(results).flatMap(([tool, rows]) =>
+      rows
+        .filter((r) => 'parent_transaction_id' in r)
+        .map((r) => ({ tool, id: r.transaction_id, parent: r.parent_transaction_id }))
+    );
+    expect(carrying).toEqual([
+      { tool: 'split_transaction', id: TX_CHILD_1, parent: TX_SPLIT_PARENT },
+      { tool: 'split_transaction', id: TX_CHILD_2, parent: TX_SPLIT_PARENT },
+    ]);
+  });
 
   test('the shipped write-row fields never read the category index', () => {
     const tx = mutationNode(seedNode(TX_CREATED), { categoryId: CAT_OLD });

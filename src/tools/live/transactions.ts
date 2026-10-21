@@ -241,13 +241,20 @@ export const LIVE_TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set(
  * The live row fields a transaction MUTATION response can supply, mapped by
  * the same {@link ENRICHED_FIELD_MAPPERS} the read path uses, so a write row
  * and a read row spell every value the same way (#825: `null` for no
- * category, note or recurring). Every mapper named here reads only fields the
- * mutations' TransactionFields fragment selects, and none reads the category
- * index. Left out: `category_name` and `excluded` (need the category index),
- * `parent_transaction_id` and `iso_currency_code` (the fragment does not
- * select `parentId` or `isoCurrencyCode`, so a value would be a guess), and
- * `tag_ids`, which the write path maps itself to survive a response with no
- * usable tags array.
+ * category, note or recurring).
+ *
+ * ADMISSION RULE: a field belongs here only if its mapper reads nothing but
+ * fields the mutations' TransactionFields fragment selects, and never the
+ * category index. The second half is checked by mapper arity — a mapper that
+ * takes the index has two parameters — in tests/tools/live-write-coherence.test.ts,
+ * for every row shape rather than the fixture's.
+ *
+ * Left out: `category_name` and `excluded` (need the category index),
+ * `iso_currency_code` (the fragment does not select `isoCurrencyCode`),
+ * `parent_transaction_id` (the fragment does not select `parentId`; a split
+ * child gets it from the parent the split returned, see
+ * {@link SPLIT_CHILD_FIELD}), and `tag_ids`, which the write path maps itself
+ * to survive a response with no usable tags array.
  */
 const WRITE_ROW_FIELDS = [
   'transaction_id',
@@ -272,11 +279,40 @@ const WRITE_ROW_FIELDS = [
 export type WriteRowField = (typeof WRITE_ROW_FIELDS)[number];
 
 /**
- * The category index a write row is mapped with: there is none, and the
- * WRITE_ROW_FIELDS admission rule says no listed mapper may read one. Every
- * property access throws, so a field added to the list whose mapper reads the
- * index (`category_name`, `excluded`) fails the write tests instead of
- * returning a plausible constant (`undefined`, `false`).
+ * The one extra field a split child's row carries: split_transaction knows the
+ * parent it just split, so the value is not a guess, and the live cache row
+ * the split wrote through carries it too.
+ */
+const SPLIT_CHILD_FIELD = 'parent_transaction_id' satisfies keyof EnrichedTransaction;
+
+type MappableWriteField = WriteRowField | typeof SPLIT_CHILD_FIELD;
+
+/**
+ * Every field a write row may be mapped with, and each one's live mapper
+ * arity. Exported for the admission-rule test (a mapper of arity 2 or more
+ * reads the category index); a function rather than a constant so nothing
+ * outside this module can mutate the list.
+ */
+export function writeRowMapperArities(): Record<string, number> {
+  const out: Record<string, number> = {};
+  const fields: readonly MappableWriteField[] = [...WRITE_ROW_FIELDS, SPLIT_CHILD_FIELD];
+  for (const field of fields) {
+    out[field] = ENRICHED_FIELD_MAPPERS[field].length;
+  }
+  return out;
+}
+
+/** The arity of one live mapper, for the admission-rule test's non-vacuity check. */
+export function liveMapperArity(field: keyof EnrichedTransaction): number {
+  return ENRICHED_FIELD_MAPPERS[field].length;
+}
+
+/**
+ * The category index a write row is mapped with: there is none. This is the
+ * RUNTIME BACKSTOP for the admission rule, not its gate (the arity test is):
+ * a mapper that reads the index only on some rows (`category_name` skips it
+ * for an empty category) escapes any one fixture, but whenever a read does
+ * happen it throws instead of returning a plausible constant.
  */
 const NO_CATEGORY_INDEX = new Proxy({} as CategoryIndex, {
   get(_target, key) {
@@ -289,17 +325,18 @@ const NO_CATEGORY_INDEX = new Proxy({} as CategoryIndex, {
 
 /**
  * Map a mutation's TransactionFields shape through the named live read
- * mappers. Exported for the admission-rule test; production code calls
- * {@link liveRowFromMutation}.
+ * mappers. `K` is limited to the admitted fields, so the type system holds the
+ * admission rule; the admission-rule test casts to reach an excluded field on
+ * purpose. Production code calls {@link liveRowFromMutation}.
  *
  * `parentId` and `isoCurrencyCode` are filled with null only to satisfy the
  * node type, and they come BEFORE the spread on purpose: they are defaults,
- * not overrides. The fragment does not select them today (bulkEditTransactions
- * does select `parentId`), and the day a response carries one, the server's
- * value must win over the placeholder.
+ * not overrides. A split child passes its known `parentId`, and the day a
+ * response carries either field (bulkEditTransactions does select
+ * `parentId`), that value must win over the placeholder.
  */
-export function mapMutationFields<K extends keyof EnrichedTransaction>(
-  tx: CreatedTransaction,
+export function mapMutationFields<K extends MappableWriteField>(
+  tx: CreatedTransaction & { parentId?: string | null },
   fields: readonly K[]
 ): Pick<EnrichedTransaction, K> {
   const node: TransactionNode = { parentId: null, isoCurrencyCode: null, ...tx };
@@ -311,11 +348,19 @@ export function mapMutationFields<K extends keyof EnrichedTransaction>(
   return row as Pick<EnrichedTransaction, K>;
 }
 
-/** A write row's live fields: {@link WRITE_ROW_FIELDS} through the live mappers. */
+/**
+ * A write row's live fields: {@link WRITE_ROW_FIELDS} through the live
+ * mappers, plus `parent_transaction_id` when the caller knows the parent (a
+ * split child).
+ */
 export function liveRowFromMutation(
-  tx: CreatedTransaction
-): Pick<EnrichedTransaction, WriteRowField> {
-  return mapMutationFields(tx, WRITE_ROW_FIELDS);
+  tx: CreatedTransaction,
+  parentId?: string
+): Pick<EnrichedTransaction, WriteRowField> &
+  Partial<Pick<EnrichedTransaction, typeof SPLIT_CHILD_FIELD>> {
+  return parentId === undefined
+    ? mapMutationFields(tx, WRITE_ROW_FIELDS)
+    : mapMutationFields({ ...tx, parentId }, [...WRITE_ROW_FIELDS, SPLIT_CHILD_FIELD]);
 }
 
 /**

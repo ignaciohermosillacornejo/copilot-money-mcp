@@ -196,13 +196,15 @@ the same way, so a field read from one reads identically from the other:
 | `recurring_id` with no recurring | key absent | `null` |
 | `is_manual` (`create_transaction` only) | `true` | removed |
 | `type`, `normalized_merchant`, `tip_amount`, `suggested_category_ids`, `created_timestamp` | not returned | returned, as in a live row |
+| `parent_transaction_id` (`split_transaction` children only) | not returned | the parent's id, as in a live row |
 
 `is_manual` was removed rather than kept because live rows have no such field
 and it carried no information: `create_transaction` only makes manual
 transactions, so it was always `true`. A write row is a subset of a live row:
-`category_name`, `excluded`, `parent_transaction_id` and `iso_currency_code`
-are not in it, because the mutation response does not carry what they are
-computed from. Cache-mode `get_transactions` rows still spell the note
+`category_name`, `excluded` and `iso_currency_code` are not in it, because the
+mutation response does not carry what they are computed from, and neither is
+`parent_transaction_id` except on a split child, whose parent the split
+itself returned. Cache-mode `get_transactions` rows still spell the note
 `user_note`, and `fields` accepts either spelling in both read modes.
 
 ## What did not change
