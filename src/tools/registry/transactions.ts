@@ -210,8 +210,8 @@ export const createTransactionTool = defineTool({
       'account_id, item_id, name, date, amount, and type; category_id required for ' +
       'REGULAR, omit for INCOME/INTERNAL_TRANSFER. Optional tag_ids, note, and ' +
       'recurring_id. Formats, sign convention, and ID sources are documented per ' +
-      'parameter. Returns the new transaction as a get_transactions_live row (the note ' +
-      'field is `user_notes`). On a manual account, a row ' +
+      'parameter. Returns the new transaction as a get_transactions_live row, minus ' +
+      'category_name and excluded (the note field is `user_notes`). On a manual account, a row ' +
       "dated before the account's last balance reset does not move its balance.",
     inputSchema: {
       type: 'object',
@@ -328,8 +328,8 @@ export const addTransactionToRecurringTool = defineTool({
       'recurring_id). The transaction must already exist — create_transaction followed by ' +
       'add_transaction_to_recurring is the manual flow. Refuses a known split parent (or when unchecked). ' +
       "Copilot also sets the row's category to the recurring's. Returns the updated " +
-      'transaction with its recurring_id and category; the row uses get_transactions_live ' +
-      'field names.',
+      'transaction with its `recurring_id` and `category_id`; the row uses get_transactions_live ' +
+      'field names, minus category_name and excluded.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -381,7 +381,8 @@ export const splitTransactionTool = defineTool({
       'and deleting the parent corrupts the balance (delete_transaction refuses it) — delete ' +
       'the children to remove the split; a known split parent or child is not split, nor one that cannot be checked. Splits ' +
       'accept no per-split tags/notes/reviewed — set those via update_transaction on each ' +
-      'child afterwards. Returned rows use get_transactions_live field names.',
+      'child afterwards. Returned rows use get_transactions_live field names, minus ' +
+      'category_name and excluded.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,

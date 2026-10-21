@@ -37,6 +37,8 @@ import { TransactionMetaStore } from '../../src/core/persistence/transaction-met
 import {
   LIVE_TRANSACTION_KNOWN_FIELDS,
   LiveTransactionsTools,
+  liveRowFromMutation,
+  mapMutationFields,
 } from '../../src/tools/live/transactions.js';
 import { TOOL_REGISTRY, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.js';
 import * as transactionRegistry from '../../src/tools/registry/transactions.js';
@@ -775,6 +777,18 @@ const RESPONSE_ROWS: Record<string, number> = {
   delete_transaction: 0,
 };
 
+/**
+ * How many of each tool's returned rows the next live read shows. A split
+ * parent is hidden from reads, so split_transaction twins its two children
+ * only. Exact, like RESPONSE_ROWS, so a change that hid a returned row from
+ * reads cannot pass with fewer comparisons.
+ */
+const TWINNED_ROWS: Record<string, number> = {
+  create_transaction: 1,
+  add_transaction_to_recurring: 1,
+  split_transaction: 2,
+};
+
 function transactionRowsIn(value: unknown, out: Row[] = []): Row[] {
   if (Array.isArray(value)) {
     for (const v of value) transactionRowsIn(v, out);
@@ -789,6 +803,28 @@ function transactionRowsIn(value: unknown, out: Row[] = []): Row[] {
 describe('write responses use live row field names (#825)', () => {
   test('every transaction write tool is classified', () => {
     expect(Object.keys(RESPONSE_ROWS).sort()).toEqual(transactionWriteToolNames());
+    expect(Object.keys(TWINNED_ROWS).sort()).toEqual(
+      Object.keys(RESPONSE_ROWS)
+        .filter((name) => RESPONSE_ROWS[name]! > 0)
+        .sort()
+    );
+  });
+
+  // The WRITE_ROW_FIELDS admission rule: a field whose live mapper reads the
+  // category index cannot be computed from a mutation response. The index a
+  // write row is mapped with throws on any read, so such a field fails here
+  // instead of returning a plausible constant.
+  test.each(['category_name', 'excluded'] as const)(
+    'a write row cannot carry %s, whose mapper reads the category index',
+    (field) => {
+      const tx = mutationNode(seedNode(TX_CREATED), { categoryId: CAT_OLD });
+      expect(() => mapMutationFields(tx, [field])).toThrow(/CategoryIndex/);
+    }
+  );
+
+  test('the shipped write-row fields never read the category index', () => {
+    const tx = mutationNode(seedNode(TX_CREATED), { categoryId: CAT_OLD });
+    expect(() => liveRowFromMutation(tx)).not.toThrow();
   });
 
   test.each(Object.keys(RESPONSE_ROWS))(
@@ -813,11 +849,14 @@ describe('write responses use live row field names (#825)', () => {
   );
 
   // Names alone are not parity: v2 rows also spelled "none" differently
-  // (`''` or an absent key where live says null). Every returned row that the
-  // next live read shows must carry the read row's value under every key it
-  // has. A split parent is hidden from reads, so it has no twin to compare.
-  test.each(Object.keys(RESPONSE_ROWS).filter((name) => RESPONSE_ROWS[name]! > 0))(
-    '%s: every returned row value equals the live read of the same row',
+  // (`''` or an absent key where live says null). Every returned row must
+  // carry, under every key it has, the value of the live-cache row the same
+  // write wrote through, read back through get_transactions_live. Both sides
+  // derive from one mutation response, so this pins the write row to the
+  // cached row (the #820/#848 surface), not to the server; the independent
+  // oracle for the server is `scripts/smoke-graphql.ts`.
+  test.each(Object.keys(TWINNED_ROWS))(
+    '%s: every returned row value equals the live-cache row the write wrote through',
     async (toolName) => {
       const c = CASES[toolName]!;
       const { call } = setup(c.mocks);
@@ -834,7 +873,7 @@ describe('write responses use live row field names (#825)', () => {
       const rows = transactionRowsIn(await call(toolName, c.args));
       const live = new Map((await readAll()).transactions.map((r) => [r.transaction_id, r]));
       const twinned = rows.filter((row) => live.has(row.transaction_id));
-      expect(twinned.length).toBeGreaterThan(0);
+      expect(twinned).toHaveLength(TWINNED_ROWS[toolName]!);
       for (const row of twinned) {
         const server = live.get(row.transaction_id)!;
         const mismatched = Object.keys(row).filter(

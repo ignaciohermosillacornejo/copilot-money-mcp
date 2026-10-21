@@ -427,16 +427,19 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // Raised 1_980 -> 2_190 by #825: the response is a get_transactions_live row
   // now (`user_notes`, not the cache model's `user_note`), and the description
   // says so, since a v2 caller reading `user_note` would get nothing. Measured
-  // 1_991 (~10% headroom); 2_005 after #885 review reworded it to "(the note
-  // field is `user_notes`)".
+  // 2_039 (~7% headroom), after the #885 reviews reworded it to "(the note
+  // field is `user_notes`)" and added the subset caveat (no category_name or
+  // excluded); 1_991 at first.
   create_transaction: 2_190,
   delete_transaction: 1_205,
   // Raised 1_305 -> 1_475 by #825 (#885 review): the returned row uses
   // get_transactions_live field names and empty-value spellings now, and the
-  // schema is the only contract a model caller reads. Measured 1_338 (~10%).
+  // schema is the only contract a model caller reads. Measured 1_379 (~7%),
+  // with the subset caveat from the #885 round-2 review; 1_338 before it.
   add_transaction_to_recurring: 1_475,
   // Raised 2_300 -> 2_590 by #825 (#885 review), same clause for the returned
-  // parent and children rows. Measured 2_351 (~10%).
+  // parent and children rows. Measured 2_385 (~8%), with the subset caveat
+  // from the #885 round-2 review; 2_351 before it.
   split_transaction: 2_590,
   update_transaction: 2_815,
   update_transactions: 3_735,
@@ -583,7 +586,8 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // 84_920 in force.
 //
 // IN FORCE (SCHEMA_TOTAL_BUDGET): 85_700, raised from 84_920 by #825's
-// write-vocabulary PR (#885), measured 84_831 (~1.0%). The PR adds the
+// write-vocabulary PR (#885), measured 84_940 (~0.9%; 84_831 before the
+// round-2 review's subset caveats). The PR adds the
 // live-row-names clause to create_transaction, add_transaction_to_recurring
 // and split_transaction, and the budget-zero/rollover/excluded caveats on
 // get_categories_live, get_budgets_live and set_budget (live probe

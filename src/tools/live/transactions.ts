@@ -271,28 +271,51 @@ const WRITE_ROW_FIELDS = [
 
 export type WriteRowField = (typeof WRITE_ROW_FIELDS)[number];
 
-/** No mapper in {@link WRITE_ROW_FIELDS} reads the category index. */
-const NO_CATEGORY_INDEX: CategoryIndex = {
-  names: new Map(),
-  excludedIds: new Set(),
-  nodes: [],
-};
+/**
+ * The category index a write row is mapped with: there is none, and the
+ * WRITE_ROW_FIELDS admission rule says no listed mapper may read one. Every
+ * property access throws, so a field added to the list whose mapper reads the
+ * index (`category_name`, `excluded`) fails the write tests instead of
+ * returning a plausible constant (`undefined`, `false`).
+ */
+const NO_CATEGORY_INDEX = new Proxy({} as CategoryIndex, {
+  get(_target, key) {
+    throw new Error(
+      `A write-row mapper read CategoryIndex.${String(key)}, which a mutation response ` +
+        'does not carry; such a field does not belong in WRITE_ROW_FIELDS'
+    );
+  },
+});
 
 /**
- * Map a mutation's TransactionFields shape through the live read mappers.
+ * Map a mutation's TransactionFields shape through the named live read
+ * mappers. Exported for the admission-rule test; production code calls
+ * {@link liveRowFromMutation}.
+ *
  * `parentId` and `isoCurrencyCode` are filled with null only to satisfy the
- * node type; no mapper in {@link WRITE_ROW_FIELDS} reads them.
+ * node type, and they come BEFORE the spread on purpose: they are defaults,
+ * not overrides. The fragment does not select them today (bulkEditTransactions
+ * does select `parentId`), and the day a response carries one, the server's
+ * value must win over the placeholder.
  */
-export function liveRowFromMutation(
-  tx: CreatedTransaction
-): Pick<EnrichedTransaction, WriteRowField> {
-  const node: TransactionNode = { ...tx, parentId: null, isoCurrencyCode: null };
+export function mapMutationFields<K extends keyof EnrichedTransaction>(
+  tx: CreatedTransaction,
+  fields: readonly K[]
+): Pick<EnrichedTransaction, K> {
+  const node: TransactionNode = { parentId: null, isoCurrencyCode: null, ...tx };
   const row: Record<string, unknown> = {};
-  for (const field of WRITE_ROW_FIELDS) {
+  for (const field of fields) {
     row[field] = ENRICHED_FIELD_MAPPERS[field](node, NO_CATEGORY_INDEX);
   }
   // Each value came from the mapper typed EnrichedTransaction[field].
-  return row as Pick<EnrichedTransaction, WriteRowField>;
+  return row as Pick<EnrichedTransaction, K>;
+}
+
+/** A write row's live fields: {@link WRITE_ROW_FIELDS} through the live mappers. */
+export function liveRowFromMutation(
+  tx: CreatedTransaction
+): Pick<EnrichedTransaction, WriteRowField> {
+  return mapMutationFields(tx, WRITE_ROW_FIELDS);
 }
 
 /**
