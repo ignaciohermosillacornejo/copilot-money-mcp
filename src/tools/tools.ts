@@ -5169,9 +5169,11 @@ export class CopilotMoneyTools {
         inputs.flatMap((i) => CopilotMoneyTools.monthOf(i.date))
       );
       if (e instanceof GraphQLError && e.writeApplied) {
-        // The split committed and only its response was unusable (#875): the
-        // parent is a split parent now, so record and evict it exactly as the
-        // success path does, or delete_transaction would accept it (#822).
+        // The server answered without errors but with an unusable payload
+        // (#875), so the split has probably landed. Treat it as landed: record
+        // and evict the parent as the success path does, or delete_transaction
+        // would accept it (#822). If it did not land, the cost is a refused
+        // delete of an unsplit row, the safe direction.
         this.recordSplitParent(transaction_id);
         this.db.patchCachedTransactionDelete(transaction_id);
         this.evictLiveTransaction(transaction_id);

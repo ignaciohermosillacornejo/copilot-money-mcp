@@ -225,7 +225,7 @@ describe('delete_transaction refuses a split parent (#822)', () => {
           { amount: 40, category_id: CAT_B },
         ],
       })
-    ).rejects.toThrow(/HAS landed/);
+    ).rejects.toThrow(/PROBABLY landed/);
 
     await expect(
       tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })

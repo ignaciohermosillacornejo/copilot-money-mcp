@@ -28,11 +28,16 @@ export interface GraphQLErrorMeta {
    */
   writeMayHaveApplied?: boolean;
   /**
-   * Set when the write DEFINITELY applied: the server answered the mutation
-   * without errors, and only the payload it returned was unusable (see
-   * {@link committedPayload}). Implies `writeMayHaveApplied`. Callers record
-   * whatever the write itself makes true (a split parent, say) and drop the
-   * caches it touched, instead of patching them from a row they do not have.
+   * Set when the write should be TREATED AS POSSIBLY APPLIED, more strongly
+   * than `writeMayHaveApplied` alone: the server answered the mutation with no
+   * `errors`, and only the payload it returned was unusable (see
+   * {@link committedPayload}). That this means the write landed is an
+   * unverified inference (ledger: {@link MUTATION_NULL_PAYLOAD_SURFACE}) —
+   * GraphQL can null a field for other reasons. Implies `writeMayHaveApplied`.
+   * Callers act as if it landed wherever that is the safe direction: record
+   * what the write would make true (a split parent, so a delete is refused)
+   * and drop the caches it touched rather than patch them from a row they do
+   * not have — both harmless if it did not land.
    */
   writeApplied?: boolean;
   /** Total attempts made before this error surfaced (≥ 1). */
@@ -70,17 +75,29 @@ export class GraphQLError extends Error {
 }
 
 /**
+ * Ledger surface for the assumption {@link committedPayload} rests on: a
+ * mutation answered with no `errors` but a null or non-object payload has
+ * probably been applied.
+ */
+export const MUTATION_NULL_PAYLOAD_SURFACE = 'Mutation.*:null-payload-means-applied' as const;
+
+/**
  * The object a mutation returned at `path`, or a classified error saying the
- * write landed (#875).
+ * write has probably landed (#875).
  *
  * By the time a wrapper reads its payload the server has answered without
- * errors, so the write has committed. Response validation is warn-only, so a
- * drifted response can carry `null` (or nothing) where the payload belongs; a
- * wrapper that dereferenced it would throw a bare TypeError, which says
- * nothing about the write having applied and skips whatever the caller does
- * on a classified failure. Every mutation wrapper that reads into its payload
- * goes through here instead (tests/core/graphql/mutation-payload.test.ts walks
- * them). The message names the path and the kind of value, never the value.
+ * `errors`, so the write has most likely committed — an inference, not an
+ * observation ({@link MUTATION_NULL_PAYLOAD_SURFACE}, `unverified`): GraphQL
+ * can also null a field for reasons that do not imply a commit. Response
+ * validation is warn-only, so a drifted response can carry `null` (or
+ * nothing) where the payload belongs; a wrapper that dereferenced it would
+ * throw a bare TypeError, which says nothing about the write and skips
+ * whatever the caller does on a classified failure. Every mutation wrapper
+ * that reads into its payload goes through here instead
+ * (tests/core/graphql/mutation-payload.test.ts walks them). The error is
+ * marked `writeApplied` — treat as possibly applied — and its message asks
+ * the user to confirm before retrying. It names the path and the kind of
+ * value, never the value.
  */
 export function committedPayload<T>(operationName: string, value: unknown, path: string): T {
   // mutation-guard: a committed write's unusable payload is classified as applied
@@ -88,9 +105,9 @@ export function committedPayload<T>(operationName: string, value: unknown, path:
   const got = value === null ? 'null' : value === undefined ? 'missing' : `a ${typeof value}`;
   throw new GraphQLError(
     'UNKNOWN',
-    `Copilot applied ${operationName}, but its response's ${path} was ${got}, so the ` +
-      'result cannot be reported. The write HAS landed: re-read the entity to see it, ' +
-      'and do not retry the write.',
+    `Copilot accepted ${operationName} without errors but returned no ${path} (it was ` +
+      `${got}), so the write has PROBABLY landed. Re-read the entity to confirm before ` +
+      'retrying — retrying a create could duplicate it.',
     operationName,
     undefined,
     undefined,

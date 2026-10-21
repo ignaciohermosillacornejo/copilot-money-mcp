@@ -148,6 +148,7 @@ import {
   TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK,
 } from '../core/graphql/read-validation.js';
 import { READ_RESPONSE_SHAPE_RUNTIME_CHECK } from '../core/graphql/read-response-validation.js';
+import { MUTATION_NULL_PAYLOAD_SURFACE } from '../core/graphql/graphql-error.js';
 export { RUNTIME_CHECK_NAMES };
 
 /** What kind of external surface the assumption is about. */
@@ -1174,6 +1175,29 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'null on mutation rows only. Every transaction write would then refuse its row and ' +
       'refetch the month (correct data, one extra request per write, no live write-through), ' +
       'and stderr would carry one "mutation-row drift" warning per failed-field set.',
+  },
+  {
+    // The constant committedPayload's doc names, so the two cannot drift apart.
+    surface: MUTATION_NULL_PAYLOAD_SURFACE,
+    kind: 'response-shape',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'Inferred, not observed (#875): when a mutation answers with no `errors` but its payload ' +
+      '(e.g. editTransaction.transaction, createTag, splitTransaction) is null or not an ' +
+      'object, the write is assumed to have PROBABLY been applied. Every mutation wrapper ' +
+      'that reads into its payload goes through committedPayload (graphql-error.ts), which ' +
+      'then raises a GraphQLError with writeApplied set: the caller drops the live months ' +
+      'rather than patching them, split_transaction records the parent as split, and the ' +
+      'message asks the user to re-read and confirm before retrying. Basis: GraphQL ' +
+      'execution reports a failed resolver in `errors`, so a payload nulled with no error ' +
+      'most plausibly comes from a resolver that ran. But GraphQL can also null a field for ' +
+      'other reasons (a nullable payload a resolver chose to return empty, an error the ' +
+      'server swallowed), and no such response has ever been observed from Copilot. Both ' +
+      'reactions are safe if the write did NOT land: a dropped month is only refetched, and a ' +
+      'wrongly recorded split parent only refuses a delete. WHAT DRIFT WOULD LOOK LIKE: a ' +
+      'write tool reporting that Copilot "returned no <path>" and the re-read showing the ' +
+      'write absent; the claim would then need narrowing to the operations it holds for.',
   },
   // ----- Synthesized transaction row fields (#604) ---------------------------
   // Not fields Copilot returns: fields this repo INVENTS on live rows so both

@@ -49,7 +49,7 @@ export function graphQLErrorToMcpError(e: GraphQLError): string {
       return `Transient network problem contacting Copilot${attemptsNote(e)} — retry. (${e.message})`;
     case 'UNKNOWN':
     default:
-      // committedPayload's errors already say the write landed (#875); any
+      // committedPayload's errors already say the write probably landed (#875); any
       // other UNKNOWN that may have written gets the standard warning.
       if (e.writeApplied) return e.message;
       if (e.writeMayHaveApplied) {

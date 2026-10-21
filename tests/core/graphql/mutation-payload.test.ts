@@ -135,7 +135,7 @@ describe('mutation wrappers classify an unusable payload after a committed write
     }
   }
 
-  test('the user-facing message says the write landed and not to retry', async () => {
+  test('the user-facing message says the write probably landed and to confirm before retrying', async () => {
     const edit = WRAPPERS.find(([n]) => n === 'transactions.ts:editTransaction')![1];
     const e = await edit(clientReturning({ editTransaction: { transaction: null } }), ARGS).then(
       () => undefined,
@@ -144,8 +144,9 @@ describe('mutation wrappers classify an unusable payload after a committed write
     expect(e).toBeInstanceOf(GraphQLError);
     const msg = graphQLErrorToMcpError(e as GraphQLError);
     expect(msg).toContain('EditTransaction');
-    expect(msg).toContain('editTransaction.transaction was null');
-    expect(msg).toContain('HAS landed');
-    expect(msg).toContain('do not retry');
+    expect(msg).toContain('returned no editTransaction.transaction (it was null)');
+    expect(msg).toContain('PROBABLY landed');
+    expect(msg).toContain('confirm before retrying');
+    expect(msg).toContain('could duplicate');
   });
 });
