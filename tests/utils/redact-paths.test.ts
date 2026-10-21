@@ -110,6 +110,8 @@ describe('redactUserPaths', () => {
       '; more',
       ']',
       '}',
+      '? Retry',
+      '!',
     ];
     for (const home of homes) {
       // Fragments of one character are skipped (the `o` of `o'brien`), so this
@@ -125,7 +127,7 @@ describe('redactUserPaths', () => {
     }
   });
 
-  test('stated limit: under /Users, a spaced home ending a sentence keeps its tail', () => {
+  test('stated limit: under /Users, a spaced home before a character outside the boundary class keeps its tail', () => {
     // `.` is a username character, so the boundary cannot accept it without
     // turning `/Users/bob.smith/x` into `~.smith/x`; the prefix rule then stops
     // at the space. Pinned so changing it is a decision.
@@ -133,19 +135,21 @@ describe('redactUserPaths', () => {
     expect(redactUserPaths(`could not open ${spaced}.`, spaced)).toBe(
       'could not open /Users/<user> smith.'
     );
+    // Any other character outside the boundary class behaves the same.
+    expect(redactUserPaths(`${spaced}=1`, spaced)).toBe('/Users/<user> smith=1');
     expect(redactUserPaths('/Users/bob.smith/x', '/Users/bob')).toBe('/Users/<user>/x');
   });
 
-  test('the home boundary accepts exactly the prefix stop class plus `:;]}`, character by character', () => {
+  test('the home boundary accepts exactly the prefix stop class plus `:;]}?!`, character by character', () => {
     // The invariant the module docblock states, tested behaviourally so it
     // survives the shared constant being split back into two literals. For a
     // candidate c:
     //   - the prefix rule stops at c  iff  c is whitespace or one of / ' " , )
     //   - the home boundary accepts c iff  the prefix rule stops at c, or c is
-    //     one of : ; ] } (characters no username can contain)
+    //     one of : ; ] } ? ! (characters no username can contain)
     // so the boundary is a superset of the stop class, and `.` is in neither.
     const prefixClass = (c: string) => /\s/.test(c) || `/'",)`.includes(c);
-    const boundaryOnly = ':;]}';
+    const boundaryOnly = ':;]}?!';
     const candidates = [
       ...Array.from({ length: 0x7f - 0x20 }, (_, i) => String.fromCharCode(0x20 + i)),
       '\t',

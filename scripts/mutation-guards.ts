@@ -990,6 +990,46 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     ],
     expectFails: 'tests/unit/dispatch-arg-validation.test.ts',
   },
+  {
+    name: 'a thrown tool error reaches the client without the username',
+    file: 'src/server.ts',
+    invariant:
+      "A thrown error's message is relayed to the MCP client from handleCallTool's catch, " +
+      'and fs errors carry absolute paths, so on macOS every one would disclose the ' +
+      'username (#774). The redaction there is the only thing between that message and ' +
+      'the client. Not a write-safety invariant: a disclosure one at the dispatch boundary.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '      // mutation-guard: a thrown tool error reaches the client without the username\n' +
+        '      const errorMessage = redactUserPaths(',
+      with:
+        '      // mutation-guard: a thrown tool error reaches the client without the username\n' +
+        '      const errorMessage = String(',
+    },
+    expectFailingTests: ['an fs error thrown past the dispatch gate reaches the client redacted'],
+    expectFails: 'tests/utils/redact-paths.test.ts',
+  },
+  {
+    name: 'a returned batch failure carries no username',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'With continue_on_error, update_transactions RETURNS per-row failure messages in a ' +
+      "success-shaped result, so they never pass the redaction at handleCallTool's catch, " +
+      'which only sees thrown errors. They are redacted where they are built; without it ' +
+      'an fs path in a row error discloses the username to the client.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '      // mutation-guard: a returned batch failure carries no username\n' +
+        '      error: redactUserPaths(',
+      with:
+        '      // mutation-guard: a returned batch failure carries no username\n' +
+        '      error: (',
+    },
+    expectFailingTests: ['continue_on_error: a returned failure message has the username redacted'],
+    expectFails: 'tests/tools/update-transactions-batching.test.ts',
+  },
 ];
 
 // ---------------------------------------------------------------------------

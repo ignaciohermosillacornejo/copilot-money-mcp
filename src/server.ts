@@ -324,6 +324,7 @@ export class CopilotMoneyServer {
       // Handle errors (validation, account not found, etc.). The one place a
       // thrown message reaches the client, so the one place the username in an
       // fs path is removed from it.
+      // mutation-guard: a thrown tool error reaches the client without the username
       const errorMessage = redactUserPaths(error instanceof Error ? error.message : String(error));
 
       return {

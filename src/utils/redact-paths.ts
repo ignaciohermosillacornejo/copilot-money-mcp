@@ -29,8 +29,9 @@
  *     segment ends (`SEGMENT_END`): before `/`, whitespace, a quote, `,` or
  *     `)`, or at the end of the text — the characters that end a path in an
  *     error message (`open '/Users/bob'`, `/Users/bob, …`, `cwd is /Users/bob
- *     and …`) — and also before `:`, `;`, `]` or `}` (`BOUNDARY_ONLY`), which
- *     no username can contain (`open /Users/bob: EACCES`, `[/Users/bob]`).
+ *     and …`) — and also before `:`, `;`, `]`, `}`, `?` or `!`
+ *     (`BOUNDARY_ONLY`), which no username can contain (`open /Users/bob:
+ *     EACCES`, `[/Users/bob]`, `did you mean /Users/bob?`).
  *     Any sibling — `/Users/bob.smith`, `/Users/bob2`,
  *     `/Users/bob.bak` — is left to the prefix rule, which replaces the whole
  *     name segment. Matching more loosely here would turn `/Users/bob.smith/x`
@@ -73,11 +74,12 @@
  *     at all: the prefix rule cannot tell a spaced name from the prose after
  *     it either. The prefix also becomes `~` (`~ smith/x`), so the output
  *     reads as the current user's home when it is someone else's path.
- *   - Under `/Users` and `/home`, a home containing whitespace followed by `.`
- *     (a path ending a sentence: `could not open /Users/bob smith.`) keeps
- *     the part after the space. The boundary cannot accept `.` without
- *     turning `/Users/bob.smith/x` into `~.smith/x`, and the prefix rule
- *     stops at the space.
+ *   - Under `/Users` and `/home`, a home containing whitespace followed by a
+ *     character outside the boundary class (`.` above all, since it cannot be
+ *     added; also `*`, `=`, …) keeps the part after the space: `could not open
+ *     /Users/bob smith.` becomes `/Users/<user> smith.`. The boundary cannot
+ *     accept `.` without turning `/Users/bob.smith/x` into `~.smith/x`, and
+ *     the prefix rule stops at the space.
  *
  * Pinned by tests so changing either is a decision.
  */
@@ -94,16 +96,19 @@ import { homedir } from 'node:os';
  * class source: append only, and escape `-`, `]`, `^` and backslash (a bare
  * `-` makes a range, a leading `^` inverts the positive class, a bare `]` ends
  * it). In this template literal an escape is written doubled, as `\\s` is.
+ * A trailing `-` is not safe either, though it looks it in the negated class:
+ * `BOUNDARY_ONLY` is concatenated after this string, so the `-` stops being
+ * last there and becomes a range (`)-:` would admit `.`, `/` and every digit).
  */
 const SEGMENT_END = `/\\s'",)`;
 
 /**
  * Characters the strict home boundary accepts on top of `SEGMENT_END`: ones no
  * username can contain, so stopping there cannot leak another user's name
- * tail. Same class-source rules as `SEGMENT_END`. Never add `.` — see the
- * module docblock.
+ * tail. Same class-source rules as `SEGMENT_END` (escape any `-`). Never add
+ * `.` — see the module docblock.
  */
-const BOUNDARY_ONLY = `:;\\]}`;
+const BOUNDARY_ONLY = `:;\\]}?!`;
 
 const USER_PREFIX = new RegExp(`/(Users|home)/[^${SEGMENT_END}]+`, 'g');
 

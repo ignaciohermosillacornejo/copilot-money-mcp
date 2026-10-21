@@ -4239,6 +4239,7 @@ export class CopilotMoneyTools {
     // `handleCallTool`'s catch, which only sees thrown errors.
     const failures = poolFailures.map(({ index, error }) => ({
       transaction_id: edits[index]!.transaction_id,
+      // mutation-guard: a returned batch failure carries no username
       error: redactUserPaths(
         error instanceof GraphQLError
           ? graphQLErrorToMcpError(error)
