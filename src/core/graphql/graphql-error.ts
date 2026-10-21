@@ -149,7 +149,7 @@ export function unusablePayloadError(
     'UNKNOWN',
     `Copilot accepted ${operationName} without errors but returned no ${path} (it was ` +
       `${got}), so the write has PROBABLY landed. Re-read the entity to confirm before ` +
-      'retrying — retrying a create could duplicate it.',
+      'retrying — retrying it could duplicate the change.',
     operationName,
     httpStatus,
     undefined,

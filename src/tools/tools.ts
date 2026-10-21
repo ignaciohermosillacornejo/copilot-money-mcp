@@ -909,6 +909,30 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * After a category / tag / recurring / budget write THREW in a way that may
+   * have applied it (#887 review): `writeMayHaveApplied`, which every
+   * `writeApplied` error (an error-free response with an unusable payload,
+   * ledger Mutation.*:null-payload-means-applied) also carries. Those tools
+   * patch their live snapshot only on success, so without this a write that
+   * probably landed stays invisible until the snapshot's TTL. Dropping it makes
+   * the next read ask the server, which is harmless if the write did not land.
+   */
+  private afterPossiblyAppliedEntityWrite(
+    e: unknown,
+    scopes: readonly ('categories' | 'tags' | 'recurring')[]
+  ): void {
+    if (!(e instanceof GraphQLError) || !e.writeMayHaveApplied || !this.liveDb) return;
+    for (const scope of scopes) {
+      if (scope === 'categories') this.liveDb.getCategoriesCache().invalidate();
+      if (scope === 'tags') this.liveDb.getTagsCache().invalidate();
+      if (scope === 'recurring') {
+        this.liveDb.getRecurringCache().invalidate();
+        this.liveDb.getUpcomingRecurringsCache().invalidate();
+      }
+    }
+  }
+
+  /**
    * After a transaction write the server ACCEPTED: drop the live snapshots it
    * can have made stale (LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS;
    * #825). The window cache is handled by each write's own write-through.
@@ -3482,6 +3506,7 @@ export class CopilotMoneyTools {
         color_name: result.colorName,
       };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['categories']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5750,6 +5775,7 @@ export class CopilotMoneyTools {
         color_name: result.colorName,
       };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['tags']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5773,6 +5799,7 @@ export class CopilotMoneyTools {
       this.liveDb?.patchLiveTagDelete(args.tag_id);
       return { success: true, tag_id: result.id, deleted: true };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['tags']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5839,6 +5866,7 @@ export class CopilotMoneyTools {
         updated: Object.keys(result.changed),
       };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['categories']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5859,6 +5887,7 @@ export class CopilotMoneyTools {
       this.liveDb?.patchLiveCategoryDelete(args.category_id);
       return { success: true, category_id: result.id, deleted: true };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['categories']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5925,6 +5954,7 @@ export class CopilotMoneyTools {
         cleared: result.cleared,
       };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['categories']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5978,6 +6008,7 @@ export class CopilotMoneyTools {
       }
       return { success: true, recurring_id: result.id, state: args.state };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['recurring']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5998,6 +6029,7 @@ export class CopilotMoneyTools {
       this.liveDb?.patchLiveRecurringDelete(args.recurring_id);
       return { success: true, recurring_id: result.id, deleted: true };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['recurring']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -6049,6 +6081,7 @@ export class CopilotMoneyTools {
       }
       return { success: true, tag_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['tags']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -6188,6 +6221,7 @@ export class CopilotMoneyTools {
         frequency: result.frequency,
       };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['recurring']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -6316,6 +6350,7 @@ export class CopilotMoneyTools {
       }
       return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
+      this.afterPossiblyAppliedEntityWrite(e, ['recurring']);
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }

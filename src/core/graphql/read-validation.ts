@@ -147,7 +147,12 @@ export function __resetReadShapeWarnDedupe(): void {
  * turns every write into a month refetch is visible rather than silent.
  * `droppedMonths` is how many cached months the refusal actually dropped, so
  * the line reports the outcome instead of promising a refetch that a write
- * to an uncached month never needs (#875).
+ * to an uncached month never needs (#875). The dedupe key is the failed-field
+ * set alone, deliberately not the count: the warning exists to flag a
+ * systematic drift once, and keying on the count too would log again for
+ * every distinct number. So the logged count is the FIRST refusal's for that
+ * field set; later refusals with the same fields log nothing, whatever they
+ * dropped.
  */
 export function warnMutationRowRefused(info: InvalidNodeInfo, droppedMonths: number): void {
   const key = `mutation-row:${[...info.fields].sort().join(',')}`;

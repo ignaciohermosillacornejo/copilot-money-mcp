@@ -25,6 +25,9 @@ function attemptsNote(e: GraphQLError): string {
  * GraphQL client) so failures are diagnosable without re-running with logging.
  */
 export function graphQLErrorToMcpError(e: GraphQLError): string {
+  // A writeApplied error's own message already says the write probably landed
+  // and to confirm before retrying (#875); no code-specific text may replace it.
+  if (e.writeApplied) return e.message;
   switch (e.code) {
     case 'AUTH_FAILED':
       return `Authentication with Copilot failed. Sign in to the Copilot web app and try again. (server said: ${e.message})`;
@@ -49,9 +52,7 @@ export function graphQLErrorToMcpError(e: GraphQLError): string {
       return `Transient network problem contacting Copilot${attemptsNote(e)} — retry. (${e.message})`;
     case 'UNKNOWN':
     default:
-      // committedPayload's errors already say the write probably landed (#875); any
-      // other UNKNOWN that may have written gets the standard warning.
-      if (e.writeApplied) return e.message;
+      // An UNKNOWN that may have written gets the standard warning.
       if (e.writeMayHaveApplied) {
         return `Copilot API request failed: ${e.message} ${WRITE_AMBIGUITY_WARNING}`;
       }

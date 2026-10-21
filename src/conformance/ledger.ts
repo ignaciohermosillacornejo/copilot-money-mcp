@@ -1189,14 +1189,19 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'requestOnce), or a returned row has no string id (committedRow), the write is ' +
       'assumed to have PROBABLY been applied. Every mutation wrapper ' +
       'that reads into its payload goes through committedPayload (graphql-error.ts), which ' +
-      'then raises a GraphQLError with writeApplied set: the caller drops the live months ' +
-      'rather than patching them, split_transaction records the parent as split, and the ' +
+      'then raises a GraphQLError with writeApplied set: a transaction tool drops the live ' +
+      'months rather than patching them, a category / tag / recurring / budget tool drops ' +
+      'its live snapshot so the probably-landed entity shows on the next read, ' +
+      'split_transaction records the parent as split, and the ' +
       'message asks the user to re-read and confirm before retrying. Basis: GraphQL ' +
       'execution reports a failed resolver in `errors`, so a payload nulled with no error ' +
       'most plausibly comes from a resolver that ran. But GraphQL can also null a field for ' +
       'other reasons (a nullable payload a resolver chose to return empty, an error the ' +
       'server swallowed), and no such response has ever been observed from Copilot. COST IF ' +
-      'WRONG: a dropped month is only refetched, but a wrongly recorded split parent is ' +
+      'WRONG: a dropped month or snapshot is only refetched; the split parent is also ' +
+      'removed from the local (cache-mode) transaction list, which is in-memory only, so a ' +
+      'real transaction disappears from cache-mode reads until the next database reload or ' +
+      'restart; and a wrongly recorded split parent is ' +
       'persistent and uid-scoped (split-parent records are never retired, #842), so this ' +
       'server refuses to delete that transaction indefinitely, and the refusal points at ' +
       'children that do not exist. Clear-out route: remove its line from ' +

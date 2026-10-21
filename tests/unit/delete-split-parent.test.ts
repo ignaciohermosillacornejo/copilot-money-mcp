@@ -233,6 +233,72 @@ describe('delete_transaction refuses a split parent (#822)', () => {
     expect(deletes(client)).toHaveLength(0);
   });
 
+  test.each([
+    ['a null parent and children', { parentTransaction: null, splitTransactions: null }],
+    [
+      'a null parent beside well-formed children',
+      {
+        parentTransaction: null,
+        splitTransactions: [serverTx(CHILD_1, 60, CAT_A), serverTx(CHILD_2, 40, CAT_B)],
+      },
+    ],
+    [
+      'children that are not an array',
+      { parentTransaction: serverTx(PARENT_ID, 100, ''), splitTransactions: {} },
+    ],
+    [
+      'an id-less child',
+      {
+        parentTransaction: serverTx(PARENT_ID, 100, ''),
+        splitTransactions: [
+          serverTx(CHILD_1, 60, CAT_A),
+          { ...serverTx(CHILD_2, 40, CAT_B), id: '' },
+        ],
+      },
+    ],
+  ])(
+    '(a3) a split answered with %s is classified as probably landed and still records the parent (#887)',
+    async (_label, payload) => {
+      // Field-level drift inside a present envelope: the wrapper classifies it
+      // instead of handing finishSplit a row it would throw a TypeError on.
+      const client = createMockGraphQLClient({
+        ...liveCategoryMocks([CAT_A, CAT_B]),
+        SplitTransaction: {
+          splitTransaction: payload as unknown as SplitTransactionResult,
+        },
+        DeleteTransaction: { deleteTransaction: true },
+      });
+      const tools = new CopilotMoneyTools(
+        makeDb([
+          {
+            transaction_id: PARENT_ID,
+            amount: 100,
+            date: '2025-03-12',
+            name: 'Hardware Store',
+            ...routing,
+            category_id: CAT_A,
+          },
+        ]),
+        client
+      );
+      await expect(
+        tools.splitTransaction({
+          transaction_id: PARENT_ID,
+          ...routing,
+          splits: [
+            { amount: 60, category_id: CAT_A },
+            { amount: 40, category_id: CAT_B },
+          ],
+        })
+      ).rejects.toThrow(/PROBABLY landed/);
+
+      await expect(
+        tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
+      ).rejects.toThrow(REFUSAL);
+      expect(deletes(client)).toHaveLength(0);
+    }
+  );
+
   test('(b) delete both children, then the parent → children go, parent refused', async () => {
     // The exact repro: once both children are gone no cached row points at
     // the parent any more, so only the record taken at child-delete time

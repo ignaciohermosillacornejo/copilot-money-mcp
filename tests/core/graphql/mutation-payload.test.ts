@@ -86,14 +86,23 @@ const ARGS = {
 };
 
 /**
- * An object whose every property read returns `leaf()`. The one special case
- * is `then`, left undefined so `await` treats the object as a plain value
- * rather than a thenable. Symbols get `leaf()` too: no wrapper coerces or
- * iterates its payload today, so a future one that does will fail here on
- * that coercion, not on a null dereference.
+ * An object that claims every property (`has`) and returns `leaf()` for every
+ * read (`get`). The `has` trap matters: without it `'id' in value` falls
+ * through to the empty target and the in-loop id assertion below never runs
+ * (#887 review). The one special case is `then`, absent from both traps so
+ * `await` treats the object as a plain value rather than a thenable. Symbols
+ * get `leaf()` too: no wrapper coerces or iterates its payload today, so a
+ * future one that does will fail here on that coercion, not on a null
+ * dereference.
  */
 function everyKey(leaf: () => unknown): Record<string, unknown> {
-  return new Proxy({}, { get: (_t, k) => (k === 'then' ? undefined : leaf()) });
+  return new Proxy(
+    {},
+    {
+      get: (_t, k) => (k === 'then' ? undefined : leaf()),
+      has: (_t, k) => k !== 'then',
+    }
+  );
 }
 
 type Drift =
@@ -246,6 +255,6 @@ describe('mutation wrappers classify an unusable payload after a committed write
     expect(msg).toContain('returned no editTransaction.transaction (it was null)');
     expect(msg).toContain('PROBABLY landed');
     expect(msg).toContain('confirm before retrying');
-    expect(msg).toContain('could duplicate');
+    expect(msg).toContain('could duplicate the change');
   });
 });

@@ -1,5 +1,5 @@
 import type { GraphQLClient } from './client.js';
-import { committedPayload, committedRow } from './graphql-error.js';
+import { committedPayload, committedRow, unusablePayloadError } from './graphql-error.js';
 import {
   ADD_TRANSACTION_TO_RECURRING,
   BULK_EDIT_TRANSACTIONS,
@@ -400,14 +400,32 @@ export async function splitTransaction(
     SPLIT_TRANSACTION,
     args
   );
-  // Only the envelope is required here: split_transaction already tolerates
-  // drift inside it (its children array, each child's fields), and needs the
-  // write classified as applied so it can record the split parent (#822).
-  return committedPayload<SplitTransactionResult>(
+  // The envelope, the parent row and every child row are required, like any
+  // other returned row (#887 review): split_transaction maps all of them, and
+  // a TypeError there would hide that the split probably landed. Classified
+  // writeApplied, split_transaction's catch records the split parent (#822).
+  const result = committedPayload<Partial<SplitTransactionResult>>(
     'SplitTransaction',
     (data as Partial<SplitTransactionResponse> | null)?.splitTransaction,
     'splitTransaction'
   );
+  const parentTransaction = committedRow<CreatedTransaction>(
+    'SplitTransaction',
+    result.parentTransaction,
+    'splitTransaction.parentTransaction'
+  );
+  const children: unknown = result.splitTransactions;
+  if (!Array.isArray(children)) {
+    throw unusablePayloadError('SplitTransaction', 'splitTransaction.splitTransactions', children);
+  }
+  const splitTransactions = children.map((c: unknown, i) =>
+    committedRow<CreatedTransaction>(
+      'SplitTransaction',
+      c,
+      `splitTransaction.splitTransactions[${i}]`
+    )
+  );
+  return { parentTransaction, splitTransactions };
 }
 
 /**
