@@ -249,7 +249,8 @@ describe('no route builds a row from a fieldless document (#627, #778, #797)', (
     expect(rows).toBe(0);
     // Every accessor, not only the route's own: a guard removed together with
     // a dispatch change that pushes the row into a different array would pass
-    // the line above and fail here.
+    // the line above and fail here. The line above is subsumed by this one and
+    // stays only for its clearer failure: it names the route's own count.
     const everywhere = Object.entries(ROWS)
       .filter(([, count]) => count(all) !== 0)
       .map(([other]) => other);

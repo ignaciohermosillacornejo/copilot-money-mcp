@@ -29,7 +29,9 @@
  *     segment ends (`SEGMENT_END`): before `/`, whitespace, a quote, `,` or
  *     `)`, or at the end of the text — the characters that end a path in an
  *     error message (`open '/Users/bob'`, `/Users/bob, …`, `cwd is /Users/bob
- *     and …`). Any sibling — `/Users/bob.smith`, `/Users/bob2`,
+ *     and …`) — and also before `:`, `;`, `]` or `}` (`BOUNDARY_ONLY`), which
+ *     no username can contain (`open /Users/bob: EACCES`, `[/Users/bob]`).
+ *     Any sibling — `/Users/bob.smith`, `/Users/bob2`,
  *     `/Users/bob.bak` — is left to the prefix rule, which replaces the whole
  *     name segment. Matching more loosely here would turn `/Users/bob.smith/x`
  *     into `~.smith/x` and leak another user's name tail. The quote and the
@@ -42,10 +44,23 @@
  *     `${home}.bak/x` becomes `~.bak/x`: the path keeps its shape and loses the
  *     name.
  *
- * The strict boundary and the prefix rule's stop class are one constant on
- * purpose. The strict boundary is only safe because everything it does not
- * accept is handed to the prefix rule, which stops exactly where the boundary
- * would have matched; two hand-kept classes could drift apart silently.
+ * The strict boundary is built from the prefix rule's stop class on purpose.
+ * The invariant: the boundary accepts exactly `SEGMENT_END` plus
+ * `BOUNDARY_ONLY`, and the prefix rule stops exactly at `SEGMENT_END` — so the
+ * boundary is a superset of the stop class. That is what makes the strict
+ * boundary safe: everything it declines is handed to the prefix rule, which
+ * never runs past a point where the boundary would have matched. Two
+ * hand-kept classes could drift apart silently; a behavioural test pins the
+ * invariant character by character.
+ *
+ * `BOUNDARY_ONLY` is not in the prefix rule's stop class because it does not
+ * need to be: those characters cannot occur in a username (macOS short names
+ * are letters, digits, `_`, `-` and `.`; Linux `useradd`/`adduser` defaults
+ * are letters, digits, `_`, `-` and a trailing `$`, and `:` is the
+ * `/etc/passwd` field separator), so the boundary may stop at them without
+ * risking another user's name tail. `.` is deliberately in neither: it IS a
+ * username character, so the prefix rule must run through it
+ * (`/Users/bob.smith` is one user) and the boundary must not stop at it.
  *
  * What remains, stated:
  *   - For a home outside `/Users` and `/home`, a sibling joined by a name
@@ -56,7 +71,13 @@
  *     home's name plus a space and more (`/Users/bob smith` while the home is
  *     `/Users/bob`) keeps the part after the space, as it would with no home
  *     at all: the prefix rule cannot tell a spaced name from the prose after
- *     it either.
+ *     it either. The prefix also becomes `~` (`~ smith/x`), so the output
+ *     reads as the current user's home when it is someone else's path.
+ *   - Under `/Users` and `/home`, a home containing whitespace followed by `.`
+ *     (a path ending a sentence: `could not open /Users/bob smith.`) keeps
+ *     the part after the space. The boundary cannot accept `.` without
+ *     turning `/Users/bob.smith/x` into `~.smith/x`, and the prefix rule
+ *     stops at the space.
  *
  * Pinned by tests so changing either is a decision.
  */
@@ -68,8 +89,21 @@ import { homedir } from 'node:os';
  * closing punctuation. Source text for a regex character class, shared by the
  * prefix rule (which stops at them) and the strict home boundary (which
  * accepts them) — see the module docblock.
+ *
+ * It is interpolated into both a negated and a positive class, so edit it as
+ * class source: append only, and escape `-`, `]`, `^` and backslash (a bare
+ * `-` makes a range, a leading `^` inverts the positive class, a bare `]` ends
+ * it). In this template literal an escape is written doubled, as `\\s` is.
  */
 const SEGMENT_END = `/\\s'",)`;
+
+/**
+ * Characters the strict home boundary accepts on top of `SEGMENT_END`: ones no
+ * username can contain, so stopping there cannot leak another user's name
+ * tail. Same class-source rules as `SEGMENT_END`. Never add `.` — see the
+ * module docblock.
+ */
+const BOUNDARY_ONLY = `:;\\]}`;
 
 const USER_PREFIX = new RegExp(`/(Users|home)/[^${SEGMENT_END}]+`, 'g');
 
@@ -92,7 +126,9 @@ function homePattern(home: string): RegExp {
     // See the module docblock: strict where the prefix rule can take over,
     // broad (and Unicode-aware) only where it cannot.
     const underUserRoot = /^\/(Users|home)\/[^/]+$/.test(home);
-    const boundary = underUserRoot ? `(?=[${SEGMENT_END}]|$)` : '(?![\\p{L}\\p{N}_-])';
+    const boundary = underUserRoot
+      ? `(?=[${SEGMENT_END}${BOUNDARY_ONLY}]|$)`
+      : '(?![\\p{L}\\p{N}_-])';
     cachedPattern = new RegExp(`${escapeRegExp(home)}${boundary}`, 'gu');
     cachedHome = home;
   }

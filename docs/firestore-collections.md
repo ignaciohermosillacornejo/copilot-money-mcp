@@ -544,8 +544,8 @@ Stores daily and high-frequency price data per security (identified by SHA256 ha
 
 **Measured 2026-10-11:** ~5,100 entries, none with a field, so there are no known fields to
 document. Earlier versions of this section described ~6,867 "raw Plaid account documents"
-carrying the `holdings` array with cost basis; that count was presumably counting these
-structural entries (not re-measured: the measurements since are ~4,250 and ~5,100), and the
+carrying the `holdings` array with cost basis; that count was presumably of these
+structural entries (not re-measured; later measurements are ~4,250 and ~5,100), and the
 holdings array is on the account documents. Its field table lives under
 [`items/{item_id}/accounts`](#itemsitem_idaccounts-account-documents) (#797).
 

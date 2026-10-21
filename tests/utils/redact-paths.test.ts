@@ -94,8 +94,26 @@ describe('redactUserPaths', () => {
       '/Users/josé garcía',
       '/home/bob smith',
     ];
-    const terminators = ['/x', '', "'", '"', ',', ')', ' and more', '\tmore', '\nmore'];
+    // `SEGMENT_END` (the prefix rule's stop class) plus the boundary-only
+    // characters that cannot occur in a username; `.` is a stated limit below.
+    const terminators = [
+      '/x',
+      '',
+      "'",
+      '"',
+      ',',
+      ')',
+      ' and more',
+      '\tmore',
+      '\nmore',
+      ': EACCES',
+      '; more',
+      ']',
+      '}',
+    ];
     for (const home of homes) {
+      // Fragments of one character are skipped (the `o` of `o'brien`), so this
+      // leak scan is not total; the exact-output equality below is.
       const nameParts = (home.split('/')[2] ?? '')
         .split(/[\s'.()]+/)
         .filter((part) => part.length > 1);
@@ -107,10 +125,57 @@ describe('redactUserPaths', () => {
     }
   });
 
+  test('stated limit: under /Users, a spaced home ending a sentence keeps its tail', () => {
+    // `.` is a username character, so the boundary cannot accept it without
+    // turning `/Users/bob.smith/x` into `~.smith/x`; the prefix rule then stops
+    // at the space. Pinned so changing it is a decision.
+    const spaced = '/Users/bob smith';
+    expect(redactUserPaths(`could not open ${spaced}.`, spaced)).toBe(
+      'could not open /Users/<user> smith.'
+    );
+    expect(redactUserPaths('/Users/bob.smith/x', '/Users/bob')).toBe('/Users/<user>/x');
+  });
+
+  test('the home boundary accepts exactly the prefix stop class plus `:;]}`, character by character', () => {
+    // The invariant the module docblock states, tested behaviourally so it
+    // survives the shared constant being split back into two literals. For a
+    // candidate c:
+    //   - the prefix rule stops at c  iff  c is whitespace or one of / ' " , )
+    //   - the home boundary accepts c iff  the prefix rule stops at c, or c is
+    //     one of : ; ] } (characters no username can contain)
+    // so the boundary is a superset of the stop class, and `.` is in neither.
+    const prefixClass = (c: string) => /\s/.test(c) || `/'",)`.includes(c);
+    const boundaryOnly = ':;]}';
+    const candidates = [
+      ...Array.from({ length: 0x7f - 0x20 }, (_, i) => String.fromCharCode(0x20 + i)),
+      '\t',
+      '\n',
+      '\r',
+      ' ',
+      ' ',
+      'é',
+      'ü',
+    ];
+    const mismatches: string[] = [];
+    for (const c of candidates) {
+      const prefixStops = redactUserPaths(`/Users/carol${c}z`, '') === `/Users/<user>${c}z`;
+      const homeAccepts = redactUserPaths(`/Users/bob${c}z`, '/Users/bob') === `~${c}z`;
+      if (prefixStops !== prefixClass(c)) mismatches.push(`prefix ${JSON.stringify(c)}`);
+      if (homeAccepts !== (prefixClass(c) || boundaryOnly.includes(c))) {
+        mismatches.push(`boundary ${JSON.stringify(c)}`);
+      }
+      if (prefixStops && !homeAccepts) mismatches.push(`superset ${JSON.stringify(c)}`);
+    }
+    expect(mismatches).toEqual([]);
+    expect(prefixClass('.') || boundaryOnly.includes('.')).toBe(false);
+  });
+
   test('stated limit: under /Users, another user named after the home plus a space keeps the tail', () => {
     // `/Users/bob smith` while the home is `/Users/bob`: the prefix rule cannot
     // tell a spaced name from the prose after it, so the part after the space
-    // stays — with or without the home rule. Pinned so changing it is a decision.
+    // stays — with or without the home rule — and with the home rule the prefix
+    // reads as `~` though the path is someone else's. Pinned so changing it is
+    // a decision.
     expect(redactUserPaths('open /Users/bob smith/x', '/Users/bob')).toBe('open ~ smith/x');
     expect(redactUserPaths('open /Users/bob smith/x', '/Users/carol')).toBe(
       'open /Users/<user> smith/x'
