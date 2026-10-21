@@ -221,7 +221,8 @@ export function createLiveCategoriesToolSchema(): ToolSchema {
       'Get user categories (live, GraphQL-backed), including each category id, parentId, and a ' +
       'derived `budget_amount`. IMPORTANT: `budget_amount` is the BUDGETED amount for the ' +
       'month — NOT the amount spent. It includes rollover, so can exceed the amount set; 0 ' +
-      'can mean no budget (cleared and never set read the same); null when excluded. To find actual spending in a category, call ' +
+      'can mean no budget (cleared and never set read the same); null when the category ' +
+      'has no budget object (e.g. excluded). To find actual spending in a category, call ' +
       'get_transactions_live with that category id and sum the transaction amounts; do not ' +
       'report the budget as spend. The budget data here is the same cache get_budgets_live ' +
       'reads from. Each row carries a `parentId` field: `null` for top-level categories ' +

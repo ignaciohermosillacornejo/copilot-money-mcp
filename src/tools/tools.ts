@@ -57,7 +57,11 @@ import { fetchCategories } from '../core/graphql/queries/categories.js';
 import type { CategoryNode } from '../core/graphql/queries/categories.js';
 import type { TagNode } from '../core/graphql/queries/tags.js';
 import type { TransactionNode } from '../core/graphql/queries/transactions.js';
-import type { EnrichedTransaction } from './live/transactions.js';
+import {
+  liveRowFromMutation,
+  type EnrichedTransaction,
+  type WriteRowField,
+} from './live/transactions.js';
 import type { RecurringNode } from '../core/graphql/queries/recurrings.js';
 import {
   createTag as gqlCreateTag,
@@ -683,66 +687,38 @@ function knownTransactionType(type: unknown): TransactionType | undefined {
 }
 
 /**
- * Compile-time gate: every key of `T` must be a get_transactions_live row
- * field. A key outside {@link EnrichedTransaction} gets type `never`, so the
- * object type that names it no longer satisfies the constraint.
- */
-type LiveRowKeysOnly<
-  T extends { [K in keyof T]: K extends keyof EnrichedTransaction ? unknown : never },
-> = T;
-
-/**
  * A transaction row as a write tool returns it (create_transaction,
  * add_transaction_to_recurring, split_transaction). `--write` implies
- * `--live-reads`, so a write caller reads rows from get_transactions_live:
- * the write response uses that row's field names (`user_notes`, not the cache
- * model's `user_note`; no cache-only `is_manual`), #825. Values are
- * transcribed from the mutation response, field for field. The detector is
+ * `--live-reads`, so a write caller reads rows from get_transactions_live, and
+ * a write row is a subset of that row: the same field names (`user_notes`,
+ * not the cache model's `user_note`; no cache-only `is_manual`) and the same
+ * value spellings (`null` for no category, note or recurring), #825. The type
+ * is a Pick of {@link EnrichedTransaction}, so a key or value type that is not
+ * the live row's does not compile. The runtime detector is
  * tests/tools/live-write-coherence.test.ts ("write responses use live row
  * field names").
  */
-export type WriteTransactionRow = LiveRowKeysOnly<{
-  transaction_id: string;
-  amount: number;
-  date: string;
-  name: string;
-  account_id: string;
-  item_id: string;
-  category_id: string;
-  pending: boolean;
-  user_reviewed: boolean;
-  user_notes?: string;
-  recurring_id?: string;
-  tag_ids?: string[];
-  internal_transfer: boolean;
-}>;
+export type WriteTransactionRow = Pick<EnrichedTransaction, WriteRowField> &
+  Partial<Pick<EnrichedTransaction, 'tag_ids'>>;
 
 /**
  * Map a mutation's TransactionFields shape to a {@link WriteTransactionRow}.
- * The one mapper every write tool that returns a row uses. `tag_ids` is the
- * returned tags, or `fallbackTagIds` when the response carries no usable tags
- * array (create_transaction passes the requested list, the best guess a create
- * has; a link or a split asked for no tags, so they pass nothing).
+ * The one mapper every write tool that returns a row uses: every field but
+ * `tag_ids` goes through get_transactions_live's own mappers
+ * (`liveRowFromMutation`). `tag_ids` is the returned tags, or
+ * `fallbackTagIds` when the response carries no usable tags array
+ * (create_transaction passes the requested list, the best guess a create has;
+ * a link or a split asked for no tags, so they pass nothing and the key is
+ * absent).
  */
 function toWriteTransactionRow(
   tx: CreatedTransaction,
   fallbackTagIds?: string[]
 ): WriteTransactionRow {
-  return {
-    transaction_id: tx.id,
-    amount: tx.amount,
-    date: tx.date,
-    name: tx.name,
-    account_id: tx.accountId,
-    item_id: tx.itemId,
-    category_id: tx.categoryId,
-    pending: tx.isPending,
-    user_reviewed: tx.isReviewed,
-    user_notes: tx.userNotes ?? undefined,
-    recurring_id: tx.recurringId ?? undefined,
-    tag_ids: returnedTagIds(tx.tags) ?? fallbackTagIds,
-    internal_transfer: tx.type === 'INTERNAL_TRANSFER',
-  };
+  const row: WriteTransactionRow = liveRowFromMutation(tx);
+  const tagIds = returnedTagIds(tx.tags) ?? fallbackTagIds;
+  if (tagIds !== undefined) row.tag_ids = tagIds;
+  return row;
 }
 
 /**

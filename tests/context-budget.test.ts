@@ -427,11 +427,17 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // Raised 1_980 -> 2_190 by #825: the response is a get_transactions_live row
   // now (`user_notes`, not the cache model's `user_note`), and the description
   // says so, since a v2 caller reading `user_note` would get nothing. Measured
-  // 1_991 (~10% headroom).
+  // 1_991 (~10% headroom); 2_005 after #885 review reworded it to "(the note
+  // field is `user_notes`)".
   create_transaction: 2_190,
   delete_transaction: 1_205,
-  add_transaction_to_recurring: 1_305,
-  split_transaction: 2_300,
+  // Raised 1_305 -> 1_475 by #825 (#885 review): the returned row uses
+  // get_transactions_live field names and empty-value spellings now, and the
+  // schema is the only contract a model caller reads. Measured 1_338 (~10%).
+  add_transaction_to_recurring: 1_475,
+  // Raised 2_300 -> 2_590 by #825 (#885 review), same clause for the returned
+  // parent and children rows. Measured 2_351 (~10%).
+  split_transaction: 2_590,
   update_transaction: 2_815,
   update_transactions: 3_735,
   review_transactions: 1_760,
@@ -576,11 +582,14 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // `fields` param). Measured 84_302 on main plus this PR (~0.7%), within the
 // 84_920 in force.
 //
-// UNMOVED by #825's write-vocabulary PR (create_transaction's row-shape
-// note, and the budget-zero/rollover/excluded caveats on get_categories_live,
-// get_budgets_live and set_budget). Measured 84_675 on main plus this PR
-// (~0.3%), within the 84_920 in force.
-const SCHEMA_TOTAL_BUDGET = 84_920;
+// IN FORCE (SCHEMA_TOTAL_BUDGET): 85_700, raised from 84_920 by #825's
+// write-vocabulary PR (#885), measured 84_831 (~1.0%). The PR adds the
+// live-row-names clause to create_transaction, add_transaction_to_recurring
+// and split_transaction, and the budget-zero/rollover/excluded caveats on
+// get_categories_live, get_budgets_live and set_budget (live probe
+// 2026-10-20). That left ~0.1% under 84_920, below the ~1% this ceiling is
+// kept at, so the raise restores the policy headroom.
+const SCHEMA_TOTAL_BUDGET = 85_700;
 
 // ---------------------------------------------------------------------------
 // Synthetic fixture. Deterministic content, opaque Firestore-shaped IDs

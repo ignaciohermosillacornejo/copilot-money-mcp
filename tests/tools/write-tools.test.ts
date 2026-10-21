@@ -1091,8 +1091,9 @@ describe('addTransactionToRecurring', () => {
       (mockDb as any)._transactions as Array<{ transaction_id: string; category_id?: string }>
     ).find((t) => t.transaction_id === 'tx1');
     expect(cached?.category_id).toBe('cat-rent');
-    // The response is a verbatim transcription: it carries no category either.
-    expect(result.transaction.category_id).toBeUndefined();
+    // The response carries no category either; the returned row spells that
+    // as get_transactions_live does, null (#825).
+    expect(result.transaction.category_id).toBeNull();
   });
 
   test('the returned recurring id wins over the requested one', async () => {
@@ -1380,7 +1381,9 @@ describe('splitTransaction', () => {
     expect(result.parent_transaction_id).toBe('parent-1');
     expect(result.child_transaction_ids).toEqual(['child-hotel', 'child-car']);
     expect(result.parent.transaction_id).toBe('parent-1');
-    expect(result.parent.category_id).toBe(''); // mirrors server's post-split blank
+    // The server blanks the parent's category on split; the returned row
+    // spells "no category" as get_transactions_live does, null (#825).
+    expect(result.parent.category_id).toBeNull();
     expect(result.children).toHaveLength(2);
     expect(result.children[0].transaction_id).toBe('child-hotel');
     expect(result.children[0].amount).toBe(400);

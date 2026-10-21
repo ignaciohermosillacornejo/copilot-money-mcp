@@ -14,6 +14,7 @@ import type {
   ReadTransactionType,
   TransactionNode,
 } from '../../core/graphql/queries/transactions.js';
+import type { CreatedTransaction } from '../../core/graphql/transactions.js';
 import { fetchTags } from '../../core/graphql/queries/tags.js';
 import type { ToolSchema, TransactionTypeFilter } from '../tools.js';
 import {
@@ -235,6 +236,64 @@ const ENRICHED_FIELD_MAPPERS: {
 export const LIVE_TRANSACTION_KNOWN_FIELDS: ReadonlySet<string> = new Set(
   Object.keys(ENRICHED_FIELD_MAPPERS)
 );
+
+/**
+ * The live row fields a transaction MUTATION response can supply, mapped by
+ * the same {@link ENRICHED_FIELD_MAPPERS} the read path uses, so a write row
+ * and a read row spell every value the same way (#825: `null` for no
+ * category, note or recurring). Every mapper named here reads only fields the
+ * mutations' TransactionFields fragment selects, and none reads the category
+ * index. Left out: `category_name` and `excluded` (need the category index),
+ * `parent_transaction_id` and `iso_currency_code` (the fragment does not
+ * select `parentId` or `isoCurrencyCode`, so a value would be a guess), and
+ * `tag_ids`, which the write path maps itself to survive a response with no
+ * usable tags array.
+ */
+const WRITE_ROW_FIELDS = [
+  'transaction_id',
+  'account_id',
+  'item_id',
+  'category_id',
+  'recurring_id',
+  'amount',
+  'date',
+  'name',
+  'normalized_merchant',
+  'type',
+  'user_reviewed',
+  'pending',
+  'internal_transfer',
+  'user_notes',
+  'tip_amount',
+  'suggested_category_ids',
+  'created_timestamp',
+] as const satisfies readonly (keyof EnrichedTransaction)[];
+
+export type WriteRowField = (typeof WRITE_ROW_FIELDS)[number];
+
+/** No mapper in {@link WRITE_ROW_FIELDS} reads the category index. */
+const NO_CATEGORY_INDEX: CategoryIndex = {
+  names: new Map(),
+  excludedIds: new Set(),
+  nodes: [],
+};
+
+/**
+ * Map a mutation's TransactionFields shape through the live read mappers.
+ * `parentId` and `isoCurrencyCode` are filled with null only to satisfy the
+ * node type; no mapper in {@link WRITE_ROW_FIELDS} reads them.
+ */
+export function liveRowFromMutation(
+  tx: CreatedTransaction
+): Pick<EnrichedTransaction, WriteRowField> {
+  const node: TransactionNode = { ...tx, parentId: null, isoCurrencyCode: null };
+  const row: Record<string, unknown> = {};
+  for (const field of WRITE_ROW_FIELDS) {
+    row[field] = ENRICHED_FIELD_MAPPERS[field](node, NO_CATEGORY_INDEX);
+  }
+  // Each value came from the mapper typed EnrichedTransaction[field].
+  return row as Pick<EnrichedTransaction, WriteRowField>;
+}
 
 /**
  * Mirror of the cache tool's projectTransactionFields: same engine, same

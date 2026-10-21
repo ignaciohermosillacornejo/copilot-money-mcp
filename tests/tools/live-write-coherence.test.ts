@@ -811,6 +811,42 @@ describe('write responses use live row field names (#825)', () => {
       }
     }
   );
+
+  // Names alone are not parity: v2 rows also spelled "none" differently
+  // (`''` or an absent key where live says null). Every returned row that the
+  // next live read shows must carry the read row's value under every key it
+  // has. A split parent is hidden from reads, so it has no twin to compare.
+  test.each(Object.keys(RESPONSE_ROWS).filter((name) => RESPONSE_ROWS[name]! > 0))(
+    '%s: every returned row value equals the live read of the same row',
+    async (toolName) => {
+      const c = CASES[toolName]!;
+      const { call } = setup(c.mocks);
+      const readAll = async () =>
+        (await call('get_transactions_live', {
+          start_date: COLD_MONTH.start,
+          end_date: COLD_MONTH.end,
+          exclude_transfers: false,
+          exclude_excluded: false,
+          limit: 500,
+          fields: ['all'],
+        })) as { transactions: Row[] };
+      await readAll();
+      const rows = transactionRowsIn(await call(toolName, c.args));
+      const live = new Map((await readAll()).transactions.map((r) => [r.transaction_id, r]));
+      const twinned = rows.filter((row) => live.has(row.transaction_id));
+      expect(twinned.length).toBeGreaterThan(0);
+      for (const row of twinned) {
+        const server = live.get(row.transaction_id)!;
+        const mismatched = Object.keys(row).filter(
+          (k) => JSON.stringify(row[k]) !== JSON.stringify(server[k])
+        );
+        expect({ id: row.transaction_id, mismatched }).toEqual({
+          id: row.transaction_id,
+          mismatched: [],
+        });
+      }
+    }
+  );
 });
 
 // ── Edits must never insert a row the cached month did not have ─────────────

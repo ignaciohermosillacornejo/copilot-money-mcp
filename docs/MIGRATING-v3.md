@@ -64,7 +64,7 @@ live rows do not carry identical field sets.
 | `_field_warning` names a field you know exists | The name exists on the *other* mode, or is misspelled | Check the tables below for the mode you are running |
 | `__typename` keys are gone from live responses | They are stripped from every response now | Nothing to do in almost every case. The one place it disambiguated anything was the icon union, and `{unicode}` vs `{id, src}` already tells those apart |
 | Responses are no longer pretty-printed | Responses serialize compactly | Nothing to do — the JSON is identical, only whitespace changed |
-| `user_note` or `is_manual` is missing from a `create_transaction`, `add_transaction_to_recurring` or `split_transaction` response | Write responses use `get_transactions_live`'s row names | Read `user_notes`. `is_manual` is gone: every `create_transaction` row was manual |
+| `user_note` or `is_manual` is missing from a `create_transaction`, `add_transaction_to_recurring` or `split_transaction` response, or `category_id` is `null` where it was `""` | Write responses use `get_transactions_live`'s row names and empty values | Read `user_notes`; treat `null` as "none". `is_manual` is gone: every `create_transaction` row was manual |
 | `get_investment_balance_live` returns ~30 history points | `history_limit` defaults to 30 | Pass `history_limit: 0` for the full series |
 | `get_investment_prices` rows lost their `prices` map | Replaced by a derived `latest_price` / `latest_at` | `fields: ["default", "prices"]` |
 | A `get_categories_live` row lost its `budget` object | Replaced by a derived `budget_amount` | `fields: ["default", "budget"]` |
@@ -183,22 +183,27 @@ caller is the one who has to change something.
 ## Write responses use live field names
 
 `--write` always turns on `--live-reads`, so a write caller reads transactions
-with `get_transactions_live`. The transaction row a write tool returns now uses
-that tool's field names, so a field read from one can be read from the other
-under the same key:
+with `get_transactions_live`. The transaction row a write tool returns
+(`create_transaction`'s and `add_transaction_to_recurring`'s `transaction`,
+`split_transaction`'s `parent` and `children[]`) is now built by that tool's
+own row mappers. It uses the same field names **and** spells an empty value
+the same way, so a field read from one reads identically from the other:
 
-| Tool | Returned row(s) | v2 | v3 |
-|---|---|---|---|
-| `create_transaction` | `transaction` | `user_note` | `user_notes` |
-| `create_transaction` | `transaction` | `is_manual: true` | removed |
-| `add_transaction_to_recurring` | `transaction` | `user_note` | `user_notes` |
-| `split_transaction` | `parent`, `children[]` | `user_note` | `user_notes` |
+| Field | v2 write row | v3 write row (= live read row) |
+|---|---|---|
+| the note | `user_note`, key absent when empty | `user_notes`, `null` when empty |
+| `category_id` with no category | `""` (or key absent) | `null` |
+| `recurring_id` with no recurring | key absent | `null` |
+| `is_manual` (`create_transaction` only) | `true` | removed |
+| `type`, `normalized_merchant`, `tip_amount`, `suggested_category_ids`, `created_timestamp` | not returned | returned, as in a live row |
 
 `is_manual` was removed rather than kept because live rows have no such field
 and it carried no information: `create_transaction` only makes manual
-transactions, so it was always `true`. No other key changed. Cache-mode
-`get_transactions` rows still spell the note `user_note`, and `fields` accepts
-either spelling in both read modes.
+transactions, so it was always `true`. A write row is a subset of a live row:
+`category_name`, `excluded`, `parent_transaction_id` and `iso_currency_code`
+are not in it, because the mutation response does not carry what they are
+computed from. Cache-mode `get_transactions` rows still spell the note
+`user_note`, and `fields` accepts either spelling in both read modes.
 
 ## What did not change
 
