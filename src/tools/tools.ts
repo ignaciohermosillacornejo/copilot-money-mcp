@@ -919,17 +919,20 @@ export class CopilotMoneyTools {
    */
   private afterPossiblyAppliedEntityWrite(
     e: unknown,
-    scopes: readonly ('categories' | 'tags' | 'recurring')[]
+    scope: 'categories' | 'tags' | 'recurring'
   ): void {
     if (!(e instanceof GraphQLError) || !e.writeMayHaveApplied || !this.liveDb) return;
-    for (const scope of scopes) {
-      if (scope === 'categories') this.liveDb.getCategoriesCache().invalidate();
-      if (scope === 'tags') this.liveDb.getTagsCache().invalidate();
-      if (scope === 'recurring') {
-        this.liveDb.getRecurringCache().invalidate();
-        this.liveDb.getUpcomingRecurringsCache().invalidate();
-      }
-    }
+    const live = this.liveDb;
+    // A Record, so a new scope is a type error here rather than a silent miss.
+    const drop: Record<typeof scope, () => void> = {
+      categories: () => live.getCategoriesCache().invalidate(),
+      tags: () => live.getTagsCache().invalidate(),
+      recurring: () => {
+        live.getRecurringCache().invalidate();
+        live.getUpcomingRecurringsCache().invalidate();
+      },
+    };
+    drop[scope]();
   }
 
   /**
@@ -3506,7 +3509,7 @@ export class CopilotMoneyTools {
         color_name: result.colorName,
       };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['categories']);
+      this.afterPossiblyAppliedEntityWrite(e, 'categories');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5145,8 +5148,10 @@ export class CopilotMoneyTools {
         input: inputs,
       });
       // Session record (#822): the server has split, so delete_transaction
-      // refuses this id from now on. First statements after the mutation, so a
-      // drifted response that makes the mapping below throw cannot skip them.
+      // refuses this id from now on. First statements after the mutation.
+      // The wrapper now refuses a drifted parent or child row before this
+      // point (#887; the catch records the parent then), so nothing below is
+      // expected to throw on drift; recording first is defence in depth.
       //
       // The parent is evicted from both caches here too, not after the
       // mapping: the Transactions query omits split parents, so reads must
@@ -5157,19 +5162,17 @@ export class CopilotMoneyTools {
       // is absent — same eviction-is-a-no-op contract as delete_transaction.
       //
       // The months the split touched are captured BEFORE the eviction (the
-      // parent's cached row is the reliable source; the response and the
-      // inputs may have drifted or differ): if the mapping or write-through
-      // below throws, those months are dropped so the next read refetches,
-      // rather than serving a month with neither parent nor children (#820).
+      // parent's cached row is the reliable source; the inputs may differ from
+      // what the server stored): if the mapping or write-through below throws,
+      // those months are dropped so the next read refetches, rather than
+      // serving a month with neither parent nor children (#820).
       const touchedMonths = [
         this.liveDb?.lookupTransactionNodes([transaction_id]).get(transaction_id)?.date,
-        (result.parentTransaction as Partial<CreatedTransaction> | undefined)?.date,
+        result.parentTransaction.date,
         ...inputs.map((i) => i.date),
-        // Guarded: this runs before the drift-tolerant mapping, so a drifted
-        // response may not carry an array of children.
-        ...(Array.isArray(result.splitTransactions)
-          ? result.splitTransactions.map((c) => (c as Partial<CreatedTransaction> | null)?.date)
-          : []),
+        // The wrapper guarantees an array of rows with string ids (#887); a
+        // row's date is still filtered by the type check below.
+        ...result.splitTransactions.map((c) => c.date),
       ]
         .filter((d): d is string => typeof d === 'string' && d.length >= 7)
         .map((d) => d.slice(0, 7));
@@ -5217,8 +5220,10 @@ export class CopilotMoneyTools {
   /**
    * The part of split_transaction after the mutation resolved and the parent
    * was recorded and evicted: map the response and write the children
-   * through. Separate so a throw here (a drifted response) can be caught and
-   * the touched months dropped from the live cache.
+   * through. The wrapper has already refused a drifted parent or child row
+   * (#887), so nothing here is expected to throw; it stays separate, with its
+   * caller's catch dropping the touched months, as defence in depth against a
+   * throw from the write-through.
    */
   private finishSplit(
     result: {
@@ -5775,7 +5780,7 @@ export class CopilotMoneyTools {
         color_name: result.colorName,
       };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['tags']);
+      this.afterPossiblyAppliedEntityWrite(e, 'tags');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5799,7 +5804,7 @@ export class CopilotMoneyTools {
       this.liveDb?.patchLiveTagDelete(args.tag_id);
       return { success: true, tag_id: result.id, deleted: true };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['tags']);
+      this.afterPossiblyAppliedEntityWrite(e, 'tags');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5866,7 +5871,7 @@ export class CopilotMoneyTools {
         updated: Object.keys(result.changed),
       };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['categories']);
+      this.afterPossiblyAppliedEntityWrite(e, 'categories');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5887,7 +5892,7 @@ export class CopilotMoneyTools {
       this.liveDb?.patchLiveCategoryDelete(args.category_id);
       return { success: true, category_id: result.id, deleted: true };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['categories']);
+      this.afterPossiblyAppliedEntityWrite(e, 'categories');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -5954,7 +5959,7 @@ export class CopilotMoneyTools {
         cleared: result.cleared,
       };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['categories']);
+      this.afterPossiblyAppliedEntityWrite(e, 'categories');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -6008,7 +6013,7 @@ export class CopilotMoneyTools {
       }
       return { success: true, recurring_id: result.id, state: args.state };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['recurring']);
+      this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -6029,7 +6034,7 @@ export class CopilotMoneyTools {
       this.liveDb?.patchLiveRecurringDelete(args.recurring_id);
       return { success: true, recurring_id: result.id, deleted: true };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['recurring']);
+      this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -6081,7 +6086,7 @@ export class CopilotMoneyTools {
       }
       return { success: true, tag_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['tags']);
+      this.afterPossiblyAppliedEntityWrite(e, 'tags');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -6221,7 +6226,7 @@ export class CopilotMoneyTools {
         frequency: result.frequency,
       };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['recurring']);
+      this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }
@@ -6350,7 +6355,7 @@ export class CopilotMoneyTools {
       }
       return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
-      this.afterPossiblyAppliedEntityWrite(e, ['recurring']);
+      this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
     }

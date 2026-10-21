@@ -1191,7 +1191,9 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'that reads into its payload goes through committedPayload (graphql-error.ts), which ' +
       'then raises a GraphQLError with writeApplied set: a transaction tool drops the live ' +
       'months rather than patching them, a category / tag / recurring / budget tool drops ' +
-      'its live snapshot so the probably-landed entity shows on the next read, ' +
+      'its live snapshot so the probably-landed entity shows on the next read (for ' +
+      'create_recurring that is the recurring list, not the transaction it links, whose ' +
+      'live row is not touched on success either), ' +
       'split_transaction records the parent as split, and the ' +
       'message asks the user to re-read and confirm before retrying. Basis: GraphQL ' +
       'execution reports a failed resolver in `errors`, so a payload nulled with no error ' +

@@ -1,6 +1,6 @@
 /**
  * A category / tag / recurring / budget write that probably landed is visible
- * on the next live read (#887 review).
+ * on the next live read (#887 review). All eleven such tools are listed.
  *
  * Those tools patch their live snapshot only on success. When the mutation
  * instead throws an error that says the write may have applied (`writeApplied`
@@ -25,6 +25,9 @@ import { createMockGraphQLClient, localCategories } from '../helpers/mock-graphq
 const CAT_ID = 'Lm2xP7rT4uY9bE1cG5hJ';
 const TAG_ID = 'Nk6wS3dF8jZ2qV5tR9oA';
 const REC_ID = 'Rt4yU9iO2pA7sD1fG6hK';
+const TX_ID = 'Zx8cV3bN6mQ1wE4rT7yU';
+const ACCOUNT_ID = 'Vq3nR8kT2pX6wL9mZ4yB';
+const ITEM_ID = 'Hc7fJ1sD5gK8aQ3vN6tW';
 
 const META_DIR = mkdtempSync(join(tmpdir(), 'possibly-applied-entity-'));
 afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
@@ -91,6 +94,20 @@ const CASES: Array<[string, string, Scope, (t: CopilotMoneyTools) => Promise<unk
     (t) => t.updateRecurring({ recurring_id: REC_ID, name: 'Gym' }),
   ],
   [
+    // Routing passed explicitly; its split-parent check loads the (empty)
+    // live window, mocked in setup().
+    'create_recurring',
+    'CreateRecurring',
+    'recurring',
+    (t) =>
+      t.createRecurring({
+        transaction_id: TX_ID,
+        account_id: ACCOUNT_ID,
+        item_id: ITEM_ID,
+        frequency: 'MONTHLY',
+      }),
+  ],
+  [
     'delete_recurring',
     'DeleteRecurring',
     'recurring',
@@ -99,7 +116,12 @@ const CASES: Array<[string, string, Scope, (t: CopilotMoneyTools) => Promise<unk
 ];
 
 async function setup(op: string, error: Error) {
-  const client = createMockGraphQLClient({ [op]: error } as never);
+  const client = createMockGraphQLClient({
+    [op]: error,
+    Transactions: {
+      transactions: { edges: [], pageInfo: { endCursor: null, hasNextPage: false } },
+    },
+  } as never);
   const db = makeDb();
   const live = new LiveCopilotDatabase(client, db, {
     metaStore: new TransactionMetaStore({
@@ -125,6 +147,22 @@ describe('a probably-landed entity write drops its live snapshot (#887)', () => 
       expect(cacheFor(live, other).peek()).toBeDefined();
     }
   });
+
+  test.each(CASES)(
+    '%s: an ambiguous failure that may have written (5xx, not writeApplied) drops it too',
+    async (_n, op, scope, call) => {
+      // The helper gates on writeMayHaveApplied, which is broader than
+      // writeApplied: a write a 5xx may or may not have applied is refetched too.
+      const ambiguous = new GraphQLError('SERVER_ERROR', '502', op, 502, undefined, {
+        requestReachedServer: true,
+        writeMayHaveApplied: true,
+      });
+      expect(ambiguous.writeApplied).toBe(false);
+      const { tools, live } = await setup(op, ambiguous);
+      await expect(call(tools)).rejects.toThrow(/may or may not have applied/);
+      expect(cacheFor(live, scope).peek()).toBeUndefined();
+    }
+  );
 
   test.each(CASES)(
     '%s: a rejection that cannot have written leaves the snapshot',

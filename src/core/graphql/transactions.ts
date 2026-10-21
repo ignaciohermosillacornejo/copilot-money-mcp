@@ -251,7 +251,11 @@ export async function bulkEditTransactions(
   // tool layer drops (#864 review).
   // `data` itself is guarded too: a null `data` would otherwise be a bare
   // TypeError here (#887 review). The client classifies a null `data` before
-  // this runs; the guard is for a caller that hands in its own client.
+  // this runs; the guard is for a caller that hands in its own client. A null
+  // `bulkEditTransactions` payload stays tolerated rather than classified, on
+  // purpose: it resolves with every id in `skipped`, whose live months the
+  // tool layer drops and reports per row, which says more than one thrown
+  // "probably landed" would.
   const response = (data as Partial<BulkEditTransactionsResponse> | null)
     ?.bulkEditTransactions as Partial<BulkEditTransactionsResponse['bulkEditTransactions']> | null;
   // Elements too: an `updated` row without a string id, or a `failed` entry

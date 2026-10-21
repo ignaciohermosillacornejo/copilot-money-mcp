@@ -580,11 +580,9 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
 
   test('(g) split recorded even when mapping a drifted response throws', async () => {
     // Response validation is warn-only, so a drifted response reaches the
-    // local mapping; a non-array `splitTransactions` makes it throw after the
-    // server has split. (A missing `tags` array no longer throws: #864.) This
-    // throws one statement after the parent's mapping; no test now makes the
-    // parent's own mapping throw, which sits on the same recorded-and-evicted
-    // path.
+    // wrapper; since #887 a non-array `splitTransactions` is refused there,
+    // classified writeApplied, and the tool's catch records the parent (the
+    // same path as the (a3) rows). Kept as the original #822 regression.
     const client = createMockGraphQLClient({
       SplitTransaction: {
         splitTransaction: {
@@ -614,8 +612,9 @@ describe('delete_transaction split-parent evidence: live path, staleness, drift 
   });
 
   test('(g-live) a drifted split leaves no stale cached parent that retires the record', async () => {
-    // The parent sits in a cached month. The drifted response throws in the
-    // mapping, before the children are written through. Two things must hold:
+    // The parent sits in a cached month. The drifted response is refused in
+    // the wrapper (#887), so no child is written through, and the month drop
+    // comes from the catch's invalidateAfterFailedWrite. Two things must hold:
     // no stale pre-split row may remain for a later check to mistake for a
     // live one, and the month must not be left cached with neither the parent
     // nor its children (the #820 shape) — it is dropped, so the next read

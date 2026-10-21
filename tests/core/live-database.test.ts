@@ -605,30 +605,6 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     }
   );
 
-  test('a refused row warns exactly once per failed-field set, naming the field and not the value (#864)', () => {
-    __resetReadShapeWarnDedupe();
-    const warn = spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const live = mkLive();
-      const wc = live.getTransactionsWindowCache();
-      const drifted = mutationRow({ name: 98765 as unknown as string });
-
-      wc.ingestMonth('2024-01', [queryRow()], Date.now());
-      live.upsertLiveTransaction(drifted);
-      wc.ingestMonth('2024-01', [queryRow()], Date.now());
-      live.upsertLiveTransaction(drifted);
-
-      const lines = warn.mock.calls.map((c) => String(c[0]));
-      expect(lines).toHaveLength(1);
-      expect(lines[0]).toContain('mutation-row drift');
-      expect(lines[0]).toContain('invalid name');
-      expect(lines[0]).not.toContain('98765');
-    } finally {
-      warn.mockRestore();
-      __resetReadShapeWarnDedupe();
-    }
-  });
-
   /** Run `fn` with console.warn captured and the warn dedupe reset around it. */
   function captureWarnings(fn: () => void): string[] {
     __resetReadShapeWarnDedupe();
@@ -641,6 +617,23 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
       __resetReadShapeWarnDedupe();
     }
   }
+
+  test('a refused row warns exactly once per failed-field set, naming the field and not the value (#864)', () => {
+    const lines = captureWarnings(() => {
+      const live = mkLive();
+      const wc = live.getTransactionsWindowCache();
+      const drifted = mutationRow({ name: 98765 as unknown as string });
+
+      wc.ingestMonth('2024-01', [queryRow()], Date.now());
+      live.upsertLiveTransaction(drifted);
+      wc.ingestMonth('2024-01', [queryRow()], Date.now());
+      live.upsertLiveTransaction(drifted);
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('mutation-row drift');
+    expect(lines[0]).toContain('invalid name');
+    expect(lines[0]).not.toContain('98765');
+  });
 
   test('a real-looking but impossible calendar date is reported as an invalid date (#875)', () => {
     // 2024-02-30 passes the read schema's date regex, so the schema names no
