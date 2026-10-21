@@ -174,6 +174,16 @@ describe('redactUserPaths', () => {
     expect(prefixClass('.') || boundaryOnly.includes('.')).toBe(false);
   });
 
+  test('stated limit: under /Users, a non-home directory continuing after a boundary-only character reads as ~', () => {
+    // The accepted cost of BOUNDARY_ONLY: the characters cannot be in a
+    // username but can be in a directory name, so `/Users/bob!old` stops at
+    // `!` and keeps `old`, where the prefix rule alone would take it whole.
+    const home = '/Users/bob';
+    expect(redactUserPaths('/Users/bob!old/x', home)).toBe('~!old/x');
+    expect(redactUserPaths('/Users/bob:old/x', home)).toBe('~:old/x');
+    expect(redactUserPaths('/Users/bob!old/x', '/Users/carol')).toBe('/Users/<user>/x');
+  });
+
   test('stated limit: under /Users, another user named after the home plus a space keeps the tail', () => {
     // `/Users/bob smith` while the home is `/Users/bob`: the prefix rule cannot
     // tell a spaced name from the prose after it, so the part after the space

@@ -65,7 +65,7 @@
  * so a reviewer can see at a glance whether the detection is the one the row
  * claims. That is also why each row must name those tests up front
  * (`expectFailingTests`): "the file went red" is satisfied by a sibling test in
- * a shared detector file, and four of the nine rows share one.
+ * a shared detector file, and several rows share one.
  *
  * ## Restoration
  *
@@ -216,7 +216,7 @@ export interface MutationGuard {
    * The test(s) inside `expectFails` that must be among the failures, matched
    * as substrings of the names bun prints.
    *
-   * `expectFails` alone would let a row ride on a sibling: four of the nine rows
+   * `expectFails` alone would let a row ride on a sibling: several rows
    * share `bulk-edit-transactions.test.ts`, so "the file went red" can be true
    * while the test covering THIS guard has quietly stopped covering it. Naming
    * the test turns that from invisible into a failure — the same reason `find`
@@ -1005,7 +1005,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
         '      const errorMessage = redactUserPaths(',
       with:
         '      // mutation-guard: a thrown tool error reaches the client without the username\n' +
-        '      const errorMessage = String(',
+        '      const errorMessage = ((text: string, _keep = redactUserPaths) => text)(',
     },
     expectFailingTests: ['an fs error thrown past the dispatch gate reaches the client redacted'],
     expectFails: 'tests/utils/redact-paths.test.ts',
@@ -1025,7 +1025,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
         '      error: redactUserPaths(',
       with:
         '      // mutation-guard: a returned batch failure carries no username\n' +
-        '      error: (',
+        '      error: ((text: string, _keep = redactUserPaths) => text)(',
     },
     expectFailingTests: ['continue_on_error: a returned failure message has the username redacted'],
     expectFails: 'tests/tools/update-transactions-batching.test.ts',

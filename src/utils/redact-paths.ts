@@ -58,8 +58,11 @@
  * need to be: those characters cannot occur in a username (macOS short names
  * are letters, digits, `_`, `-` and `.`; Linux `useradd`/`adduser` defaults
  * are letters, digits, `_`, `-` and a trailing `$`, and `:` is the
- * `/etc/passwd` field separator), so the boundary may stop at them without
- * risking another user's name tail. `.` is deliberately in neither: it IS a
+ * `/etc/passwd` field separator). That is a proxy: what the boundary actually
+ * meets is a directory name directly under `/Users` or `/home`, and all six
+ * are legal in a filename. It holds because such a directory is in practice a
+ * home named after a short name; where it does not, see the last limit below.
+ * `.` is deliberately in neither: it IS a
  * username character, so the prefix rule must run through it
  * (`/Users/bob.smith` is one user) and the boundary must not stop at it.
  *
@@ -80,6 +83,11 @@
  *     /Users/bob smith.` becomes `/Users/<user> smith.`. The boundary cannot
  *     accept `.` without turning `/Users/bob.smith/x` into `~.smith/x`, and
  *     the prefix rule stops at the space.
+ *   - Under `/Users` and `/home`, a directory that is not a home and whose
+ *     name continues after a boundary-only character (`/Users/bob!old` while
+ *     the home is `/Users/bob`) keeps the continuation and reads as `~`:
+ *     `~!old/x`, where the prefix rule alone would give `/Users/<user>/x`.
+ *     The accepted cost of `BOUNDARY_ONLY`.
  *
  * Pinned by tests so changing either is a decision.
  */
