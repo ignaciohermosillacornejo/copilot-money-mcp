@@ -1,4 +1,5 @@
 import type { GraphQLClient } from './client.js';
+import { committedPayload } from './graphql-error.js';
 import { EDIT_RECURRING, DELETE_RECURRING } from './operations.generated.js';
 
 /**
@@ -61,11 +62,16 @@ export async function createRecurring(
     CREATE_RECURRING_MINIMAL,
     args
   );
+  const created = committedPayload<CreateRecurringResponse['createRecurring']>(
+    'CreateRecurring',
+    (data as Partial<CreateRecurringResponse> | null)?.createRecurring,
+    'createRecurring'
+  );
   return {
-    id: data.createRecurring.id,
-    name: data.createRecurring.name,
-    state: data.createRecurring.state,
-    frequency: data.createRecurring.frequency,
+    id: created.id,
+    name: created.name,
+    state: created.state,
+    frequency: created.frequency,
   };
 }
 
@@ -181,7 +187,11 @@ export async function editRecurring(
     },
     EditRecurringResponse
   >('EditRecurring', EDIT_RECURRING, { id: args.id, input: wireInput });
-  const recurring = data.editRecurring.recurring;
+  const recurring = committedPayload<EditRecurringResponse['editRecurring']['recurring']>(
+    'EditRecurring',
+    (data as Partial<EditRecurringResponse> | null)?.editRecurring?.recurring,
+    'editRecurring.recurring'
+  );
   // Report back fields the caller named in args.input — keyed by presence,
   // not by value. The `state` echo uses the server-confirmed value; the
   // `rule` echo is the caller's input (see EditRecurring wire-shape comment

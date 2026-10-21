@@ -33,6 +33,7 @@ import {
   QUERY_RESPONSE_SCHEMAS,
   READ_RESPONSE_SHAPE_RUNTIME_CHECK,
 } from '../../src/core/graphql/read-response-validation.js';
+import { MUTATION_ROW_READ_SCHEMA_SURFACE } from '../../src/core/graphql/read-validation.js';
 
 const SMOKE_DIR = join(import.meta.dir, '..', '..', 'scripts', 'smoke');
 
@@ -240,6 +241,13 @@ describe('conformance ledger', () => {
       (entry) => entry.surface
     );
     expect(blank).toEqual([]);
+  });
+
+  test('the surface the mutation-row refusal warning names has a ledger entry (#875)', () => {
+    // warnMutationRowRefused sends readers to this surface by name; a renamed
+    // or deleted entry would leave the warning pointing at nothing.
+    const entry = CONFORMANCE_LEDGER.find((e) => e.surface === MUTATION_ROW_READ_SCHEMA_SURFACE);
+    expect(entry?.kind).toBe('response-shape');
   });
 
   test('class distribution counts every entry exactly once', () => {

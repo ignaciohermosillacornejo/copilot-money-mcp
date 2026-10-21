@@ -1,4 +1,5 @@
 import type { GraphQLClient } from './client.js';
+import { committedPayload } from './graphql-error.js';
 import { EDIT_ACCOUNT } from './operations.generated.js';
 
 export interface EditAccountInput {
@@ -29,7 +30,11 @@ export async function editAccount(
     { id: string; itemId: string; input: EditAccountInput },
     EditAccountResponse
   >('EditAccount', EDIT_ACCOUNT, args);
-  const account = data.editAccount.account;
+  const account = committedPayload<EditAccountResponse['editAccount']['account']>(
+    'EditAccount',
+    (data as Partial<EditAccountResponse> | null)?.editAccount?.account,
+    'editAccount.account'
+  );
   // Report back fields the caller named in args.input — keyed by presence,
   // not by value. Lets callers explicitly "change to undefined" if ever needed;
   // tools.ts builds args.input via conditional spread so explicit-undefined

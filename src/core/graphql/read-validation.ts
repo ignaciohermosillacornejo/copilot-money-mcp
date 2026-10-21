@@ -145,15 +145,25 @@ export function __resetReadShapeWarnDedupe(): void {
  * mutation returned was refused by the live cache. Warn once per failed-field
  * set, naming the fields and never their values, so a systematic drift that
  * turns every write into a month refetch is visible rather than silent.
+ * `droppedMonths` is how many cached months the refusal actually dropped, so
+ * the line reports the outcome instead of promising a refetch that a write
+ * to an uncached month never needs (#875).
  */
-export function warnMutationRowRefused(info: InvalidNodeInfo): void {
+export function warnMutationRowRefused(info: InvalidNodeInfo, droppedMonths: number): void {
   const key = `mutation-row:${[...info.fields].sort().join(',')}`;
   if (warned.has(key)) return;
   warned.add(key);
+  const outcome =
+    droppedMonths > 0
+      ? `the ${droppedMonths === 1 ? 'cached month' : `${droppedMonths} cached months`} it ` +
+        `touched ${droppedMonths === 1 ? 'was' : 'were'} dropped, so the next read refetches ` +
+        `from the server`
+      : 'no cached month held it, so nothing was dropped and the next read of its month ' +
+        'fetches from the server';
   console.warn(
     `[copilot-money-mcp] mutation-row drift: transaction ${info.id ?? '<unreadable id>'} not ` +
-      `stored in the live cache (invalid ${info.fields.join(', ')}); its months are refetched ` +
-      `instead — see ${MUTATION_ROW_READ_SCHEMA_SURFACE} in the conformance ledger ` +
+      `stored in the live cache (invalid ${info.fields.join(', ')}); ${outcome} — see ` +
+      `${MUTATION_ROW_READ_SCHEMA_SURFACE} in the conformance ledger ` +
       `(src/conformance/ledger.ts). Further identical refusals this session are not logged.`
   );
 }

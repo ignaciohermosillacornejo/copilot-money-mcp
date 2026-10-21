@@ -19,11 +19,19 @@ import { isAbortOrTimeout } from '../abort.js';
 import type { FirebaseAuth } from '../auth/firebase-auth.js';
 import { validateMutationResponse } from './response-validation.js';
 import { validateQueryResponse } from './read-response-validation.js';
+import { GraphQLError, type GraphQLErrorCode, type GraphQLErrorMeta } from './graphql-error.js';
+
+// The error type lives in its own dependency-free module so the per-domain
+// mutation wrappers can construct it (committedPayload) without importing
+// this module, whose response validation imports them back (#875).
+export {
+  GraphQLError,
+  committedPayload,
+  type GraphQLErrorCode,
+  type GraphQLErrorMeta,
+} from './graphql-error.js';
 
 const ENDPOINT = 'https://app.copilot.money/api/graphql';
-
-export type GraphQLErrorCode =
-  'AUTH_FAILED' | 'SCHEMA_ERROR' | 'USER_ACTION_REQUIRED' | 'SERVER_ERROR' | 'NETWORK' | 'UNKNOWN';
 
 /** Cap on how much raw server text we embed in error messages. */
 const MAX_SERVER_TEXT = 600;
@@ -109,56 +117,6 @@ function classifyHttpError(status: number, parsed?: ParsedErrorBody): GraphQLErr
   // rejection of our request shape.
   if (status === 400) return 'SCHEMA_ERROR';
   return 'UNKNOWN';
-}
-
-export interface GraphQLErrorMeta {
-  /**
-   * Three-state delivery evidence:
-   *  - true       → an HTTP response arrived, so the request definitely
-   *                 reached the server
-   *  - false      → the failure provably happened before send (connection
-   *                 refused, DNS failure) — the server never saw it
-   *  - undefined  → ambiguous (timeout, mid-flight reset); the request may
-   *                 or may not have been processed
-   * This is what makes mutation retries safe: only `false` is retryable.
-   */
-  requestReachedServer?: boolean;
-  /**
-   * Set on mutation failures where the write may have executed server-side
-   * (ambiguous transport failure or 5xx). Callers must verify state before
-   * retrying.
-   */
-  writeMayHaveApplied?: boolean;
-  /** Total attempts made before this error surfaced (≥ 1). */
-  attempts?: number;
-  /**
-   * The transport error this one replaces, kept as the standard `Error.cause`
-   * (a timeout's `TimeoutError`, a socket reset). The message is rewritten for
-   * the caller; the original is what someone debugging needs, and the auth
-   * side's timeout already keeps it (#805).
-   */
-  cause?: unknown;
-}
-
-export class GraphQLError extends Error {
-  public readonly requestReachedServer?: boolean;
-  public readonly writeMayHaveApplied: boolean;
-  public readonly attempts: number;
-
-  constructor(
-    public readonly code: GraphQLErrorCode,
-    message: string,
-    public readonly operationName?: string,
-    public readonly httpStatus?: number,
-    public readonly serverErrors?: unknown,
-    meta: GraphQLErrorMeta = {}
-  ) {
-    super(message, meta.cause === undefined ? undefined : { cause: meta.cause });
-    this.name = 'GraphQLError';
-    this.requestReachedServer = meta.requestReachedServer;
-    this.writeMayHaveApplied = meta.writeMayHaveApplied ?? false;
-    this.attempts = meta.attempts ?? 1;
-  }
 }
 
 // ── Retry / timeout configuration ───────────────────────────────────────────
@@ -361,6 +319,7 @@ export class GraphQLClient {
     return new GraphQLError(e.code, e.message, e.operationName, e.httpStatus, e.serverErrors, {
       requestReachedServer: e.requestReachedServer,
       writeMayHaveApplied,
+      writeApplied: e.writeApplied,
       attempts,
       // A rebuild, not a new failure: what it replaced is still the cause.
       cause: e.cause,

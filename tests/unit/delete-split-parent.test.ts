@@ -25,7 +25,10 @@ import { TransactionMetaStore } from '../../src/core/persistence/transaction-met
 import { SplitParentStore } from '../../src/core/persistence/split-parent-store.js';
 import { createTestDb } from '../helpers/test-db.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
-import type { CreatedTransaction } from '../../src/core/graphql/transactions.js';
+import type {
+  CreatedTransaction,
+  SplitTransactionResult,
+} from '../../src/core/graphql/transactions.js';
 import {
   createMockGraphQLClient,
   liveCategoryMocks,
@@ -183,6 +186,46 @@ describe('delete_transaction refuses a split parent (#822)', () => {
         { amount: 40, category_id: CAT_B },
       ],
     });
+
+    await expect(
+      tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })
+    ).rejects.toThrow(REFUSAL);
+    expect(deletes(client)).toHaveLength(0);
+  });
+
+  test('(a2) a split that landed with an unusable response still records the parent (#875)', async () => {
+    // The server applied the split but answered with a null payload: the tool
+    // reports that the write landed, and the parent is recorded exactly as
+    // on success, so delete_transaction cannot double-credit it.
+    const client = createMockGraphQLClient({
+      ...liveCategoryMocks([CAT_A, CAT_B]),
+      // Drift the types rule out, which warn-only validation lets through.
+      SplitTransaction: { splitTransaction: null as unknown as SplitTransactionResult },
+      DeleteTransaction: { deleteTransaction: true },
+    });
+    const tools = new CopilotMoneyTools(
+      makeDb([
+        {
+          transaction_id: PARENT_ID,
+          amount: 100,
+          date: '2025-03-12',
+          name: 'Hardware Store',
+          ...routing,
+          category_id: CAT_A,
+        },
+      ]),
+      client
+    );
+    await expect(
+      tools.splitTransaction({
+        transaction_id: PARENT_ID,
+        ...routing,
+        splits: [
+          { amount: 60, category_id: CAT_A },
+          { amount: 40, category_id: CAT_B },
+        ],
+      })
+    ).rejects.toThrow(/HAS landed/);
 
     await expect(
       tools.deleteTransaction({ transaction_id: PARENT_ID, ...routing })

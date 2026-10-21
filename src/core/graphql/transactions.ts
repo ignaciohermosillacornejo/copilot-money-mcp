@@ -1,4 +1,5 @@
 import type { GraphQLClient } from './client.js';
+import { committedPayload } from './graphql-error.js';
 import {
   ADD_TRANSACTION_TO_RECURRING,
   BULK_EDIT_TRANSACTIONS,
@@ -82,7 +83,11 @@ export async function createTransaction(
     CREATE_TRANSACTION,
     args
   );
-  return data.createTransaction;
+  return committedPayload<CreatedTransaction>(
+    'CreateTransaction',
+    (data as Partial<CreateTransactionResponse> | null)?.createTransaction,
+    'createTransaction'
+  );
 }
 
 export interface EditTransactionInput {
@@ -339,7 +344,12 @@ export async function addTransactionToRecurring(
     AddTransactionToRecurringArgs,
     AddTransactionToRecurringResponse
   >('AddTransactionToRecurring', ADD_TRANSACTION_TO_RECURRING, args);
-  return data.addTransactionToRecurring.transaction;
+  return committedPayload<CreatedTransaction>(
+    'AddTransactionToRecurring',
+    (data as Partial<AddTransactionToRecurringResponse> | null)?.addTransactionToRecurring
+      ?.transaction,
+    'addTransactionToRecurring.transaction'
+  );
 }
 
 export interface SplitTransactionInput {
@@ -388,7 +398,14 @@ export async function splitTransaction(
     SPLIT_TRANSACTION,
     args
   );
-  return data.splitTransaction;
+  // Only the envelope is required here: split_transaction already tolerates
+  // drift inside it (its children array, each child's fields), and needs the
+  // write classified as applied so it can record the split parent (#822).
+  return committedPayload<SplitTransactionResult>(
+    'SplitTransaction',
+    (data as Partial<SplitTransactionResponse> | null)?.splitTransaction,
+    'splitTransaction'
+  );
 }
 
 /**
@@ -419,7 +436,13 @@ export async function editTransaction(
     EDIT_TRANSACTION,
     args
   );
-  const tx = data.editTransaction.transaction;
+  // A null row after a committed edit is classified, not a TypeError (#875):
+  // the caller's catch then drops the live months instead of patching them.
+  const tx = committedPayload<CreatedTransaction>(
+    'EditTransaction',
+    (data as Partial<EditTransactionResponse> | null)?.editTransaction?.transaction,
+    'editTransaction.transaction'
+  );
   const changed: EditTransactionChanges = {};
   // Report back fields the caller named in args.input — keyed by presence,
   // not by value. Lets callers explicitly "change to undefined" if ever needed;

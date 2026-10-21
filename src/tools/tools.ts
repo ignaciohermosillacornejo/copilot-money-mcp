@@ -5168,6 +5168,14 @@ export class CopilotMoneyTools {
         [transaction_id],
         inputs.flatMap((i) => CopilotMoneyTools.monthOf(i.date))
       );
+      if (e instanceof GraphQLError && e.writeApplied) {
+        // The split committed and only its response was unusable (#875): the
+        // parent is a split parent now, so record and evict it exactly as the
+        // success path does, or delete_transaction would accept it (#822).
+        this.recordSplitParent(transaction_id);
+        this.db.patchCachedTransactionDelete(transaction_id);
+        this.evictLiveTransaction(transaction_id);
+      }
       if (e instanceof GraphQLError) {
         throw new Error(graphQLErrorToMcpError(e), { cause: e });
       }

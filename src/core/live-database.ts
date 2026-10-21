@@ -766,9 +766,15 @@ export class LiveCopilotDatabase {
       insert?: boolean;
       parentId?: string | null;
       /**
-       * Months (YYYY-MM) the request moved the row into. If the returned row
-       * is refused as malformed, these are dropped too: the response's own
-       * date cannot be trusted to name the destination.
+       * Months (YYYY-MM) the request moved the row into. Consulted ONLY when
+       * the returned row is refused as malformed: then these are dropped too,
+       * since a date the row failed on cannot name the destination. A
+       * well-formed row is filed under its own returned date, which is
+       * trusted as the server's persisted one — split children share one
+       * superset of touched months, so treating every requested month the
+       * row did not land in as stale would drop each sibling's month in turn
+       * and undo the split's write-through (#820). A well-formed row that
+       * echoes a pre-edit date is server drift this does not detect (#875).
        */
       refusalMonths?: readonly string[];
     } = {}
@@ -796,11 +802,6 @@ export class LiveCopilotDatabase {
     // sits in, are dropped so the next read refetches (#864 review).
     // mutation-guard: a malformed returned row is never cached
     if (!LiveCopilotDatabase.isCacheableRow(node)) {
-      // Not silent (#864 review): name the failed fields, once per set. The
-      // schema passing means the calendar-date check failed, the only other
-      // clause.
-      const fields = invalidMutationRowFields(node);
-      warnMutationRowRefused({ id: node.id, fields: fields.length > 0 ? fields : ['date'] });
       const months = new Set<string>();
       // The cached copy's month is dropped too: the row is not stored, so a
       // write that moved or changed it must not leave that month serving the
@@ -810,9 +811,26 @@ export class LiveCopilotDatabase {
       }
       const cached = this.lookupTransactionNodes([node.id]).get(node.id);
       if (cached) months.add(cached.date.slice(0, 7));
-      for (const m of opts.refusalMonths ?? []) if (isCalendarMonth(m)) months.add(m);
+      for (const m of opts.refusalMonths ?? []) {
+        if (isCalendarMonth(m)) months.add(m);
+      }
       const stale = [...months].filter((m) => this.transactionsWindowCache.hasMonth(m));
       if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
+      // Not silent (#864 review): name the failed fields, once per set. The
+      // schema passing means the calendar-date check failed, the only other
+      // clause. Warned after the drop, so the line reports what happened
+      // rather than predicting it (#875). The id is printed only when it is
+      // a readable string the schema did not flag, as the read path's
+      // stripInvalidTransactionNodes does: a drifted id is a value, not a name.
+      const fields = invalidMutationRowFields(node);
+      const rawId: unknown = node.id;
+      warnMutationRowRefused(
+        {
+          id: typeof rawId === 'string' && !fields.includes('id') ? rawId : null,
+          fields: fields.length > 0 ? fields : ['date'],
+        },
+        stale.length
+      );
       return;
     }
     const existing = this.lookupTransactionNodes([node.id]).get(node.id);
@@ -874,8 +892,15 @@ export class LiveCopilotDatabase {
    * Drop every cached month that holds any of `ids`, so the next read refetches
    * them. For a write whose outcome is unknown — a bulk edit that threw on the
    * transport or with a GraphQL error may still have applied some rows, and no
-   * response says which. A month that holds none of them is left alone; an id
-   * in no cached month has nothing stale to serve.
+   * response says which. A month that holds none of them is left alone.
+   *
+   * Coverage is by the rows' OWN cached months only. An id in no cached month
+   * leaves its own row nothing stale to serve, but that does not make every
+   * month safe: a split parent is in no cached month by construction (the
+   * Transactions query omits it), so a failed write to one drops nothing here
+   * while its cached children may now be stale (#834). This does not look
+   * them up; a caller that knows the months a write touched passes them to
+   * {@link invalidateLiveMonthKeys} as well.
    */
   invalidateLiveTransactionMonths(ids: readonly string[]): void {
     if (ids.length === 0) return;

@@ -1,4 +1,5 @@
 import type { GraphQLClient } from './client.js';
+import { committedPayload } from './graphql-error.js';
 import type { ColorName } from './colors.js';
 import { CREATE_TAG, EDIT_TAG, DELETE_TAG } from './operations.generated.js';
 
@@ -24,10 +25,15 @@ export async function createTag(
     CREATE_TAG,
     args
   );
+  const created = committedPayload<CreateTagResponse['createTag']>(
+    'CreateTag',
+    (data as Partial<CreateTagResponse> | null)?.createTag,
+    'createTag'
+  );
   return {
-    id: data.createTag.id,
-    name: data.createTag.name,
-    colorName: data.createTag.colorName,
+    id: created.id,
+    name: created.name,
+    colorName: created.colorName,
   };
 }
 
@@ -58,7 +64,11 @@ export async function editTag(
     EDIT_TAG,
     args
   );
-  const tag = data.editTag;
+  const tag = committedPayload<EditTagResponse['editTag']>(
+    'EditTag',
+    (data as Partial<EditTagResponse> | null)?.editTag,
+    'editTag'
+  );
   // Report back fields the caller named in args.input — keyed by presence,
   // not by value. Lets callers explicitly "change to undefined" if ever needed;
   // tools.ts builds args.input via conditional spread so explicit-undefined

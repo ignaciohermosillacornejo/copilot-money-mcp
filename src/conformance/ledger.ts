@@ -143,7 +143,10 @@ import {
   RESPONSE_SHAPE_RUNTIME_CHECK,
   RUNTIME_CHECK_NAMES,
 } from '../core/graphql/response-validation.js';
-import { TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK } from '../core/graphql/read-validation.js';
+import {
+  MUTATION_ROW_READ_SCHEMA_SURFACE,
+  TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK,
+} from '../core/graphql/read-validation.js';
 import { READ_RESPONSE_SHAPE_RUNTIME_CHECK } from '../core/graphql/read-response-validation.js';
 export { RUNTIME_CHECK_NAMES };
 
@@ -1149,10 +1152,12 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'Per-node Zod validation at fetchTransactionsPage (warn-and-skip, #512): ' +
       'invalid nodes are dropped from rows and all cache/index feeds, counted, and ' +
       'surfaced via _dropped_invalid_rows + a deduped stderr warning. The write side reuses ' +
-      'this schema; that assumption is its own entry, Mutation.TransactionFields:read-schema-parity.',
+      `this schema; that assumption is its own entry, ${MUTATION_ROW_READ_SCHEMA_SURFACE}.`,
   },
   {
-    surface: 'Mutation.TransactionFields:read-schema-parity',
+    // The constant the mutation-row refusal warning names, so the two cannot
+    // drift apart (#875).
+    surface: MUTATION_ROW_READ_SCHEMA_SURFACE,
     kind: 'response-shape',
     oracle: null,
     class: 'unverified',

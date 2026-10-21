@@ -49,6 +49,12 @@ export function graphQLErrorToMcpError(e: GraphQLError): string {
       return `Transient network problem contacting Copilot${attemptsNote(e)} — retry. (${e.message})`;
     case 'UNKNOWN':
     default:
+      // committedPayload's errors already say the write landed (#875); any
+      // other UNKNOWN that may have written gets the standard warning.
+      if (e.writeApplied) return e.message;
+      if (e.writeMayHaveApplied) {
+        return `Copilot API request failed: ${e.message} ${WRITE_AMBIGUITY_WARNING}`;
+      }
       return `Copilot API request failed: ${e.message}`;
   }
 }

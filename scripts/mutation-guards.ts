@@ -1038,6 +1038,27 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFailingTests: ['continue_on_error: a returned failure message has the username redacted'],
     expectFails: 'tests/tools/update-transactions-batching.test.ts',
   },
+  {
+    name: "a committed write's unusable payload is classified as applied",
+    file: 'src/core/graphql/graphql-error.ts',
+    invariant:
+      'Mutation responses are validated warn-only, so a response can carry null where the ' +
+      'payload belongs after the server has committed the write. Without this check the ' +
+      'wrapper hands null to its caller, which throws a bare TypeError: split_transaction then ' +
+      'never records the parent it just split, and a later delete_transaction of that parent ' +
+      'is sent, which credits its amount back to the account a second time (#822, #875).',
+    mutation: {
+      kind: 'replace',
+      find:
+        "  // mutation-guard: a committed write's unusable payload is classified as applied\n" +
+        "  if (value !== null && typeof value === 'object') return value as T;",
+      with:
+        "  // mutation-guard: a committed write's unusable payload is classified as applied\n" +
+        '  return value as T;',
+    },
+    expectFailingTests: ['a split that landed with an unusable response still records the parent'],
+    expectFails: 'tests/unit/delete-split-parent.test.ts',
+  },
 ];
 
 // ---------------------------------------------------------------------------

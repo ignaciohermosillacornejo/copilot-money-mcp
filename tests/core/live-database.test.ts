@@ -629,6 +629,63 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     }
   });
 
+  /** Run `fn` with console.warn captured and the warn dedupe reset around it. */
+  function captureWarnings(fn: () => void): string[] {
+    __resetReadShapeWarnDedupe();
+    const warn = spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      fn();
+      return warn.mock.calls.map((c) => String(c[0]));
+    } finally {
+      warn.mockRestore();
+      __resetReadShapeWarnDedupe();
+    }
+  }
+
+  test('a real-looking but impossible calendar date is reported as an invalid date (#875)', () => {
+    // 2024-02-30 passes the read schema's date regex, so the schema names no
+    // field; the refusal comes from the calendar check alone, and the warning
+    // must still name `date` rather than print an empty field list.
+    const lines = captureWarnings(() => {
+      const live = mkLive();
+      live.getTransactionsWindowCache().ingestMonth('2024-01', [queryRow()], Date.now());
+      live.upsertLiveTransaction(mutationRow({ date: '2024-02-30' }));
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('(invalid date)');
+  });
+
+  test('a drifted non-string id is not printed in the refusal warning (#875)', () => {
+    // Same rule as the read path's stripInvalidTransactionNodes: a value the
+    // schema flagged is never echoed to stderr, only its field name.
+    const lines = captureWarnings(() => {
+      const live = mkLive();
+      live.upsertLiveTransaction(mutationRow({ id: 424242 as unknown as string }));
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('<unreadable id>');
+    expect(lines[0]).toContain('invalid id');
+    expect(lines[0]).not.toContain('424242');
+  });
+
+  test('the refusal warning reports the months it dropped, or that it dropped none (#875)', () => {
+    const dropped = captureWarnings(() => {
+      const live = mkLive();
+      live.getTransactionsWindowCache().ingestMonth('2024-01', [queryRow()], Date.now());
+      live.upsertLiveTransaction(mutationRow({ name: undefined }), { refusalMonths: ['2024-03'] });
+    });
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toContain('the cached month it touched was dropped');
+
+    const none = captureWarnings(() => {
+      // Nothing cached: there is nothing to refetch, and the line must not say so.
+      mkLive().upsertLiveTransaction(mutationRow({ name: undefined }));
+    });
+    expect(none).toHaveLength(1);
+    expect(none[0]).toContain('no cached month held it, so nothing was dropped');
+    expect(none[0]).not.toContain('refetches');
+  });
+
   test('a non-string routing id never overwrites the cached one (#864)', () => {
     const live = mkLive();
     const wc = live.getTransactionsWindowCache();
@@ -673,6 +730,73 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     const live = mkLive();
     live.upsertLiveTransaction(mutationRow({ accountId: '' }));
     expect(live.lookupTransactionMeta(['aB3xK9pQ2mN7vR4tY8wZ']).size).toBe(0);
+  });
+});
+
+// ── hasSplitChildOf / invalidateLiveMonthKeys / invalidateLiveTransactionMonths ─
+
+describe('LiveCopilotDatabase split-parent and month-invalidation helpers (#822, #834, #839)', () => {
+  const PARENT = 'pQ4rS8tU2vW6xY0zA3bC';
+  const CHILD = 'dE5fG9hI3jK7lM1nO4pQ';
+  const OTHER = 'rS6tU0vW4xY8zA2bC5dE';
+
+  function mkWarm() {
+    const live = new LiveCopilotDatabase(mkClient(), mkCache());
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [{ id: OTHER, date: '2024-01-05', parentId: null }], Date.now());
+    wc.ingestMonth('2024-02', [{ id: CHILD, date: '2024-02-10', parentId: PARENT }], Date.now());
+    return { live, wc };
+  }
+
+  test('hasSplitChildOf is true when a cached row names the id as its parent', () => {
+    const { live } = mkWarm();
+    expect(live.hasSplitChildOf(PARENT)).toBe(true);
+  });
+
+  test('hasSplitChildOf is false for a child, an ordinary row, or an unknown id', () => {
+    const { live } = mkWarm();
+    expect(live.hasSplitChildOf(CHILD)).toBe(false);
+    expect(live.hasSplitChildOf(OTHER)).toBe(false);
+    expect(live.hasSplitChildOf('zZ9yY8xX7wW6vV5uU4tT')).toBe(false);
+  });
+
+  test('hasSplitChildOf only sees cached months', () => {
+    // The evidence is the window cache's; once the child's month is dropped it
+    // has none, which is why callers re-check after loading a window.
+    const { live, wc } = mkWarm();
+    wc.invalidate(['2024-02']);
+    expect(live.hasSplitChildOf(PARENT)).toBe(false);
+  });
+
+  test('invalidateLiveMonthKeys drops each named cached month and leaves the rest', () => {
+    const { live, wc } = mkWarm();
+    live.invalidateLiveMonthKeys(['2024-02', '2024-02', '2023-12']);
+    expect(wc.hasMonth('2024-02')).toBe(false);
+    // An uncached month is skipped, and an unnamed cached one survives.
+    expect(wc.hasMonth('2023-12')).toBe(false);
+    expect(wc.hasMonth('2024-01')).toBe(true);
+  });
+
+  test('invalidateLiveMonthKeys with no months is a no-op', () => {
+    const { live, wc } = mkWarm();
+    live.invalidateLiveMonthKeys([]);
+    expect(wc.cachedMonths().sort()).toEqual(['2024-01', '2024-02']);
+  });
+
+  test('invalidateLiveTransactionMonths drops only the months holding the ids', () => {
+    const { live, wc } = mkWarm();
+    live.invalidateLiveTransactionMonths([OTHER]);
+    expect(wc.hasMonth('2024-01')).toBe(false);
+    expect(wc.hasMonth('2024-02')).toBe(true);
+  });
+
+  test("invalidateLiveTransactionMonths does NOT reach a split parent's children (#834)", () => {
+    // The documented limit: a split parent sits in no cached month, so its id
+    // finds nothing to drop. A caller that knows the touched months must pass
+    // them to invalidateLiveMonthKeys as well.
+    const { live, wc } = mkWarm();
+    live.invalidateLiveTransactionMonths([PARENT]);
+    expect(wc.hasMonth('2024-02')).toBe(true);
   });
 });
 

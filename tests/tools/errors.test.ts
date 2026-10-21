@@ -66,6 +66,22 @@ describe('graphQLErrorToMcpError', () => {
     const msg = graphQLErrorToMcpError(err);
     expect(msg).toContain('Copilot API request failed');
     expect(msg).toContain('418: teapot');
+    expect(msg).not.toContain('may or may not have applied');
+  });
+
+  test('UNKNOWN write that may have applied → carries the verify-first warning (#875)', () => {
+    const err = new GraphQLError('UNKNOWN', 'odd', 'EditTag', undefined, undefined, {
+      writeMayHaveApplied: true,
+    });
+    expect(graphQLErrorToMcpError(err)).toContain('may or may not have applied');
+  });
+
+  test('UNKNOWN write that definitely applied → its own message, no ambiguity warning (#875)', () => {
+    const err = new GraphQLError('UNKNOWN', 'it landed', 'EditTag', undefined, undefined, {
+      writeApplied: true,
+    });
+    expect(err.writeMayHaveApplied).toBe(true);
+    expect(graphQLErrorToMcpError(err)).toBe('it landed');
   });
 
   test('NETWORK write with ambiguous delivery → "may or may not have applied" warning (#443)', () => {

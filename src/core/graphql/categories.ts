@@ -1,4 +1,5 @@
 import type { GraphQLClient } from './client.js';
+import { committedPayload } from './graphql-error.js';
 import type { ColorName } from './colors.js';
 import { CREATE_CATEGORY, EDIT_CATEGORY, DELETE_CATEGORY } from './operations.generated.js';
 
@@ -28,10 +29,15 @@ export async function createCategory(
     { input: CreateCategoryInput; spend: boolean; budget: boolean },
     CreateCategoryResponse
   >('CreateCategory', CREATE_CATEGORY, { spend: false, budget: false, input: args.input });
+  const created = committedPayload<CreateCategoryResponse['createCategory']>(
+    'CreateCategory',
+    (data as Partial<CreateCategoryResponse> | null)?.createCategory,
+    'createCategory'
+  );
   return {
-    id: data.createCategory.id,
-    name: data.createCategory.name,
-    colorName: data.createCategory.colorName,
+    id: created.id,
+    name: created.name,
+    colorName: created.colorName,
   };
 }
 
@@ -75,7 +81,11 @@ export async function editCategory(
     budget: false,
     input: args.input,
   });
-  const cat = data.editCategory.category;
+  const cat = committedPayload<EditCategoryResponse['editCategory']['category']>(
+    'EditCategory',
+    (data as Partial<EditCategoryResponse> | null)?.editCategory?.category,
+    'editCategory.category'
+  );
   // Report back fields the caller named in args.input — keyed by presence,
   // not by value. Lets callers explicitly "change to undefined" if ever needed;
   // tools.ts builds args.input via conditional spread so explicit-undefined
