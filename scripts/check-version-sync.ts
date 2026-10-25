@@ -23,11 +23,14 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8'));
-const server = JSON.parse(readFileSync(join(__dirname, '../server.json'), 'utf-8'));
-const manifest = JSON.parse(readFileSync(join(__dirname, '../manifest.json'), 'utf-8'));
-const lockfile = JSON.parse(readFileSync(join(__dirname, '../package-lock.json'), 'utf-8'));
-const changelog = readFileSync(join(__dirname, '../CHANGELOG.md'), 'utf-8');
+// Overridable so tests can drive the real script against a synthetic repo root.
+const ROOT = process.env.CHECK_VERSION_SYNC_ROOT ?? join(__dirname, '..');
+
+const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
+const server = JSON.parse(readFileSync(join(ROOT, 'server.json'), 'utf-8'));
+const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf-8'));
+const lockfile = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf-8'));
+const changelog = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf-8');
 
 const pkgVersion: string = pkg.version;
 const serverVersion: string = server.version;
@@ -65,12 +68,26 @@ if (lockfileSelfVersion !== pkgVersion) {
     `package-lock.json#packages[''].version (${lockfileSelfVersion}) !== package.json#version (${pkgVersion})`
   );
 }
-// Mirrors build-mcpb.yml's extractor: a line starting `## [` that contains `[<version>]`.
+
+// Mirrors build-mcpb.yml's extractor: the notes are the lines after the first
+// `## [` heading containing `[<version>]`, up to the next `## [` heading. A
+// missing or empty section makes the release fall back to "Release v<version>".
 const changelogHeading = `## [${pkgVersion}]`;
-if (!changelog.split('\n').some((line) => line.startsWith(changelogHeading))) {
+const changelogLines = changelog.split('\n');
+const sectionStart = changelogLines.findIndex((line) => line.startsWith(changelogHeading));
+if (sectionStart === -1) {
   mismatches.push(
     `CHANGELOG.md has no "${changelogHeading}" section (the release notes are taken from it)`
   );
+} else {
+  const rest = changelogLines.slice(sectionStart + 1);
+  const sectionEnd = rest.findIndex((line) => line.startsWith('## ['));
+  const body = sectionEnd === -1 ? rest : rest.slice(0, sectionEnd);
+  if (!body.some((line) => line.trim() !== '')) {
+    mismatches.push(
+      `CHANGELOG.md's "${changelogHeading}" section is empty (the release would fall back to "Release v${pkgVersion}" notes)`
+    );
+  }
 }
 
 if (mismatches.length > 0) {
