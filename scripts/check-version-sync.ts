@@ -18,8 +18,10 @@
  * exists because npm-publish.yml waits for npm to serve package.json's
  * name@version before the registry publish, while the registry validates
  * server.json's identifier. If those names diverged, the wait would go green
- * on the wrong package and the registry would still 404. Run as part of
- * `bun run check`.
+ * on the wrong package and the registry would still 404. The third part of
+ * that URL, the npm base, is not checked: the workflow hardcodes
+ * https://registry.npmjs.org, which matches server.json's registryBaseUrl. Run
+ * as part of `bun run check`.
  */
 
 import { readFileSync } from 'fs';
@@ -44,7 +46,7 @@ const npmPackage = (server.packages ?? []).find(
   (p: { registryType?: string }) => p.registryType === 'npm'
 );
 const npmPackageVersion: string | undefined = npmPackage?.version;
-const pkgName: string = pkg.name;
+const pkgName: string | undefined = pkg.name;
 const npmPackageIdentifier: string | undefined = npmPackage?.identifier;
 const lockfileVersion: string = lockfile.version;
 const lockfileSelfVersion: string | undefined = lockfile.packages?.['']?.version;
@@ -109,7 +111,8 @@ if (mismatches.length > 0) {
     '\nBump the version consistently across package.json, server.json (#version + ' +
       "#packages[npm].version), manifest.json, and package-lock.json (#version + #packages[''].version) " +
       "to the same value, and move CHANGELOG.md's [Unreleased] notes under a dated " +
-      '## [<version>] heading, before publishing.'
+      '## [<version>] heading, before publishing. Keep server.json#packages[npm].identifier ' +
+      'equal to package.json#name.'
   );
   process.exit(1);
 }

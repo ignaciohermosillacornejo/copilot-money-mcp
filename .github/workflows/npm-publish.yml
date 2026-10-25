@@ -243,12 +243,12 @@ jobs:
         env:
           NPM_WAIT_OUTCOME: ${{ steps.npm_wait.outcome }}
         run: |
+          RERUN="gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
           if [ "$NPM_WAIT_OUTCOME" = success ]; then
-            WHY="after npm was serving the version"
+            MSG="The MCP Registry publish failed after npm was serving the version. Re-run only the registry steps: ${RERUN}"
           else
-            WHY="while npm was still not serving the version after the 10-minute wait"
+            MSG="The MCP Registry publish failed while npm was still not serving the version after the 10-minute wait. Once npm serves it, re-run only the registry steps: ${RERUN}"
           fi
-          MSG="The MCP Registry publish failed ${WHY}. Once npm serves it, re-run only the registry steps: gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
           echo "::warning::${MSG}"
           echo "### MCP Registry not updated" >> "$GITHUB_STEP_SUMMARY"
           echo "${MSG}" >> "$GITHUB_STEP_SUMMARY"

@@ -37,6 +37,7 @@ async function runCheck(root: string): Promise<Result> {
 const NOTES = '## [Unreleased]\n\n## [1.2.3] - 2026-01-01\n\n### Fixed\n\n- A fix.\n';
 
 interface Repo {
+  pkgName: string | undefined;
   pkg: string;
   server: string;
   serverNpm: string;
@@ -48,6 +49,7 @@ interface Repo {
 }
 
 const IN_SYNC: Repo = {
+  pkgName: 'synthetic-pkg',
   pkg: '1.2.3',
   server: '1.2.3',
   serverNpm: '1.2.3',
@@ -64,7 +66,7 @@ async function withRepo(overrides: Partial<Repo>): Promise<Result> {
   const dir = await mkdtemp(join(tmpdir(), 'version-sync-'));
   try {
     const json = (v: unknown) => JSON.stringify(v, null, 2);
-    await writeFile(join(dir, 'package.json'), json({ name: 'synthetic-pkg', version: r.pkg }));
+    await writeFile(join(dir, 'package.json'), json({ name: r.pkgName, version: r.pkg }));
     await writeFile(
       join(dir, 'server.json'),
       json({
@@ -120,6 +122,14 @@ describe('check:version-sync', () => {
     expect(code).toBe(1);
     expect(stderr).toContain(
       'server.json#packages[npm].identifier (other-pkg) !== package.json#name (synthetic-pkg)'
+    );
+  });
+
+  test('fails when package.json has no name', async () => {
+    const { code, stderr } = await withRepo({ pkgName: undefined });
+    expect(code).toBe(1);
+    expect(stderr).toContain(
+      'server.json#packages[npm].identifier (synthetic-pkg) !== package.json#name (undefined)'
     );
   });
 
