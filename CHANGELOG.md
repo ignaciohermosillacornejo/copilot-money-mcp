@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-25
+
 > **Upgrading from v2.x?** This release changes the shape of read responses.
 > [docs/MIGRATING-v3.md](docs/MIGRATING-v3.md) is the short version: what breaks, what to
 > pass instead, and the default row for every tool.
