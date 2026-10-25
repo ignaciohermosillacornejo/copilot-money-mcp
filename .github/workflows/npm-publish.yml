@@ -129,12 +129,24 @@ jobs:
           fi
 
       # Read once, so the existence check, the publish and the npm poll all name
-      # the same version.
+      # the same version. Assigned to variables first: `echo "x=$(node ...)"`
+      # would swallow a node failure under `bash -e`. The shape check also
+      # catches `node -p` printing `undefined` for a missing key, and keeps a
+      # stray newline from forging extra step outputs. An empty value would
+      # otherwise turn the existence check and the npm wait into silent no-ops.
       - name: Read package name and version
         id: pkg
         run: |
-          echo "name=$(node -p "require('./package.json').name")" >> "$GITHUB_OUTPUT"
-          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          if ! [[ "$PACKAGE_NAME" =~ ^[a-z0-9@/._-]+$ ]] || [ "$PACKAGE_NAME" = undefined ] \
+            || ! [[ "$PACKAGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::package.json gave an unusable name ('$PACKAGE_NAME') or version ('$PACKAGE_VERSION')"
+            exit 1
+          fi
+          echo "name=$PACKAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Check if version already exists on npm
         if: inputs.skip_npm != true && github.event.inputs.skip_npm != 'true'
@@ -213,16 +225,17 @@ jobs:
       # the registry entry was never written (v3.0.0). Say so where it is seen.
       #
       # success(), not always(): a failed continue-on-error step still concludes
-      # `success`, so a failure in any of the registry steps reaches this one,
+      # `success`, so a failure in any of the registry steps reaches this one
+      # (an Install or Authenticate failure makes the publish itself fail),
       # while a hard failure upstream (tests, build, `npm publish`) or a
       # cancellation does not. In those cases npm is NOT fine, and the
       # skip_npm=true advice below would register a version npm never accepted.
+      # Under this gate the publish always ran, so the only outcome left to
+      # report is a failure.
       - name: Report a missed MCP Registry publish
         if: success() && inputs.dry_run != true && github.event.inputs.dry_run != 'true' && steps.registry_publish.outcome != 'success'
-        env:
-          REGISTRY_OUTCOME: ${{ steps.registry_publish.outcome }}
         run: |
-          MSG="The MCP Registry publish did not succeed (outcome: ${REGISTRY_OUTCOME}) after a successful npm publish. Re-run only the registry steps: gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
+          MSG="The MCP Registry publish failed after npm had the version. Re-run only the registry steps: gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
           echo "::warning::${MSG}"
           echo "### MCP Registry not updated" >> "$GITHUB_STEP_SUMMARY"
           echo "${MSG}" >> "$GITHUB_STEP_SUMMARY"
