@@ -8,9 +8,9 @@
  *
  * Currently checks:
  *   - description length <= 100 (the registry rejects longer values with HTTP 422)
- *   - every packages[].packageArguments entry is a `named` argument whose name
- *     starts with `--`, with a non-empty description and a boolean isRequired
- *     (the shape every published entry has used; a typo there would only
+ *   - every packages[].packageArguments entry is an object with a non-empty
+ *     description and a boolean isRequired; a `named` one has a `--flag` name and
+ *     a `positional` one a value or valueHint (a typo there would otherwise only
  *     surface as a 422 in the registry publish step)
  *
  * Add new constraints here as they are discovered.
@@ -37,28 +37,49 @@ if (typeof description !== 'string') {
   );
 }
 
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
 const packages: unknown = server.packages;
 if (!Array.isArray(packages)) {
   issues.push('packages is missing or not an array');
 } else {
-  packages.forEach((pkg: { packageArguments?: unknown }, p: number) => {
+  packages.forEach((pkg: unknown, p: number) => {
+    if (!isObject(pkg)) {
+      issues.push(`packages[${p}] is ${JSON.stringify(pkg)}, expected an object`);
+      return;
+    }
     const args = pkg.packageArguments;
     if (args === undefined) return;
     if (!Array.isArray(args)) {
       issues.push(`packages[${p}].packageArguments is not an array`);
       return;
     }
-    args.forEach((arg: Record<string, unknown>, a: number) => {
+    args.forEach((arg: unknown, a: number) => {
       const where = `packages[${p}].packageArguments[${a}]`;
-      if (arg.type !== 'named')
-        issues.push(`${where}.type is ${JSON.stringify(arg.type)}, expected "named"`);
-      if (typeof arg.name !== 'string' || !arg.name.startsWith('--')) {
-        issues.push(`${where}.name is ${JSON.stringify(arg.name)}, expected a "--flag" string`);
+      if (!isObject(arg)) {
+        issues.push(`${where} is ${JSON.stringify(arg)}, expected an object`);
+        return;
+      }
+      if (arg.type === 'named') {
+        if (typeof arg.name !== 'string' || !arg.name.startsWith('--')) {
+          issues.push(`${where}.name is ${JSON.stringify(arg.name)}, expected a "--flag" string`);
+        }
+      } else if (arg.type === 'positional') {
+        if (typeof arg.value !== 'string' && typeof arg.valueHint !== 'string') {
+          issues.push(`${where} is positional but has neither a value nor a valueHint string`);
+        }
+      } else {
+        issues.push(
+          `${where}.type is ${JSON.stringify(arg.type)}, expected "named" or "positional"`
+        );
       }
       if (typeof arg.description !== 'string' || arg.description.trim() === '') {
         issues.push(`${where}.description is missing or empty`);
       }
-      if (typeof arg.isRequired !== 'boolean') issues.push(`${where}.isRequired is not a boolean`);
+      if (typeof arg.isRequired !== 'boolean') {
+        issues.push(`${where}.isRequired is not a boolean`);
+      }
     });
   });
 }

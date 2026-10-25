@@ -71,7 +71,12 @@ describe('check:server-json', () => {
   });
 
   const BAD: [string, Record<string, unknown>, string][] = [
-    ['a non-named type', { ...GOOD_ARG, type: 'positional' }, '.type is "positional"'],
+    ['an unknown type', { ...GOOD_ARG, type: 'flag' }, '.type is "flag"'],
+    [
+      'a positional with no value or valueHint',
+      { type: 'positional', description: 'A path.', isRequired: true },
+      ' is positional but has neither a value nor a valueHint string',
+    ],
     ['a name without --', { ...GOOD_ARG, name: 'flag' }, '.name is "flag"'],
     ['a missing name', { ...GOOD_ARG, name: undefined }, '.name is undefined'],
     ['an empty description', { ...GOOD_ARG, description: ' ' }, '.description is missing or empty'],
@@ -84,6 +89,37 @@ describe('check:server-json', () => {
       expect(stderr).toContain(`packages[0].packageArguments[1]${message}`);
     });
   }
+
+  test('passes a positional argument with a valueHint', async () => {
+    const positional = {
+      type: 'positional',
+      valueHint: 'path',
+      description: 'A path.',
+      isRequired: true,
+    };
+    expect((await withArgs([GOOD_ARG, positional])).code).toBe(0);
+  });
+
+  test('reports a null argument by index instead of crashing', async () => {
+    const { code, stderr } = await withArgs([GOOD_ARG, null]);
+    expect(code).toBe(1);
+    expect(stderr).toContain('packages[0].packageArguments[1] is null, expected an object');
+    expect(stderr).not.toContain('TypeError');
+  });
+
+  test('reports a null package by index instead of crashing', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'server-json-'));
+    const path = join(dir, 'server.json');
+    try {
+      await writeFile(path, JSON.stringify({ description: 'A server.', packages: [null] }));
+      const { code, stderr } = await runCheck(path);
+      expect(code).toBe(1);
+      expect(stderr).toContain('packages[0] is null, expected an object');
+      expect(stderr).not.toContain('TypeError');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 
   test('fails packageArguments that is not an array', async () => {
     const { code, stderr } = await withArgs({ name: '--flag' });
