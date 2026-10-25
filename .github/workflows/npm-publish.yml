@@ -134,6 +134,10 @@ jobs:
       # catches `node -p` printing `undefined` for a missing key, and keeps a
       # stray newline from forging extra step outputs. An empty value would
       # otherwise turn the existence check and the npm wait into silent no-ops.
+      # Semver build metadata (`+build`) is refused on purpose: it would need
+      # encoding in the poll URL, and no release here has used it.
+      # check:version-sync holds this name equal to server.json's npm
+      # identifier, which is the name the registry validates.
       - name: Read package name and version
         id: pkg
         run: |
@@ -179,12 +183,14 @@ jobs:
       # and the loop stops once 600s have passed, so the step ends within ~10
       # minutes however slow npm answers.
       - name: Wait for npm to serve the version
+        id: npm_wait
         if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
         continue-on-error: true
         env:
           PACKAGE_NAME: ${{ steps.pkg.outputs.name }}
           PACKAGE_VERSION: ${{ steps.pkg.outputs.version }}
         run: |
+          set -euo pipefail
           URL="https://registry.npmjs.org/${PACKAGE_NAME}/${PACKAGE_VERSION}"
           attempt=0
           while :; do
@@ -234,8 +240,15 @@ jobs:
       # report is a failure.
       - name: Report a missed MCP Registry publish
         if: success() && inputs.dry_run != true && github.event.inputs.dry_run != 'true' && steps.registry_publish.outcome != 'success'
+        env:
+          NPM_WAIT_OUTCOME: ${{ steps.npm_wait.outcome }}
         run: |
-          MSG="The MCP Registry publish failed after npm had the version. Re-run only the registry steps: gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
+          if [ "$NPM_WAIT_OUTCOME" = success ]; then
+            WHY="after npm was serving the version"
+          else
+            WHY="while npm was still not serving the version after the 10-minute wait"
+          fi
+          MSG="The MCP Registry publish failed ${WHY}. Once npm serves it, re-run only the registry steps: gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
           echo "::warning::${MSG}"
           echo "### MCP Registry not updated" >> "$GITHUB_STEP_SUMMARY"
           echo "${MSG}" >> "$GITHUB_STEP_SUMMARY"

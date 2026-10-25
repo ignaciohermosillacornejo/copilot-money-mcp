@@ -40,6 +40,7 @@ interface Repo {
   pkg: string;
   server: string;
   serverNpm: string;
+  serverNpmIdentifier: string;
   manifest: string;
   lock: string;
   lockSelf: string;
@@ -50,6 +51,7 @@ const IN_SYNC: Repo = {
   pkg: '1.2.3',
   server: '1.2.3',
   serverNpm: '1.2.3',
+  serverNpmIdentifier: 'synthetic-pkg',
   manifest: '1.2.3',
   lock: '1.2.3',
   lockSelf: '1.2.3',
@@ -62,10 +64,15 @@ async function withRepo(overrides: Partial<Repo>): Promise<Result> {
   const dir = await mkdtemp(join(tmpdir(), 'version-sync-'));
   try {
     const json = (v: unknown) => JSON.stringify(v, null, 2);
-    await writeFile(join(dir, 'package.json'), json({ version: r.pkg }));
+    await writeFile(join(dir, 'package.json'), json({ name: 'synthetic-pkg', version: r.pkg }));
     await writeFile(
       join(dir, 'server.json'),
-      json({ version: r.server, packages: [{ registryType: 'npm', version: r.serverNpm }] })
+      json({
+        version: r.server,
+        packages: [
+          { registryType: 'npm', identifier: r.serverNpmIdentifier, version: r.serverNpm },
+        ],
+      })
     );
     await writeFile(join(dir, 'manifest.json'), json({ version: r.manifest }));
     await writeFile(
@@ -106,6 +113,15 @@ describe('check:version-sync', () => {
       expect(stderr).toContain(`${label} (1.2.2) !== package.json#version (1.2.3)`);
     });
   }
+
+  test("fails when server.json's npm identifier differs from package.json#name", async () => {
+    // npm-publish.yml polls package.json's name; the registry validates this identifier.
+    const { code, stderr } = await withRepo({ serverNpmIdentifier: 'other-pkg' });
+    expect(code).toBe(1);
+    expect(stderr).toContain(
+      'server.json#packages[npm].identifier (other-pkg) !== package.json#name (synthetic-pkg)'
+    );
+  });
 
   test('fails when the CHANGELOG has no section for the version', async () => {
     const { code, stderr } = await withRepo({

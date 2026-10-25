@@ -4,7 +4,8 @@
  * (both the top-level `version` and the npm package entry's `version`),
  * manifest.json, and package-lock.json (its root `version` and the
  * `packages[""]` self-entry `version`), and that CHANGELOG.md has a
- * `## [<version>]` section for it.
+ * `## [<version>]` section for it. Also asserts the npm package entry's
+ * `identifier` in server.json equals package.json#name.
  *
  * The MCP registry entry is bound to a specific published npm version, and
  * manifest.json is the version Claude Desktop reads from the .mcpb bundle —
@@ -13,7 +14,11 @@
  * that a manual `version` bump can silently miss (issue #563). The release
  * workflow takes the GitHub release notes from the CHANGELOG section matching
  * the version, and v2.3.0 shipped with none (its notes were left in an empty
- * `[Unreleased]`), so a missing section fails here too. Run as part of
+ * `[Unreleased]`), so a missing section fails here too. The identifier check
+ * exists because npm-publish.yml waits for npm to serve package.json's
+ * name@version before the registry publish, while the registry validates
+ * server.json's identifier. If those names diverged, the wait would go green
+ * on the wrong package and the registry would still 404. Run as part of
  * `bun run check`.
  */
 
@@ -39,6 +44,8 @@ const npmPackage = (server.packages ?? []).find(
   (p: { registryType?: string }) => p.registryType === 'npm'
 );
 const npmPackageVersion: string | undefined = npmPackage?.version;
+const pkgName: string = pkg.name;
+const npmPackageIdentifier: string | undefined = npmPackage?.identifier;
 const lockfileVersion: string = lockfile.version;
 const lockfileSelfVersion: string | undefined = lockfile.packages?.['']?.version;
 
@@ -51,6 +58,11 @@ if (serverVersion !== pkgVersion) {
 if (npmPackageVersion !== pkgVersion) {
   mismatches.push(
     `server.json#packages[npm].version (${npmPackageVersion}) !== package.json#version (${pkgVersion})`
+  );
+}
+if (npmPackageIdentifier !== pkgName) {
+  mismatches.push(
+    `server.json#packages[npm].identifier (${npmPackageIdentifier}) !== package.json#name (${pkgName})`
   );
 }
 if (manifestVersion !== pkgVersion) {
