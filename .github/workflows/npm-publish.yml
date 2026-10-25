@@ -243,6 +243,7 @@ jobs:
         env:
           NPM_WAIT_OUTCOME: ${{ steps.npm_wait.outcome }}
         run: |
+          set -euo pipefail
           RERUN="gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
           if [ "$NPM_WAIT_OUTCOME" = success ]; then
             MSG="The MCP Registry publish failed after npm was serving the version. Re-run only the registry steps: ${RERUN}"
