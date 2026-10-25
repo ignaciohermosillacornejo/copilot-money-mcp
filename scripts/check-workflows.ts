@@ -105,10 +105,11 @@ const WORKFLOW_DIR = process.env.CHECK_WORKFLOWS_DIR ?? join(__dirname, '../.git
  *
  * Without a ceiling the cheapest way to satisfy invariant 1 is `timeout-minutes:
  * 360` — the default, written down. That passes a presence check while changing
- * nothing, so presence alone is not the property worth gating. Every job here
- * runs in under a minute; the two AI jobs, whose runtime is dominated by an
- * external service, sit at 15 and 20. 60 leaves room for a genuinely long job
- * while making "the default wearing a hat" fail.
+ * nothing, so presence alone is not the property worth gating. Most jobs here
+ * run in under a minute; the two AI jobs, whose runtime is dominated by an
+ * external service, sit at 15 and 20, and npm-publish sits at 30 because it
+ * may wait up to 10 minutes for npm to serve a fresh version. 60 leaves room
+ * for a genuinely long job while making "the default wearing a hat" fail.
  */
 const MAX_TIMEOUT_MINUTES = 60;
 

@@ -47,14 +47,15 @@ jobs:
   publish:
     name: Publish to npm
     runs-on: ubuntu-latest
-    # Observed ~55s, and the longest chain in the repo: install, audit,
-    # typecheck, lint, the full test suite, build, `npm view`, `npm publish
-    # --provenance` (sigstore/OIDC round-trips), then a GitHub-releases curl and
-    # two mcp-publisher calls. Three external services set the pace, so it gets
-    # the widest bound — the same 20 the other externally-paced job
-    # (claude-review) carries. Bounding it at all is the point: this job holds
+    # The longest chain in the repo: install, audit, typecheck, lint, the full
+    # test suite, build, `npm view`, `npm publish --provenance` (sigstore/OIDC
+    # round-trips), up to 10 minutes waiting for npm to serve the version, then a
+    # GitHub-releases curl and two mcp-publisher calls. The work itself took
+    # about 2 minutes for v3.0.0; the wait is what sizes the bound, and 30 leaves
+    # the rest ~20 minutes of headroom so a slow npm cannot cancel a release npm
+    # already accepted. Bounding it at all is the point: this job holds
     # `id-token: write`, and 360 minutes of that is not a thing we want.
-    timeout-minutes: 20
+    timeout-minutes: 30
     # Only run for releases created by trusted publishers, or any other trigger
     # (workflow_dispatch / workflow_call) initiated by the trusted actor. Note: in a
     # workflow_call context, github.event_name reflects the calling workflow's event
@@ -127,11 +128,20 @@ jobs:
             exit 1
           fi
 
+      # Read once, so the existence check, the publish and the npm poll all name
+      # the same version.
+      - name: Read package name and version
+        id: pkg
+        run: |
+          echo "name=$(node -p "require('./package.json').name")" >> "$GITHUB_OUTPUT"
+          echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       - name: Check if version already exists on npm
         if: inputs.skip_npm != true && github.event.inputs.skip_npm != 'true'
+        env:
+          PACKAGE_NAME: ${{ steps.pkg.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.pkg.outputs.version }}
         run: |
-          PACKAGE_NAME=$(node -p "require('./package.json').name")
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
           echo "Checking if $PACKAGE_NAME@$PACKAGE_VERSION exists on npm..."
           if npm view "$PACKAGE_NAME@$PACKAGE_VERSION" version 2>/dev/null; then
             echo "Error: Version $PACKAGE_VERSION already exists on npm"
@@ -152,23 +162,32 @@ jobs:
       # v3.0.0's registry publish ran seconds after the npm publish and was
       # rejected with "version '3.0.0' was not found". Poll the exact version
       # URL the registry checks before handing off.
+      #
+      # The bound is wall-clock, not an attempt count: each curl is capped at 10s
+      # and the loop stops once 600s have passed, so the step ends within ~10
+      # minutes however slow npm answers.
       - name: Wait for npm to serve the version
         if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
         continue-on-error: true
+        env:
+          PACKAGE_NAME: ${{ steps.pkg.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.pkg.outputs.version }}
         run: |
-          PACKAGE_NAME=$(node -p "require('./package.json').name")
-          PACKAGE_VERSION=$(node -p "require('./package.json').version")
           URL="https://registry.npmjs.org/${PACKAGE_NAME}/${PACKAGE_VERSION}"
-          for attempt in $(seq 1 60); do
-            if curl -fsS -o /dev/null "$URL"; then
-              echo "npm serves ${PACKAGE_NAME}@${PACKAGE_VERSION} (attempt ${attempt})"
+          attempt=0
+          while :; do
+            attempt=$((attempt + 1))
+            if curl -fsS --max-time 10 -o /dev/null "$URL"; then
+              echo "npm serves ${PACKAGE_NAME}@${PACKAGE_VERSION} (attempt ${attempt}, ${SECONDS}s)"
               exit 0
             fi
-            echo "npm does not serve ${PACKAGE_NAME}@${PACKAGE_VERSION} yet (attempt ${attempt}/60)"
+            if [ "$SECONDS" -ge 600 ]; then
+              echo "::warning::npm still does not serve ${PACKAGE_NAME}@${PACKAGE_VERSION} after ${SECONDS}s; publishing to the MCP Registry anyway"
+              exit 1
+            fi
+            echo "npm does not serve ${PACKAGE_NAME}@${PACKAGE_VERSION} yet (attempt ${attempt}, ${SECONDS}s)"
             sleep 10
           done
-          echo "::error::npm still does not serve ${PACKAGE_NAME}@${PACKAGE_VERSION} after 10 minutes"
-          exit 1
 
       - name: Install mcp-publisher
         if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
@@ -192,10 +211,18 @@ jobs:
       # The registry steps are continue-on-error so a registry hiccup cannot fail
       # a release npm already accepted, but that also leaves the run green when
       # the registry entry was never written (v3.0.0). Say so where it is seen.
+      #
+      # success(), not always(): a failed continue-on-error step still concludes
+      # `success`, so a failure in any of the registry steps reaches this one,
+      # while a hard failure upstream (tests, build, `npm publish`) or a
+      # cancellation does not. In those cases npm is NOT fine, and the
+      # skip_npm=true advice below would register a version npm never accepted.
       - name: Report a missed MCP Registry publish
-        if: always() && inputs.dry_run != true && github.event.inputs.dry_run != 'true' && steps.registry_publish.outcome != 'success'
+        if: success() && inputs.dry_run != true && github.event.inputs.dry_run != 'true' && steps.registry_publish.outcome != 'success'
+        env:
+          REGISTRY_OUTCOME: ${{ steps.registry_publish.outcome }}
         run: |
-          MSG="The MCP Registry publish did not succeed (outcome: ${{ steps.registry_publish.outcome }}); npm is unaffected. Re-run only the registry steps: gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
+          MSG="The MCP Registry publish did not succeed (outcome: ${REGISTRY_OUTCOME}) after a successful npm publish. Re-run only the registry steps: gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
           echo "::warning::${MSG}"
           echo "### MCP Registry not updated" >> "$GITHUB_STEP_SUMMARY"
           echo "${MSG}" >> "$GITHUB_STEP_SUMMARY"
