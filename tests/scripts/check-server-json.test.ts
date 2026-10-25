@@ -41,16 +41,21 @@ const GOOD_ARG = {
   isRequired: false,
 };
 
-/** Write a synthetic server.json with these packageArguments, run the gate, clean up. */
-async function withArgs(packageArguments: unknown, description = 'A server.'): Promise<Result> {
+/** Write this value as server.json, run the gate, clean up. */
+async function withServerJson(server: unknown): Promise<Result> {
   const dir = await mkdtemp(join(tmpdir(), 'server-json-'));
   const path = join(dir, 'server.json');
   try {
-    await writeFile(path, JSON.stringify({ description, packages: [{ packageArguments }] }));
+    await writeFile(path, JSON.stringify(server));
     return await runCheck(path);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+}
+
+/** A server.json with one package carrying these packageArguments. */
+function withArgs(packageArguments: unknown, description = 'A server.'): Promise<Result> {
+  return withServerJson({ description, packages: [{ packageArguments }] });
 }
 
 describe('check:server-json', () => {
@@ -72,6 +77,7 @@ describe('check:server-json', () => {
 
   const BAD: [string, Record<string, unknown>, string][] = [
     ['an unknown type', { ...GOOD_ARG, type: 'flag' }, '.type is "flag"'],
+    ['a missing type', { ...GOOD_ARG, type: undefined }, '.type is undefined'],
     [
       'a positional with no value or valueHint',
       { type: 'positional', description: 'A path.', isRequired: true },
@@ -108,17 +114,23 @@ describe('check:server-json', () => {
   });
 
   test('reports a null package by index instead of crashing', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'server-json-'));
-    const path = join(dir, 'server.json');
-    try {
-      await writeFile(path, JSON.stringify({ description: 'A server.', packages: [null] }));
-      const { code, stderr } = await runCheck(path);
-      expect(code).toBe(1);
-      expect(stderr).toContain('packages[0] is null, expected an object');
-      expect(stderr).not.toContain('TypeError');
-    } finally {
-      await rm(dir, { recursive: true, force: true });
-    }
+    const { code, stderr } = await withServerJson({ description: 'A server.', packages: [null] });
+    expect(code).toBe(1);
+    expect(stderr).toContain('packages[0] is null, expected an object');
+    expect(stderr).not.toContain('TypeError');
+  });
+
+  test('reports a null server.json instead of crashing', async () => {
+    const { code, stderr } = await withServerJson(null);
+    expect(code).toBe(1);
+    expect(stderr).toContain('server.json is null, expected an object');
+    expect(stderr).not.toContain('TypeError');
+  });
+
+  test('reports an array argument by index', async () => {
+    const { code, stderr } = await withArgs([GOOD_ARG, []]);
+    expect(code).toBe(1);
+    expect(stderr).toContain('packages[0].packageArguments[1] is [], expected an object');
   });
 
   test('fails packageArguments that is not an array', async () => {

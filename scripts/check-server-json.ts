@@ -23,7 +23,16 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Overridable so tests can drive the real script against a synthetic server.json.
 const SERVER_JSON = process.env.CHECK_SERVER_JSON_PATH ?? join(__dirname, '../server.json');
-const server = JSON.parse(readFileSync(SERVER_JSON, 'utf-8'));
+const parsed: unknown = JSON.parse(readFileSync(SERVER_JSON, 'utf-8'));
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
+if (!isObject(parsed)) {
+  console.error(`server.json is ${JSON.stringify(parsed)}, expected an object`);
+  process.exit(1);
+}
+const server = parsed;
 
 const DESCRIPTION_MAX = 100;
 const issues: string[] = [];
@@ -36,9 +45,6 @@ if (typeof description !== 'string') {
     `description is ${description.length} chars (max ${DESCRIPTION_MAX}). The MCP registry rejects longer values with HTTP 422.`
   );
 }
-
-const isObject = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
 
 const packages: unknown = server.packages;
 if (!Array.isArray(packages)) {
