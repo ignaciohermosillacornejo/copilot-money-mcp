@@ -37,6 +37,24 @@
           "name": "--live-reads",
           "description": "Use GraphQL-backed live reads instead of the local LevelDB cache. Requires an authenticated browser session at app.copilot.money.",
           "isRequired": false
+        },
+        {
+          "type": "named",
+          "name": "--browser",
+          "description": "With --live-reads or --write: read the Copilot session from this browser only (chrome, edge, brave, firefox, safari, …), with no fallback to others.",
+          "isRequired": false
+        },
+        {
+          "type": "named",
+          "name": "--browser-profile",
+          "description": "With --browser: read the session from this profile only, by directory name or display name.",
+          "isRequired": false
+        },
+        {
+          "type": "named",
+          "name": "--browser-data-dir",
+          "description": "With --browser: use this user-data root instead of the browser's default locations. Not supported for Safari.",
+          "isRequired": false
         }
       ]
     }

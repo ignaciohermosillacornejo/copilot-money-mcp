@@ -3,13 +3,17 @@
  * Assert that the version in package.json matches the version in server.json
  * (both the top-level `version` and the npm package entry's `version`),
  * manifest.json, and package-lock.json (its root `version` and the
- * `packages[""]` self-entry `version`).
+ * `packages[""]` self-entry `version`), and that CHANGELOG.md has a
+ * `## [<version>]` section for it.
  *
  * The MCP registry entry is bound to a specific published npm version, and
  * manifest.json is the version Claude Desktop reads from the .mcpb bundle —
  * drift between any of these would leave a stale pointer or bundle after a
  * release. package-lock.json carries its own self-describing version metadata
- * that a manual `version` bump can silently miss (issue #563). Run as part of
+ * that a manual `version` bump can silently miss (issue #563). The release
+ * workflow takes the GitHub release notes from the CHANGELOG section matching
+ * the version, and v2.3.0 shipped with none (its notes were left in an empty
+ * `[Unreleased]`), so a missing section fails here too. Run as part of
  * `bun run check`.
  */
 
@@ -23,6 +27,7 @@ const pkg = JSON.parse(readFileSync(join(__dirname, '../package.json'), 'utf-8')
 const server = JSON.parse(readFileSync(join(__dirname, '../server.json'), 'utf-8'));
 const manifest = JSON.parse(readFileSync(join(__dirname, '../manifest.json'), 'utf-8'));
 const lockfile = JSON.parse(readFileSync(join(__dirname, '../package-lock.json'), 'utf-8'));
+const changelog = readFileSync(join(__dirname, '../CHANGELOG.md'), 'utf-8');
 
 const pkgVersion: string = pkg.version;
 const serverVersion: string = server.version;
@@ -60,6 +65,13 @@ if (lockfileSelfVersion !== pkgVersion) {
     `package-lock.json#packages[''].version (${lockfileSelfVersion}) !== package.json#version (${pkgVersion})`
   );
 }
+// Mirrors build-mcpb.yml's extractor: a line starting `## [` that contains `[<version>]`.
+const changelogHeading = `## [${pkgVersion}]`;
+if (!changelog.split('\n').some((line) => line.startsWith(changelogHeading))) {
+  mismatches.push(
+    `CHANGELOG.md has no "${changelogHeading}" section (the release notes are taken from it)`
+  );
+}
 
 if (mismatches.length > 0) {
   console.error('Version sync check failed:');
@@ -67,7 +79,8 @@ if (mismatches.length > 0) {
   console.error(
     '\nBump the version consistently across package.json, server.json (#version + ' +
       "#packages[npm].version), manifest.json, and package-lock.json (#version + #packages[''].version) " +
-      'to the same value before publishing.'
+      "to the same value, and move CHANGELOG.md's [Unreleased] notes under a dated " +
+      '## [<version>] heading, before publishing.'
   );
   process.exit(1);
 }

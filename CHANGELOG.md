@@ -166,6 +166,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Every tool call is validated against the tool's inputSchema at dispatch** ([#845](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/845)). Arguments a tool does not take used to be dropped in silence, so `get_categories_live {period}`, `get_budgets_live {active_only}` or `get_recurring_live {limit}` returned a normal-looking result for a filter that never ran, and `get_investment_balance_live {time_frame: "1W"}` came back as Copilot's raw 400. Now, in both modes and for every tool, an undeclared argument, a wrong type or an out-of-enum value is an error naming the argument and listing what is accepted, before any handler runs. The v3 removed arguments (`compact`, and `include_logos` on both accounts tools, `get_accounts_live` included), `get_transactions_live`'s cache-only location filters and `create_category`'s `parent_id` still reach their tool, for its more specific message. Every problem in a call is reported at once, including inside nested objects and arrays (#877 follow-up); the same problem repeated across a batch collapses to one line naming how many items share it and a few of them, even when each row's wrong value differs, and the list stops at 15 distinct problems. The tolerated arguments also skip the local-cache gate, so a pre-v3 caller of cache-mode `get_transactions {compact}` or `get_accounts {include_logos}` gets the migration hint even with no readable cache, rather than "Database not available". `get_holdings_live` gains a `fields` param (the whole row stays the default), so a field-name typo is reported in `_field_warning` as on the other tools. **Breaking for a caller that relied on extra arguments being ignored:** such a call is now an error.
 
+## [2.3.0] - 2026-07-18
+
+> Backfilled with v3.0.0: this release shipped with an empty `[Unreleased]` section, so its GitHub release fell back to default notes.
+
+### Added
+
+- **Four live investment tools:** `get_investment_allocation_live` ([#539](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/539)), `get_top_movers_live` ([#540](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/540)), `get_aggregated_holdings_live` ([#541](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/541)) and `get_investment_balance_live` ([#542](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/542)), each with its own `refresh_cache` scope.
+- **Every live read response is validated against a schema, in warn mode** ([#537](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/537)). A shape that drifts from the schema logs a warning instead of failing the call, and `get_transactions_live` skips a malformed row and counts it in a drift counter.
+
+### Fixed
+
+- **Writes resolve account and item ids through the live API**, so writes are no longer limited to transactions in the local cache's window. A per-login, append-only index of transaction routing ids is fed by live reads and persisted on disk; `split_transaction` and `create_recurring` resolve live-first ([#509](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/509)).
+- **Live caches are flushed when the signed-in account changes mid-session** ([#521](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/521)), so one login's data cannot be served to another.
+- **Wire types corrected from live responses:** several amounts, `latestBalanceUpdate` and `Security.lastUpdate` arrive as numbers, not strings ([#537](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/537), [#553](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/553)), and a `securityPrices` price can be null ([#534](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/534)).
+- **Empty routing ids are refused** at every point that feeds the routing index and on mutation inputs ([#518](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/518), [#526](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/526)).
+- **In live mode, write tools validate category and tag ids against the live data.**
+
 ## [2.2.2] - 2026-06-14
 
 ### Fixed
