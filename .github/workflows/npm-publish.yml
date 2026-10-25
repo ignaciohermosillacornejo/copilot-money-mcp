@@ -147,6 +147,29 @@ jobs:
         if: inputs.dry_run != true && github.event.inputs.dry_run != 'true' && inputs.skip_npm != true && github.event.inputs.skip_npm != 'true'
         run: npm publish --provenance --access public --verbose
 
+      # npm answers a publish with 202 ("may take a few minutes to become
+      # available"), and the registry refuses a version npm does not serve yet.
+      # v3.0.0's registry publish ran seconds after the npm publish and was
+      # rejected with "version '3.0.0' was not found". Poll the exact version
+      # URL the registry checks before handing off.
+      - name: Wait for npm to serve the version
+        if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
+        continue-on-error: true
+        run: |
+          PACKAGE_NAME=$(node -p "require('./package.json').name")
+          PACKAGE_VERSION=$(node -p "require('./package.json').version")
+          URL="https://registry.npmjs.org/${PACKAGE_NAME}/${PACKAGE_VERSION}"
+          for attempt in $(seq 1 60); do
+            if curl -fsS -o /dev/null "$URL"; then
+              echo "npm serves ${PACKAGE_NAME}@${PACKAGE_VERSION} (attempt ${attempt})"
+              exit 0
+            fi
+            echo "npm does not serve ${PACKAGE_NAME}@${PACKAGE_VERSION} yet (attempt ${attempt}/60)"
+            sleep 10
+          done
+          echo "::error::npm still does not serve ${PACKAGE_NAME}@${PACKAGE_VERSION} after 10 minutes"
+          exit 1
+
       - name: Install mcp-publisher
         if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
         continue-on-error: true
@@ -161,6 +184,18 @@ jobs:
         run: ./mcp-publisher login github-oidc
 
       - name: Publish to MCP Registry
+        id: registry_publish
         if: inputs.dry_run != true && github.event.inputs.dry_run != 'true'
         continue-on-error: true
         run: ./mcp-publisher publish
+
+      # The registry steps are continue-on-error so a registry hiccup cannot fail
+      # a release npm already accepted, but that also leaves the run green when
+      # the registry entry was never written (v3.0.0). Say so where it is seen.
+      - name: Report a missed MCP Registry publish
+        if: always() && inputs.dry_run != true && github.event.inputs.dry_run != 'true' && steps.registry_publish.outcome != 'success'
+        run: |
+          MSG="The MCP Registry publish did not succeed (outcome: ${{ steps.registry_publish.outcome }}); npm is unaffected. Re-run only the registry steps: gh workflow run npm-publish.yml --ref main -f skip_npm=true -f dry_run=false"
+          echo "::warning::${MSG}"
+          echo "### MCP Registry not updated" >> "$GITHUB_STEP_SUMMARY"
+          echo "${MSG}" >> "$GITHUB_STEP_SUMMARY"
