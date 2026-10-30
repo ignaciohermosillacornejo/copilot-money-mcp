@@ -247,7 +247,10 @@ function wholeLines(...ls: readonly string[]): string {
  * Bar for entry: violating it writes wrong data to a real financial account (or
  * sends an unbounded write), AND a named test file detects the violation. Both
  * halves are enforced — the second by this runner, so an entry cannot be added
- * on the strength of a claim.
+ * on the strength of a claim. A row outside that class says so in its own
+ * `invariant` text and gives its reason — see `the internal income flag is
+ * never returned` and `a thrown tool error reaches the client without the
+ * username`.
  *
  * Deliberately absent: the SECOND `stopOnError` check in `runBoundedPool`, the
  * one inside the `catch`. It keeps only the first recorded failure, but the
@@ -960,7 +963,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       'Cache rows must never carry the decoded `income` flag (#854). It exists only so the ' +
       'shared transaction_type rules can recognise an INCOME row in cache mode; live rows ' +
       'have no such field, so surfacing it reopens the cache/live field-name divergence ' +
-      '#843 closed. Not a write-safety invariant like the rows above: registered at review ' +
+      '#843 closed. Not a write-safety invariant: registered at review ' +
       'request because it is a one-line strip whose only other defence is a type.',
     mutation: {
       kind: 'replace',
