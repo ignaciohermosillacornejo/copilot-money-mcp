@@ -777,7 +777,9 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       'Discovery is deferred to the first cache access (#895). That access must report what ' +
       'its own look found: falling through to the transient-failure retry would walk the ' +
       'Copilot container twice inside one call, doubling the interrupt bound, and silently ' +
-      'change which access is allowed to retry.',
+      'change which access is allowed to retry. Not a write-safety invariant: a local-cache ' +
+      'discovery one, registered at review request because its violation is invisible to ' +
+      'every observable except the syscall count.',
     mutation: {
       kind: 'replace',
       find:
