@@ -15,7 +15,7 @@
 **This is an independent, community-driven project and is not affiliated with, endorsed by, or associated with Copilot Money or its parent company in any way.** This tool was created by an independent developer to enable AI-powered queries of locally cached data. "Copilot Money" is a trademark of its respective owner.
 
 > [!NOTE]
-> **Copilot Money now has an official MCP server.** It is read-only for now (Copilot says write support is coming in the future) and connects to Claude, ChatGPT, Cursor and other MCP clients over OAuth. If a first-party, read-only integration suits your needs, you should strongly consider using it instead of this community project. Setup instructions: [Setting up the MCP](https://help.copilot.money/en/articles/14758080-setting-up-the-mcp).
+> **Copilot Money now has an official MCP server.** It is read-only, with write support announced as coming later, and connects to MCP clients over OAuth. If a first-party, read-only integration suits your needs, you should strongly consider using it instead of this community project. Setup instructions: [Setting up the MCP](https://help.copilot.money/en/articles/14758080-setting-up-the-mcp).
 >
 > This project remains useful if you need write tools today (categorize transactions, manage budgets, edit recurrings, etc.) or fully offline cache-mode reads with zero network requests.
 
