@@ -771,6 +771,25 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/unit/delete-split-parent.test.ts',
   },
   {
+    name: 'the first discovery keeps its own outcome',
+    file: 'src/core/database.ts',
+    invariant:
+      'Discovery is deferred to the first cache access (#895). That access must report what ' +
+      'its own look found: falling through to the transient-failure retry would walk the ' +
+      'Copilot container twice inside one call, doubling the interrupt bound, and silently ' +
+      'change which access is allowed to retry.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '      // mutation-guard: the first discovery keeps its own outcome\n' + '      return;\n',
+      with: '      // mutation-guard: the first discovery keeps its own outcome\n',
+    },
+    expectFailingTests: [
+      'a transient first lookup makes exactly one discovery attempt, not a retry too',
+    ],
+    expectFails: 'tests/core/database-lazy-startup.test.ts',
+  },
+  {
     name: 'split-parent evidence honours the cache TTL',
     file: 'src/core/database.ts',
     invariant:

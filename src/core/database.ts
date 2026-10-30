@@ -434,6 +434,7 @@ export class CopilotDatabase {
       this.dbPath = discovery.path;
       this.discoveryError = discovery.lookupError;
       this.discoveryHome = discovery.home;
+      // mutation-guard: the first discovery keeps its own outcome
       return;
     }
     if (this.dbPath || !this.discoveryHome || !isRetryableErrno(this.discoveryError)) return;
