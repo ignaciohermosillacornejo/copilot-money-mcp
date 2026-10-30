@@ -22,7 +22,7 @@ function run(body: string): void {
     import assert from 'node:assert/strict';
     import fs from 'node:fs';
     import { homedir } from 'node:os';
-    import { CopilotDatabase } from './src/core/database.ts';
+    import { CopilotDatabase, discoverCopilotDatabase } from './src/core/database.ts';
     import { CopilotMoneyServer } from './src/server.ts';
     const home = homedir();
     const main = home + '/Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT/copilot-production-test/main';
@@ -72,6 +72,13 @@ test('first lookup preserves transient error and subsequent access retries', () 
     assert.equal(db.availability().lookupError.code, 'EINTR');
     const firstWalks = walks; assert.ok(firstWalks > 0);
     fault = undefined; assert.equal(db.getDbPath(), main); assert.ok(walks > firstWalks);`);
+});
+
+test('a transient first lookup makes exactly one discovery attempt, not a retry too', () => {
+  run(`fault = 'EINTR';
+    discoverCopilotDatabase(home); const oneAttempt = walks; assert.ok(oneAttempt > 0);
+    walks = 0; assert.equal(new CopilotDatabase().availability().lookupError.code, 'EINTR');
+    assert.equal(walks, oneAttempt);`);
 });
 
 test('settled absence does not rewalk', () => {
