@@ -434,7 +434,6 @@ export class CopilotDatabase {
       this.dbPath = discovery.path;
       this.discoveryError = discovery.lookupError;
       this.discoveryHome = discovery.home;
-      // Preserve this request's outcome; only a subsequent access may retry.
       return;
     }
     if (this.dbPath || !this.discoveryHome || !isRetryableErrno(this.discoveryError)) return;
@@ -1703,11 +1702,11 @@ export class CopilotDatabase {
   /**
    * Get database path, or undefined if not found.
    *
-   * Re-looks after a retryable discovery failure, like `availability()` and
-   * `requireDbPath()`, so every reader of the path sees the same answer and
-   * call-site ordering cannot matter. `smoke:cache` read this before
-   * `availability()`, and without the re-look here it reported "no cache" for
-   * a cache the very next line had found.
+   * Runs the deferred first discovery and re-looks after a retryable failure,
+   * like `availability()` and `requireDbPath()`, so every reader of the path
+   * sees the same answer and call-site ordering cannot matter. `smoke:cache`
+   * read this before `availability()`, and without the re-look here it
+   * reported "no cache" for a cache the very next line had found.
    */
   getDbPath(): string | undefined {
     this.ensureDiscovered();
