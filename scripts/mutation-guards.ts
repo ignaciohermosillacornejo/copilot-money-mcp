@@ -248,9 +248,9 @@ function wholeLines(...ls: readonly string[]): string {
  * sends an unbounded write), AND a named test file detects the violation. Both
  * halves are enforced — the second by this runner, so an entry cannot be added
  * on the strength of a claim. A row outside that class says so in its own
- * `invariant` text and gives its reason — see `the internal income flag is
- * never returned` and `a thrown tool error reaches the client without the
- * username`.
+ * `invariant` text and names the class it belongs to instead — see `the
+ * internal income flag is never returned` and `a thrown tool error reaches the
+ * client without the username`.
  *
  * Deliberately absent: the SECOND `stopOnError` check in `runBoundedPool`, the
  * one inside the `catch`. It keeps only the first recorded failure, but the
@@ -1049,7 +1049,8 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       'With continue_on_error, update_transactions RETURNS per-row failure messages in a ' +
       "success-shaped result, so they never pass the redaction at handleCallTool's catch, " +
       'which only sees thrown errors. They are redacted where they are built; without it ' +
-      'an fs path in a row error discloses the username to the client.',
+      'an fs path in a row error discloses the username to the client. Not a write-safety ' +
+      'invariant: a disclosure one in a returned result.',
     mutation: {
       kind: 'replace',
       find:
