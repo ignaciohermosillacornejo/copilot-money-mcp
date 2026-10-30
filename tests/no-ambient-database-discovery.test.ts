@@ -522,9 +522,9 @@ describe('no test discovers the real Copilot database', () => {
     // see — the failure mode this project files under `silent-under-collecting-scan`.
     expect(
       discoveryCallSites(databaseSource),
-      `src/core/database.ts must call findCopilotDatabase() from rediscoverIfTransient and nowhere ` +
+      `src/core/database.ts must call findCopilotDatabase() from ensureDiscovered and nowhere ` +
         `else, or the sweep below stops being an exact statement about what tests can reach.`
-    ).toEqual(['method rediscoverIfTransient']);
+    ).toEqual(['method ensureDiscovered']);
     expect(
       discoveryExports(databaseSource),
       'findCopilotDatabase() must stay module-private. Exported under ANY spelling — a ' +

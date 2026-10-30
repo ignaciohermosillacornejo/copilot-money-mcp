@@ -373,7 +373,7 @@ export class CopilotDatabase {
    * Get the database path, throwing if not available.
    */
   private requireDbPath(): string {
-    this.rediscoverIfTransient();
+    this.ensureDiscovered();
     if (!this.dbPath) {
       throw missingDatabaseError(this.discoveryError);
     }
@@ -396,7 +396,7 @@ export class CopilotDatabase {
    * gated, so the collapse is not an API anyone can reach for.
    */
   availability(): { available: boolean; lookupError?: Error } {
-    this.rediscoverIfTransient();
+    this.ensureDiscovered();
     // Copied to a local: `this.dbPath` does not stay narrowed inside the closure.
     const dbPath = this.dbPath;
     if (!dbPath) return { available: false, lookupError: this.discoveryError };
@@ -414,17 +414,20 @@ export class CopilotDatabase {
   }
 
   /**
-   * Look again when no-path discovery failed with a retryable errno.
+   * Run no-path discovery on the first cache access, and look again later only
+   * when that look failed with a retryable errno.
    *
-   * Discovery first runs on cache access, never during startup. Previously its
-   * error was served on every later call without a syscall, so its own advice —
-   * the read was interrupted, retry the request — could never change the
-   * answer; only restarting the server could. A retryable failure is by
-   * definition one a later look may settle, so it gets that look. A persistent
-   * one (`EACCES`/`EPERM`) is still served from memory: its message says to fix
+   * Discovery never runs during startup: construction, `tools/list` and live
+   * reads must not touch the Copilot container. The first access keeps its own
+   * outcome; only a later one retries. Previously a discovery error was served
+   * on every later call without a syscall, so its own advice — the read was
+   * interrupted, retry the request — could never change the answer; only
+   * restarting the server could. A retryable failure is by definition one a
+   * later look may settle, so it gets that look. A persistent one
+   * (`EACCES`/`EPERM`) is still served from memory: its message says to fix
    * permissions, and re-walking the container on every call would not help.
    */
-  private rediscoverIfTransient(): void {
+  private ensureDiscovered(): void {
     if (this.discoveryPending) {
       this.discoveryPending = false;
       const discovery = findCopilotDatabase();
@@ -1707,7 +1710,7 @@ export class CopilotDatabase {
    * a cache the very next line had found.
    */
   getDbPath(): string | undefined {
-    this.rediscoverIfTransient();
+    this.ensureDiscovered();
     return this.dbPath;
   }
 
