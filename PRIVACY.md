@@ -31,7 +31,7 @@ Both `--live-reads` and `--write` send authenticated requests to Copilot Money's
 
 Each provider has its own privacy policy, data retention, and training-data practices, which apply to this data once it is transmitted. This project has no control over how those providers handle your data.
 
-**By using this MCP server with a hosted AI model, you are knowingly and voluntarily sharing your financial data with the provider of that model. You must be comfortable with that trade-off.** If you are not, do not use this tool — consider waiting for an official Copilot Money integration, or running a fully local model that does not transmit data off your machine.
+**By using this MCP server with a hosted AI model, you are knowingly and voluntarily sharing your financial data with the provider of that model. You must be comfortable with that trade-off.** If you are not, do not use this tool — consider running a fully local model that does not transmit data off your machine.
 
 ## Data Collection
 
