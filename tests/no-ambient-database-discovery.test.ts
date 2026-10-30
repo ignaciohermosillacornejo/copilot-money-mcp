@@ -109,9 +109,9 @@
  * computed in another statement (`const h = homedir();
  * discoverCopilotDatabase(h)`) or `process.env.HOME` passes. Fail-open in that
  * direction. One instance exists: `tests/core/database-lazy-startup.test.ts`
- * calls it with `homedir()` from a spawned child, inside a template literal the
- * sweep cannot parse. What keeps that honest is the child's `HOME`, a `mkdtemp`
- * directory, not this sweep.
+ * calls it with `homedir()` from a spawned child, inside a template literal, so
+ * the AST walk sees a string token rather than a call. What keeps that honest
+ * is the child's `HOME`, a `mkdtemp` directory, not this sweep.
  * Inside `src/`, `CopilotDatabase` itself calls the walker again with the home
  * it recorded at construction, when a retryable discovery failure is retried;
  * `src/` is not swept, and that home is the same one the constructor used.
