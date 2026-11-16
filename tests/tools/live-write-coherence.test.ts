@@ -45,6 +45,7 @@ import {
   type WriteRowField,
 } from '../../src/tools/live/transactions.js';
 import { LiveBalanceHistoryTools } from '../../src/tools/live/balance-history.js';
+import { GraphQLError, unusablePayloadError } from '../../src/core/graphql/client.js';
 import { TOOL_REGISTRY, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.js';
 import * as transactionRegistry from '../../src/tools/registry/transactions.js';
 import type { LiveToolContext, ToolContext } from '../../src/tools/registry/types.js';
@@ -1286,10 +1287,11 @@ describe('a transaction write that throws leaves the next read to the server (#8
 // snapshot LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS names, on
 // success and on a throw alike; same derived tool key set.
 
-/** Every snapshot some write family drops: transaction- or recurring-derived. */
+/** Every snapshot some write family drops: transaction-, recurring- or category-derived. */
 type SnapshotKey =
   | (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number]
-  | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number];
+  | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number]
+  | (typeof LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS)[number];
 
 /**
  * How to warm and inspect each named snapshot. A key added to the list
@@ -1335,7 +1337,7 @@ const SNAPSHOT_PROBES: Record<
       });
     },
     // Undefined once empty, like a dropped SnapshotCache.
-    peek: (db) => (db.getBalanceHistoryCache().size > 0 ? db.getBalanceHistoryCache() : undefined),
+    peek: (db) => (db.getBalanceHistoryCache().size > 0 ? true : undefined),
   },
 };
 
@@ -1766,13 +1768,16 @@ describe('a malformed returned row is never cached (#864 review)', () => {
 // fails the scope-classification tests until a family list names it or
 // exempts it with a reason.
 
-type WriteFamily = 'transaction' | 'recurring' | 'reference';
+type WriteFamily = 'transaction' | 'recurring' | 'category' | 'reference';
 
 const FAMILY_DROPS: Record<WriteFamily, readonly SnapshotKey[]> = {
   transaction: LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS,
   recurring: LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS,
-  // Categories, tags and budgets: each write patches its own reference
-  // snapshot (categories / tags), which none of the probed ones derives from.
+  // update_category, delete_category, set_budget: monthly spend's budget
+  // comparison and its category-based exclusions (#911 review).
+  category: LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS,
+  // create_category and the tag writes: a new category holds no rows, and no
+  // probed snapshot is computed from tags. Each patches its own snapshot.
   reference: [],
 };
 
@@ -1829,7 +1834,7 @@ const NON_TRANSACTION_WRITES: Record<
     args: { name: 'Pets', color_name: 'BLUE1', emoji: '🐶' },
   },
   update_category: {
-    family: 'reference',
+    family: 'category',
     mocks: {
       EditCategory: {
         editCategory: { category: { id: CAT_OLD, name: 'Food', colorName: 'RED1' } },
@@ -1838,12 +1843,12 @@ const NON_TRANSACTION_WRITES: Record<
     args: { category_id: CAT_OLD, name: 'Food' },
   },
   delete_category: {
-    family: 'reference',
+    family: 'category',
     mocks: { DeleteCategory: { deleteCategory: true } },
     args: { category_id: CAT_NEW },
   },
   set_budget: {
-    family: 'reference',
+    family: 'category',
     mocks: { EditBudget: { editCategoryBudget: true } },
     args: { category_id: CAT_OLD, amount: '100' },
   },
@@ -1884,6 +1889,11 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
     const writeTools = WRITE_TOOL_DEFS.map((def) => def.name).sort();
     expect(writeTools.length).toBeGreaterThan(0);
     expect(Object.keys(WRITE_TABLE).sort()).toEqual(writeTools);
+    // No tool in both source tables: the spread would silently make it a
+    // transaction write with the key set unchanged.
+    expect(Object.keys(WRITE_TABLE).length).toBe(
+      Object.keys(NON_TRANSACTION_WRITES).length + Object.keys(CASES).length
+    );
   });
 
   test("every derived snapshot has a probe, and every probe is some family's", () => {
@@ -1891,21 +1901,33 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
     expect(Object.keys(SNAPSHOT_PROBES).sort()).toEqual([...derived].sort());
   });
 
-  test('every refresh_cache scope is classified for recurring writes too', () => {
-    const scopeSchema = TOOL_REGISTRY.get('refresh_cache')!.schema.inputSchema.properties as {
-      scope: { enum: string[] };
-    };
-    const scopes = scopeSchema.scope.enum.filter((sc) => sc !== 'all').sort();
-    const dropped: readonly string[] = LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS;
-    const exempt = Object.keys(LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES);
-    expect(dropped.filter((k) => exempt.includes(k))).toEqual([]);
-    expect([...dropped, ...exempt].sort()).toEqual(scopes);
-    for (const reason of Object.values(
-      LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES
-    )) {
-      expect(reason.length).toBeGreaterThan(0);
+  test.each([
+    [
+      'recurring',
+      LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS,
+      LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES,
+    ],
+    [
+      'category',
+      LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS,
+      LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_CATEGORY_WRITES,
+    ],
+  ] as const)(
+    'every refresh_cache scope is classified for %s writes too',
+    (_family, droppedList, exemptions) => {
+      const scopeSchema = TOOL_REGISTRY.get('refresh_cache')!.schema.inputSchema.properties as {
+        scope: { enum: string[] };
+      };
+      const scopes = scopeSchema.scope.enum.filter((sc) => sc !== 'all').sort();
+      const dropped: readonly string[] = droppedList;
+      const exempt = Object.keys(exemptions);
+      expect(dropped.filter((k) => exempt.includes(k))).toEqual([]);
+      expect([...dropped, ...exempt].sort()).toEqual(scopes);
+      for (const reason of Object.values(exemptions)) {
+        expect(reason.length).toBeGreaterThan(0);
+      }
     }
-  });
+  );
 
   test.each(Object.keys(WRITE_TABLE))(
     "%s: success drops exactly its family's snapshots",
@@ -1937,6 +1959,41 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
 
     expect((await read())._cache_hit).toBe(false);
     expect(fetches()).toBeGreaterThan(before);
+  });
+
+  test('create_recurring links its seed row in the local cache too (#911 review)', async () => {
+    const c = WRITE_TABLE.create_recurring!;
+    const { call, local } = setup(c.mocks);
+    expect(local(TX_RECURRING)?.recurring_id).toBeUndefined();
+
+    await call('create_recurring', c.args);
+
+    expect(local(TX_RECURRING)?.recurring_id).toBe(RECURRING_ID);
+  });
+
+  test("a create_recurring that may have applied drops the seed row's month too (#911 review)", async () => {
+    const { call, read, fetches } = setup({
+      CreateRecurring: unusablePayloadError('CreateRecurring', 'createRecurring', null),
+    });
+    await read();
+    const before = fetches();
+
+    await expect(call('create_recurring', WRITE_TABLE.create_recurring!.args)).rejects.toThrow();
+
+    expect((await read())._cache_hit).toBe(false);
+    expect(fetches()).toBeGreaterThan(before);
+  });
+
+  test("a create_recurring that cannot have written keeps the seed row's month (#911 review)", async () => {
+    const rejected = new GraphQLError('USER_ACTION_REQUIRED', 'nope', 'CreateRecurring', 200, [], {
+      requestReachedServer: true,
+    });
+    const { call, read } = setup({ CreateRecurring: rejected });
+    await read();
+
+    await expect(call('create_recurring', WRITE_TABLE.create_recurring!.args)).rejects.toThrow();
+
+    expect((await read())._cache_hit).toBe(true);
   });
 
   test('get_balance_history_live refetches after a transaction write (#870)', async () => {

@@ -765,6 +765,30 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'are not known by id, so their cached live months are left to their TTL.',
   },
   {
+    surface: 'Mutation.editRecurring:recategorizes-series',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      "ASSUMED (#911 review): changing a recurring's category may recategorize the series' " +
+      'transactions, as linking one sets its category (Mutation.addTransactionToRecurring:' +
+      'sets-category). Not probed. update_recurring drops the monthly-spend snapshot ' +
+      '(LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS); the rows are not known by id, so ' +
+      'their cached live months are left to their TTL.',
+  },
+  {
+    surface: 'Mutation.deleteCategory:uncategorizes-transactions',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'ASSUMED (#911 review): deleting a category leaves its transactions uncategorized, which ' +
+      'takes them out of the monthly-spend total (it leaves out uncategorized rows, measured ' +
+      '#844). Not probed. delete_category drops the monthly-spend snapshot ' +
+      '(LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS); the rows are not known by id, so ' +
+      'their cached live months are left to their TTL.',
+  },
+  {
     surface: 'Mutation.addTransactionToRecurring:sets-category',
     kind: 'operation',
     oracle: null,

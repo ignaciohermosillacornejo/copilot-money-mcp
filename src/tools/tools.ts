@@ -918,7 +918,12 @@ export class CopilotMoneyTools {
     const live = this.liveDb;
     // A Record, so a new scope is a type error here rather than a silent miss.
     const drop: Record<typeof scope, () => void> = {
-      categories: () => live.getCategoriesCache().invalidate(),
+      // Every category write, create included: a create holds no rows, so
+      // dropping monthly_spend after one costs a refetch and nothing else.
+      categories: () => {
+        live.getCategoriesCache().invalidate();
+        live.invalidateCategoryDerivedSnapshots();
+      },
       tags: () => live.getTagsCache().invalidate(),
       recurring: () => {
         live.getRecurringCache().invalidate();
@@ -944,6 +949,16 @@ export class CopilotMoneyTools {
    */
   private afterRecurringWrite(): void {
     this.liveDb?.invalidateRecurringDerivedSnapshots();
+  }
+
+  /**
+   * After an update, delete or budget write to a category the server
+   * ACCEPTED: drop the live snapshots it can have made stale
+   * (LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS). The categories snapshot
+   * itself is patched by each write.
+   */
+  private afterCategoryWrite(): void {
+    this.liveDb?.invalidateCategoryDerivedSnapshots();
   }
 
   /** YYYY-MM of `date` when it is a string long enough to have one. */
@@ -5840,6 +5855,7 @@ export class CopilotMoneyTools {
           this.liveDb.patchLiveCategoryUpsert(merged);
         }
       }
+      this.afterCategoryWrite();
       return {
         success: true,
         category_id: result.id,
@@ -5865,6 +5881,7 @@ export class CopilotMoneyTools {
       const result = await gqlDeleteCategory(client, { id: args.category_id });
       this.db.patchCachedCategoryDelete(args.category_id);
       this.liveDb?.patchLiveCategoryDelete(args.category_id);
+      this.afterCategoryWrite();
       return { success: true, category_id: result.id, deleted: true };
     } catch (e) {
       this.afterPossiblyAppliedEntityWrite(e, 'categories');
@@ -5926,6 +5943,7 @@ export class CopilotMoneyTools {
         this.db.patchCachedBudget(args.category_id, parseFloat(args.amount), args.month);
         this.liveDb?.patchLiveCategoryBudget(args.category_id, parseFloat(args.amount), args.month);
       }
+      this.afterCategoryWrite();
       return {
         success: true,
         category_id: result.categoryId,
@@ -6196,8 +6214,12 @@ export class CopilotMoneyTools {
         payments: [],
       });
       // The seed row now belongs to the series (unverified:
-      // Mutation.createRecurring:links-seed-transaction), so its cached month
-      // would keep serving it unlinked; the next read refetches it.
+      // Mutation.createRecurring:links-seed-transaction). Locally only the
+      // link is patched: the response carries no category, so the one
+      // add_transaction_to_recurring takes from its returned row (#848) is
+      // not known here. The live month is dropped, so the next read refetches
+      // the row whole.
+      this.db.patchCachedTransaction(args.transaction_id, { recurring_id: result.id });
       this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);
       this.afterRecurringWrite();
       return {
@@ -6208,6 +6230,11 @@ export class CopilotMoneyTools {
         frequency: result.frequency,
       };
     } catch (e) {
+      // A create that may have landed may have linked the seed row too; the
+      // generic helper below has no transaction id, so its month goes here.
+      if (e instanceof GraphQLError && e.writeMayHaveApplied) {
+        this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);
+      }
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
