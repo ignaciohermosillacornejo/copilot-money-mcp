@@ -585,59 +585,50 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
     return null;
   }
 
-  // Extract segments by parsing the binary structure directly
-  // Pattern: 0x00 0x01 0xBE followed by string, then 0x00 0x01 or 0x80 (end)
+  // Walk the components after the table name. Every component is accounted
+  // for: 0x80 ends the key, 0xBE is a string segment, and anything else (a
+  // non-string label, or running off the end of a truncated key) rejects the
+  // key. Skipping a component would let path parity be satisfied by
+  // subtraction, which is exactly how `remote_document_read_time` keys, a
+  // numeric read time followed by a string path, parsed as documents (#807).
   const segments: string[] = [];
-  let pos = remoteDocIndex + remoteDocStr.length;
+  // At the table name's 0x00 0x01 terminator, checked above.
+  let pos = tableEnd;
 
-  while (pos < keyBuffer.length) {
-    // Look for separator: 0x00 0x01
-    if (keyBuffer[pos] === 0x00 && pos + 1 < keyBuffer.length && keyBuffer[pos + 1] === 0x01) {
-      pos += 2;
-
-      // Check for 0xBE (string segment marker) or 0x80 (end marker)
-      if (pos < keyBuffer.length) {
-        if (keyBuffer[pos] === 0x80) {
-          // End of key
-          break;
-        }
-        if (keyBuffer[pos] === 0xbe) {
-          pos++;
-          // The string runs to its 0x00 0x01 terminator. It used to stop at
-          // 0x80 too and keep only printable ASCII, but 0x80 is a UTF-8
-          // continuation byte and a non-ASCII segment is still a segment:
-          // dropping one flips path parity and, with the parity check below,
-          // would drop a real document silently (#807).
-          let strEnd = pos;
-          while (strEnd < keyBuffer.length && keyBuffer[strEnd] !== 0x00) {
-            strEnd++;
-          }
-          // A segment that cannot be read makes the whole key unreadable.
-          // Skipping it and carrying on would let parity be satisfied by
-          // subtraction: `users/u1/<truncated>` would come back as the
-          // different document `users/u1` (#807). So an empty segment, one
-          // with no terminator (a truncated key) or one holding a control
-          // character rejects the key. Invalid UTF-8 inside a segment decodes
-          // lossily (U+FFFD): the id no longer round-trips, but the segment
-          // still counts, so parity holds.
-          // The terminator is 0x00 0x01; a 0x00 followed by anything else
-          // (0x00 0xFF is ordered-code's escaped NUL) means the segment goes
-          // on past where this scan stopped, so reading up to it would
-          // truncate the segment in place and keep the count.
-          if (strEnd <= pos || strEnd + 1 >= keyBuffer.length || keyBuffer[strEnd + 1] !== 0x01) {
-            return null;
-          }
-          const str = keyBuffer.slice(pos, strEnd).toString('utf8');
-          if (hasControlCharacter(str)) {
-            return null;
-          }
-          segments.push(str);
-          pos = strEnd;
-        }
-      }
-    } else {
-      pos++;
+  for (;;) {
+    pos += 2; // past a component's 0x00 0x01 terminator
+    const label = keyBuffer[pos];
+    if (label === 0x80) {
+      break; // end of key
     }
+    if (label !== 0xbe) {
+      return null;
+    }
+    pos++;
+    // The string runs to its 0x00 0x01 terminator. It used to stop at 0x80 too
+    // and keep only printable ASCII, but 0x80 is a UTF-8 continuation byte and
+    // a non-ASCII segment is still a segment (#807).
+    let strEnd = pos;
+    while (strEnd < keyBuffer.length && keyBuffer[strEnd] !== 0x00) {
+      strEnd++;
+    }
+    // A segment that cannot be read makes the whole key unreadable, for the
+    // same reason as an unknown label: `users/u1/<truncated>` must not come
+    // back as the different document `users/u1`. So an empty segment, one
+    // whose 0x00 is not followed by 0x01 (no terminator, or 0x00 0xFF, which
+    // is ordered-code's escaped NUL and means the segment goes on), and one
+    // holding a control character all reject the key. Invalid UTF-8 inside a
+    // segment decodes lossily (U+FFFD): the id no longer round-trips, but the
+    // segment still counts, so parity holds.
+    if (strEnd <= pos || strEnd + 1 >= keyBuffer.length || keyBuffer[strEnd + 1] !== 0x01) {
+      return null;
+    }
+    const str = keyBuffer.slice(pos, strEnd).toString('utf8');
+    if (hasControlCharacter(str)) {
+      return null;
+    }
+    segments.push(str);
+    pos = strEnd;
   }
 
   // Need at least: collection, doc_id. A document path has an even number of
@@ -938,9 +929,11 @@ export function isDocumentPathParity(collection: string): boolean {
 /**
  * Is this yielded document key from the `remote_document` table itself (#807)?
  *
- * True when the first `remote_document` in the key is followed by the binary
- * component terminator (`0x00`) or, in the string-path format test databases
- * use, by `/`. A key from a sibling table such as `remote_document_read_time`
+ * True when the first `remote_document` in the key is followed by `0x00` (the
+ * start of the binary component terminator) or, in the string-path format test
+ * databases use, by `/`. Deliberately weaker than the parser, which requires
+ * the full `0x00 0x01`: everything the parser accepts passes this, so the
+ * `smoke:cache` oracle cannot pass merely by agreeing with the parser. A key from a sibling table such as `remote_document_read_time`
  * fails it. `smoke:cache` uses this as an oracle that does not go through the
  * key parser's own table check.
  */

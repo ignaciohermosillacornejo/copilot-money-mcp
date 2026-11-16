@@ -363,10 +363,26 @@ describe('leveldb-reader', () => {
         expect(parseDocumentKey(key)).toBeNull();
       });
 
-      test('auditDocumentTable refuses a missing path like iterateDocuments does', async () => {
-        await expect(auditDocumentTable(path.join(FIXTURES_DIR, 'no-such-db'))).rejects.toThrow(
-          'Database path not found'
-        );
+      test('a non-string component rejects the key rather than being skipped', () => {
+        // The read_time shape inside the right table: a non-string component
+        // before an even string path. Skipping it would return users/{ITEM}.
+        const key = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          Buffer.from([0x90, 0x81, 0x02, 0x00, 0x01]),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, ITEM),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(key)).toBeNull();
+      });
+
+      test('a key with no end marker rejects', () => {
+        const key = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, ITEM),
+        ]);
+        expect(parseDocumentKey(key)).toBeNull();
       });
 
       test('a table name followed by 0x00 and a byte other than 0x01 is not the table', () => {
@@ -417,6 +433,18 @@ describe('leveldb-reader', () => {
             Buffer.from('remote_document/projects/p/databases/(default)/documents/users/u1', 'utf8')
           )
         ).toEqual({ collection: 'users', documentId: 'u1' });
+      });
+
+      test('auditDocumentTable refuses a missing path like iterateDocuments does', async () => {
+        await expect(auditDocumentTable(path.join(FIXTURES_DIR, 'no-such-db'))).rejects.toThrow(
+          'Database path not found'
+        );
+      });
+
+      test('auditDocumentTable refuses a file like iterateDocuments does', async () => {
+        const file = path.join(FIXTURES_DIR, 'not-a-db');
+        fs.writeFileSync(file, '');
+        await expect(auditDocumentTable(file)).rejects.toThrow('Path is not a directory');
       });
 
       test('isDocumentTableKey tells the document table from its sibling', () => {

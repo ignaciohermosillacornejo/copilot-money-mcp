@@ -31,6 +31,7 @@ import {
   isDocumentPathParity,
 } from '../../src/core/leveldb-reader.js';
 import type { DocumentTableAudit } from '../../src/core/leveldb-reader.js';
+import { redactUserPaths } from '../../src/utils/redact-paths.js';
 import {
   decodeAllCollections,
   decodeTransactions,
@@ -866,10 +867,17 @@ async function main(): Promise<void> {
   // must first be established that what it yields are documents. Reported before
   // the raw-scan line, whose count is only meaningful if this holds.
   // ---------------------------------------------------------------------
-  const keyVerdict = reportDocumentKeyShape(
-    { ...keyShape, yielded: scanned },
-    await auditDocumentTable(dbPath)
-  );
+  // A failed audit must not abort the smoke before any check is printed. An
+  // empty audit FAILs check 0 through its range guard, and the rest still run.
+  let audit: DocumentTableAudit = { tableKeys: 0, rejectedNonEmpty: 0 };
+  try {
+    audit = await auditDocumentTable(dbPath);
+  } catch (err: unknown) {
+    console.error(
+      `[cache-smoke] document table audit failed: ${redactUserPaths(err instanceof Error ? err.message : String(err))}`
+    );
+  }
+  const keyVerdict = reportDocumentKeyShape({ ...keyShape, yielded: scanned }, audit);
   record('document key shape', keyVerdict.status, keyVerdict.detail);
 
   record(
