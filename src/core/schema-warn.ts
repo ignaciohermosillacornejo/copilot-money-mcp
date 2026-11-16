@@ -216,7 +216,10 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
   // pre-#902 drop, a nested path in a `schema drop` warn with no hint that a
   // repair ran. Say so separately.
   if (repair.reason !== 'top-level') {
-    const key = `${ctx.collection}::gave-up::${repair.reason}`;
+    // Keyed by the drop's own failure shape too, like the `schema drop` warn
+    // it accompanies, so a second distinct shape still gets its companion.
+    const shape = dedupeShape(result.error.issues[0]?.path.join('.') ?? '');
+    const key = `${ctx.collection}::gave-up::${repair.reason}::${shape}`;
     if (!warnedNestedKeys.has(key)) {
       warnedNestedKeys.add(key);
       const why =

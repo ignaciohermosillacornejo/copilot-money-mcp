@@ -29,7 +29,8 @@
  *      so the node that encloses it is removed instead: one holding, one
  *      contribution, one history snapshot.
  *
- * Rounds repeat until the document validates or nothing more can be removed.
+ * Rounds repeat until the document validates, nothing more can be removed, or
+ * `MAX_ROUNDS` runs out. The last two are give-ups, reported as such.
  *
  * WHAT IT NEVER TOUCHES. A path of length < 2 — a top-level field. Those come
  * from the decoder's typed getters, so a failure there is genuine shape drift
@@ -190,7 +191,8 @@ export type NestedRepairOutcome<T> = ({ ok: true } & NestedRepairResult<T>) | Ne
  * @returns `{ ok: true, data, removed }`, or `{ ok: false, reason }` when the
  *   document cannot be repaired. The reason is reported so a caller can tell
  *   the expected refusal (`top-level`) from the repair giving up
- *   (`exhausted`), which would otherwise look exactly like the pre-#902 drop.
+ *   (`exhausted` or `no-progress`), which would otherwise look exactly like
+ *   the pre-#902 drop.
  *   Never mutates `data`.
  */
 export function repairNestedIssues<T>(
@@ -219,6 +221,12 @@ export function repairNestedIssues<T>(
       // field) takes its enclosing node with it.
       const target = exists(current, issue.path) ? [...issue.path] : issue.path.slice(0, -1);
       if (target.length < MIN_REPAIR_DEPTH) return { ok: false, reason: 'top-level' };
+      // An issue path two or more levels past the data climbs to a node that
+      // does not exist either. Nothing is removed for it, so nothing is
+      // claimed: `removed` feeds the warn, and must only name real removals.
+      // If no issue in the round yields a real target, `removeAll` returns the
+      // same reference and the round reports `no-progress`.
+      if (!exists(current, target)) continue;
       const key = keyOf(target);
       if (seen.has(key)) continue;
       seen.add(key);

@@ -1023,9 +1023,8 @@ describe('validateOrWarn — nested value repair (#902)', () => {
     // node nor its parent exists, so a round can remove nothing.
     const Refined = z
       .object({ id: z.string(), items: z.array(z.object({ name: z.string() })) })
-      .superRefine((doc, ctx2) => {
+      .superRefine((_doc, ctx2) => {
         ctx2.addIssue({ code: 'custom', path: ['items', 0, 'name', 'a', 'b'], message: 'bad' });
-        void doc;
       });
 
     const result = validateOrWarn(Refined, { id: 'x', items: [{ name: 'n' }] }, ctx);
@@ -1035,6 +1034,22 @@ describe('validateOrWarn — nested value repair (#902)', () => {
     expect(
       messages.some((m) => m.includes('nested repair gave up') && m.includes('reason=no-progress'))
     ).toBe(true);
+  });
+
+  test('each distinct give-up shape gets its own gave-up warn', () => {
+    const Refined = z
+      .object({ id: z.string(), items: z.array(z.object({ name: z.string() })) })
+      .superRefine((doc, ctx2) => {
+        ctx2.addIssue({ code: 'custom', path: ['items', 0, 'name', doc.id, 'b'], message: 'bad' });
+      });
+
+    validateOrWarn(Refined, { id: 'a', items: [{ name: 'n' }] }, ctx);
+    validateOrWarn(Refined, { id: 'z', items: [{ name: 'n' }] }, { ...ctx, docId: 'doc2' });
+
+    const gaveUp = warnSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((m) => m.includes('nested repair gave up'));
+    expect(gaveUp).toHaveLength(2);
   });
 
   test('date-keyed failures under different dates share one warn', () => {
