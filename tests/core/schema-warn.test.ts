@@ -962,6 +962,67 @@ describe('validateOrWarn — nested value repair (#902)', () => {
     expect(getDecodeStats().accounts?.repaired).toBe(2);
   });
 
+  test('the warn key ignores how many entries failed and in what order', () => {
+    // One unpriced holding, then three: the same failure shape, so one warn.
+    validateOrWarn(
+      AccountLike,
+      { ...base, holdings: [{ security_id: 'sec_1', institution_price: null }] },
+      ctx
+    );
+    validateOrWarn(
+      AccountLike,
+      {
+        ...base,
+        holdings: [
+          { security_id: 'sec_1', institution_price: null },
+          { security_id: 'sec_2', institution_price: null },
+          { security_id: 'sec_3', institution_price: null },
+        ],
+      },
+      { collection: 'accounts', docId: 'doc2' }
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(getDecodeStats().accounts?.repaired).toBe(2);
+  });
+
+  test('a warn lists at most ten paths', () => {
+    const holdings = Array.from({ length: 13 }, (_, i) => ({
+      security_id: `sec_${i}`,
+      institution_price: null,
+    }));
+    validateOrWarn(AccountLike, { ...base, holdings }, ctx);
+
+    const message = warnSpy.mock.calls[0]?.[0] as string;
+    expect(message).toContain('holdings.9.institution_price (+3 more)');
+    expect(message).not.toContain('holdings.10.institution_price');
+  });
+
+  test('a repair that runs out of rounds says so instead of passing for a plain drop', () => {
+    let leaf: z.ZodType = z.object({ value: z.number() });
+    let bad: unknown = { value: null };
+    for (let depth = 0; depth < 10; depth++) {
+      leaf = z.object({ child: leaf });
+      bad = { child: bad };
+    }
+    const Deep = z.object({ id: z.string(), items: z.array(leaf) });
+
+    const result = validateOrWarn(Deep, { id: 'x', items: [bad] }, ctx);
+
+    expect(result).toBeNull();
+    expect(getDecodeStats().accounts?.dropped).toBe(1);
+    const messages = warnSpy.mock.calls.map((c) => c[0] as string);
+    expect(messages.some((m) => m.includes('nested repair exhausted'))).toBe(true);
+    expect(messages.some((m) => m.includes('schema drop'))).toBe(true);
+  });
+
+  test('a top-level refusal does not claim the repair was exhausted', () => {
+    validateOrWarn(AccountLike, { ...base, nickname: 42 }, ctx);
+
+    const messages = warnSpy.mock.calls.map((c) => c[0] as string);
+    expect(messages.some((m) => m.includes('nested repair exhausted'))).toBe(false);
+  });
+
   test('does not mutate the input document', () => {
     const input = { ...base, holdings: [{ security_id: 'sec_1', institution_price: null }] };
     validateOrWarn(AccountLike, input, ctx);

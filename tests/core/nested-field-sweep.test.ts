@@ -10,9 +10,10 @@
  *
  * It walks EVERY object schema exported from `src/models/`, builds a valid
  * document with every field populated, then for every node below the top
- * level (array elements, record entries, nested-object fields, and every leaf
- * inside them) replaces the value with each bad value we can name — `null`, a
- * wrong-type primitive, and for numbers `Infinity` — and asserts the document
+ * level (array elements, record entries and record keys, nested-object
+ * fields, and every leaf inside them) replaces the value with each bad value
+ * we can name — `null`, a wrong-type primitive, for numbers `Infinity`, and
+ * for record keys a key the key schema rejects — and asserts the document
  * still decodes through `validateOrWarn` with all of its top-level fields.
  *
  * Because the cases come from the schemas themselves, a nested field added
@@ -78,6 +79,7 @@ function sample(t: AnySchema, at: Segment[], nodes: SweepNode[]): unknown {
     }
     case 'number':
       value = [1, 0].find((c) => inner.safeParse(c).success);
+      if (value === undefined) throw new SamplerError(`no number candidate fits ${at.join('.')}`);
       break;
     case 'boolean':
       value = true;
@@ -101,6 +103,10 @@ function sample(t: AnySchema, at: Segment[], nodes: SweepNode[]): unknown {
     case 'record': {
       const key = STRING_CANDIDATES.find((c) => (d.keyType as AnySchema).safeParse(c).success);
       if (key === undefined) throw new SamplerError(`no record key fits ${at.join('.')}`);
+      // A record's KEYS can be wrong too (a validated key schema such as
+      // InvestmentSplitSchema.adjustments' date regex), so the record itself
+      // is a sweep node of kind 'record-key' whenever it sits at depth >= 1.
+      if (at.length >= 1) nodes.push({ path: [...at, key], kind: 'record-key' });
       value = { [key]: sample(d.valueType as AnySchema, [...at, key], nodes) };
       break;
     }
@@ -118,8 +124,14 @@ function sample(t: AnySchema, at: Segment[], nodes: SweepNode[]): unknown {
   return value;
 }
 
+/** Sentinel: rename the record key at this path instead of setting a value. */
+const RENAME_KEY = Symbol('rename-key');
+/** A key no model's key schema accepts as a date or id-shaped key. */
+const BAD_KEY = 'not a valid key!';
+
 /** Values the schema should reject at a node of this kind. */
 function badValuesFor(kind: string): [label: string, value: unknown][] {
+  if (kind === 'record-key') return [['an invalid key', RENAME_KEY]];
   const out: [string, unknown][] = [['null', null]];
   if (kind === 'number') {
     out.push(['a string', 'not-a-number'], ['Infinity', Infinity]);
@@ -135,7 +147,13 @@ function setAt(doc: unknown, at: Segment[], value: unknown): unknown {
   const copy = structuredClone(doc) as Record<string, unknown>;
   let node: Record<string | number, unknown> = copy;
   for (const segment of at.slice(0, -1)) node = node[segment] as Record<string | number, unknown>;
-  node[at[at.length - 1] as Segment] = value;
+  const last = at[at.length - 1] as Segment;
+  if (value === RENAME_KEY) {
+    node[BAD_KEY] = node[last];
+    delete node[last];
+  } else {
+    node[last] = value;
+  }
   return copy;
 }
 
@@ -217,6 +235,14 @@ describe('nested-field sweep (#902)', () => {
     expect(covered).toContain('account.ts:AccountSchema holdings.0.vested_value');
     expect(covered).toContain('plaid-account.ts:PlaidAccountSchema holdings.0.institution_price');
     expect(covered).toContain('holdings-history.ts:HoldingsHistorySchema history.sample.price');
+    // The one model whose record KEYS are validated (a date regex).
+    expect(
+      modelCases.some(
+        (m) =>
+          m.name === 'investment-split.ts:InvestmentSplitSchema' &&
+          m.nodes.some((n) => n.kind === 'record-key' && n.path[0] === 'adjustments')
+      )
+    ).toBe(true);
     // A floor, so a sampler regression that quietly stops descending is loud.
     expect(sweepCases.length).toBeGreaterThan(100);
   });
