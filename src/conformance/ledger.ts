@@ -504,7 +504,7 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'deleted right after, balance unchanged) createTransaction with `categoryId: ""` ' +
       'succeeded for both INCOME and INTERNAL_TRANSFER, and the returned row carried ' +
       '`categoryId: ""` and the requested type. smoke:roundtrip\'s create_transaction check ' +
-      're-verifies it on every run: it creates a marker INCOME row with `categoryId: ""`, ' +
+      're-verifies it on every full run: it creates a marker INCOME row with `categoryId: ""`, ' +
       're-reads it, asserts type INCOME and no category, and deletes it in cleanup.',
   },
   {

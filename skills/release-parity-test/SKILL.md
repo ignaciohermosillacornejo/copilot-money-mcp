@@ -107,9 +107,9 @@ replaced by a SKIP (test-matrix.md, How to extend).
    (P-03).
 4. Ask the user which account is the Manual test account and confirm
    `isManual: true` (P-04). Record its id, item id, balance, the date of its
-   last balance reset (or `unknown`, see Phase 2), and every existing transaction id as DO NOT TOUCH. If it
-   has real transactions, check balances as changes from the baseline, never as
-   absolute values.
+   last balance reset (or `unknown`, see Phase 2), and every existing
+   transaction id as DO NOT TOUCH. If it has real transactions, check balances
+   as changes from the baseline, never as absolute values.
 5. Start the local report, `docs/superpowers/RELEASE-PARITY-TEST-<YYYY-MM-DD>.md`,
    with the cleanup ledger at the top. Finish any unfinished ledger from an
    earlier run first (Guardrail 6), then clear leftovers (P-08).
@@ -154,7 +154,11 @@ description, or Copilot's own behaviour.
    creating, changing or deleting such a row does not move the balance. When a
    case needs an older date (W-19, a cold-month COH row when the reset is
    recent), log that row's expected balance effect as 0; W-12, CL-04 and CL-07
-   count only rows dated after the reset. If the user does not know the reset date, record it as unknown and mark W-12, CL-04 and CL-07 SKIP (reset date unknown) rather than FAIL.
+   count only rows dated after the reset. If the user does not know the reset
+   date, record it as unknown and do not judge W-12, CL-04 and CL-07 this run:
+   note them as SKIP (reset date unknown) in the local report only, and in
+   `test-matrix.md` give their Last run cells just the usual
+   `; not re-run <date>` stamp. A recorded FAIL is never overwritten by a SKIP.
 2. After each write, check it in live **and** in the web.
 3. Coherence is the part most likely to regress, and it is invisible unless you
    test a **cold month** (P-09): it is cached for a week. Read it once, write

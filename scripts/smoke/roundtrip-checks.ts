@@ -554,14 +554,15 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
         incomeAfter.type === 'INCOME',
         `create_transaction: INCOME row (empty categoryId) re-read type '${incomeAfter.type}', expected INCOME`
       );
-      // INCOME has its own sign rule, so compare magnitudes.
-      check(
-        Math.abs(incomeAfter.amount) === 200,
-        `create_transaction: INCOME row (empty categoryId) re-read amount ${incomeAfter.amount}, expected magnitude 200`
-      );
       check(
         !incomeAfter.categoryId,
         `create_transaction: INCOME row (empty categoryId) re-read with category '${String(incomeAfter.categoryId)}', expected none`
+      );
+      // Incidental to the ledgered claim, so checked after it. INCOME has its
+      // own sign rule, so compare magnitudes.
+      check(
+        Math.abs(incomeAfter.amount) === 200,
+        `create_transaction: INCOME row (empty categoryId) re-read amount ${incomeAfter.amount}, expected magnitude 200`
       );
       return undefined;
     },
