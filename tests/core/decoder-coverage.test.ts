@@ -1832,12 +1832,14 @@ describe('decoder coverage', () => {
 
     test('decodes plaid accounts via decodeAllCollections', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-db');
-      // Plaid account docs sit at items/{item_id}/accounts/{account_id} in Firestore.
-      // The routing requires collection.includes('/accounts/') which needs the full path.
-      // Using binary keys so the parser reconstructs the full collection path.
+      // A document path has an even segment count, and the key parser rejects an
+      // odd one (#807), so the doc sits one subcollection below the account. No
+      // real cache has been seen to hold a document at a path this route accepts:
+      // the 5-segment shape it was written for came from `remote_document_read_time`
+      // index keys misparsed as documents.
       await createDeepTestDb(dbPath, [
         {
-          collection: 'items/item1/accounts/pacc1',
+          collection: 'items/item1/accounts/pacc1/details',
           id: 'data',
           fields: {
             account_id: 'acc_plaid_1',
@@ -3500,9 +3502,11 @@ describe('decoder coverage', () => {
   describe('plaid account extended fields', () => {
     test('extracts all new plaid account fields', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-full-db');
+      // Even-segment path one subcollection below the account; see the note on
+      // 'decodes plaid accounts via decodeAllCollections' (#807).
       await createDeepTestDb(dbPath, [
         {
-          collection: 'items/item2/accounts/pacc2',
+          collection: 'items/item2/accounts/pacc2/details',
           id: 'data',
           fields: {
             account_id: 'acc_plaid_2',
@@ -3802,10 +3806,14 @@ describe('decoder coverage', () => {
   describe('processPlaidAccount field coverage', () => {
     test('plaid account with numeric limit and string verification_status', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-fields-db');
-      // Use 5-segment path so binary key routing picks up /accounts/ in the middle
+      // A document path has an even segment count, and the key parser rejects an
+      // odd one (#807), so the doc sits one subcollection below the account. No
+      // real cache has been seen to hold a document at a path this route accepts:
+      // the 5-segment shape it was written for came from `remote_document_read_time`
+      // index keys misparsed as documents.
       await createDeepTestDb(dbPath, [
         {
-          collection: 'items/item1/accounts/pacc1',
+          collection: 'items/item1/accounts/pacc1/details',
           id: 'data',
           fields: {
             name: 'Chase Credit',

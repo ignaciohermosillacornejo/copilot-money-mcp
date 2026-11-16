@@ -24,7 +24,12 @@
  * names are aggregated and only reported for the allowlisted collections below.
  */
 
-import { iterateDocuments } from '../../src/core/leveldb-reader.js';
+import {
+  iterateDocuments,
+  auditDocumentTable,
+  isDocumentTableKey,
+} from '../../src/core/leveldb-reader.js';
+import type { DocumentTableAudit } from '../../src/core/leveldb-reader.js';
 import {
   decodeAllCollections,
   decodeTransactions,
@@ -428,6 +433,61 @@ export function reportExtinctDependencies(
   };
 }
 
+/** What the raw scan saw of the keys behind the documents it was handed (#807). */
+export interface DocumentKeyShape {
+  /** Documents the reader yielded. */
+  yielded: number;
+  /** Of those, documents whose key is not from the `remote_document` table itself. */
+  foreignTable: number;
+  /** Of those, documents whose full path has an odd segment count (a collection path). */
+  oddSegment: number;
+}
+
+/**
+ * Check 0's verdict — are the reader's documents documents (#807)?
+ *
+ * Every other check compares the decoder against `iterateDocuments`, so a key
+ * the reader misparses is invisible to all of them: the raw side and the rows
+ * see the same wrong path. Until #807 the reader took every key of the sibling
+ * `remote_document_read_time` index as a document whose id was a collection
+ * name, and most of what it yielded on a real cache was that. This checks the
+ * keys with an oracle that does not go through the parser's own guards (the
+ * table name read off the key, and path parity), and in the other direction
+ * counts the document-table keys with data that the parser rejects, since a
+ * guard that rejects too much loses documents just as silently.
+ */
+export function reportDocumentKeyShape(
+  shape: DocumentKeyShape,
+  audit: DocumentTableAudit
+): { status: Status; detail: string } {
+  const problems: string[] = [];
+  if (shape.foreignTable > 0) {
+    problems.push(
+      `${shape.foreignTable} yielded document(s) come from a table other than remote_document`
+    );
+  }
+  if (shape.oddSegment > 0) {
+    problems.push(
+      `${shape.oddSegment} yielded document(s) have an odd segment count, i.e. a collection path`
+    );
+  }
+  if (audit.rejectedNonEmpty > 0) {
+    problems.push(
+      `${audit.rejectedNonEmpty} remote_document key(s) with data are rejected by the key ` +
+        `parser and never reach the decoder`
+    );
+  }
+  if (problems.length > 0) {
+    return { status: 'FAIL', detail: `${problems.join('; ')} (see #807)` };
+  }
+  return {
+    status: 'PASS',
+    detail:
+      `all ${shape.yielded} yielded documents are remote_document keys with an even path, ` +
+      `and none of the table's ${audit.tableKeys} keys is rejected while holding data`,
+  };
+}
+
 /**
  * Is this raw collection path the ACCOUNT-document collection?
  *
@@ -743,6 +803,7 @@ async function main(): Promise<void> {
   // Ids only, for check 9 — no values are kept.
   // A Set: the decoder dedupes same-id documents, so the counts must too.
   const incomeTransferWithCategory = new Set<string>();
+  const keyShape: DocumentKeyShape = { yielded: 0, foreignTable: 0, oddSegment: 0 };
   let scanned = 0;
   const started = Date.now();
 
@@ -759,6 +820,8 @@ async function main(): Promise<void> {
     // not data, and must not be counted as decodable rows.
     if (doc.fields.size === 0) entry.empty++;
     tallyRoutedDocument(routed, doc.collection, doc.fields.size === 0);
+    if (!isDocumentTableKey(doc.key)) keyShape.foreignTable++;
+    if ((doc.collection.split('/').length + 1) % 2 !== 0) keyShape.oddSegment++;
 
     for (const leafPath of nonFiniteLeafPaths(doc.fields)) {
       const key = `${pattern}:${leafPath}`;
@@ -783,6 +846,16 @@ async function main(): Promise<void> {
     'PASS',
     `${scanned} documents across ${raw.size} collection patterns in ${elapsed}s`
   );
+
+  // ---------------------------------------------------------------------
+  // Check 0 — document key shape (#807).
+  //
+  // Every check below compares against what `iterateDocuments` yields, so it
+  // must first be established that what it yields are documents.
+  // ---------------------------------------------------------------------
+  keyShape.yielded = scanned;
+  const keyVerdict = reportDocumentKeyShape(keyShape, await auditDocumentTable(dbPath));
+  record('document key shape', keyVerdict.status, keyVerdict.detail);
 
   const all = await decodeAllCollections(dbPath);
 
