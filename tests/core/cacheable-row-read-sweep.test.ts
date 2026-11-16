@@ -22,11 +22,12 @@
  * turns into an accepted row that throws or goes missing here.
  */
 
-import { describe, test, expect, afterAll } from 'bun:test';
+import { describe, test, expect, afterAll, beforeAll, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { LiveCopilotDatabase } from '../../src/core/live-database.js';
+import { __resetReadShapeWarnDedupe } from '../../src/core/graphql/read-validation.js';
 import type { CopilotDatabase } from '../../src/core/database.js';
 import { TransactionMetaStore } from '../../src/core/persistence/transaction-meta-store.js';
 import type { TransactionNode } from '../../src/core/graphql/queries/transactions.js';
@@ -165,6 +166,19 @@ function variants(): Variant[] {
 
 const META_DIR = mkdtempSync(join(tmpdir(), 'cacheable-row-sweep-meta-'));
 afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
+
+// Hundreds of refusals run through warnMutationRowRefused here. Silence them,
+// and reset the module-level dedupe on both sides, so this file neither
+// floods stderr nor seeds warning keys for whichever file runs next.
+let warnSpy: ReturnType<typeof spyOn> | undefined;
+beforeAll(() => {
+  __resetReadShapeWarnDedupe();
+  warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+});
+afterAll(() => {
+  warnSpy?.mockRestore();
+  __resetReadShapeWarnDedupe();
+});
 
 /** FULL_ROW as the Transactions query returns it, for the cached-copy pass. */
 const CACHED_COPY: TransactionNode = { ...FULL_ROW, parentId: null, isoCurrencyCode: 'USD' };
