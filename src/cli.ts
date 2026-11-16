@@ -11,6 +11,7 @@ import {
   validBrowserNames,
   type BrowserSelection,
 } from './core/auth/browser-selection.js';
+import { CliArgError, parseCliArgs, type ParsedCliArgs } from './cli-args.js';
 
 /** Print a fatal argument error to stderr and exit 1. */
 function failArgs(message: string): never {
@@ -18,63 +19,9 @@ function failArgs(message: string): never {
   process.exit(1);
 }
 
-/**
- * Parse command-line arguments.
- */
-function parseArgs(): {
-  dbPath?: string;
-  verbose: boolean;
-  timeoutMs?: number;
-  writeFlagSeen: boolean;
-  liveReadsEnabled: boolean;
-  browserSelection?: BrowserSelection;
-  selectionWarning?: string;
-} {
-  const args = process.argv.slice(2);
-  let dbPath: string | undefined;
-  let verbose = false;
-  let timeoutMs: number | undefined;
-  let writeFlagSeen = false;
-  let liveReadsEnabled = false;
-  let browserFlag: string | undefined;
-  let profileFlag: string | undefined;
-  let dataDirFlag: string | undefined;
-
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i];
-
-    if (arg === '--db-path' && i + 1 < args.length) {
-      dbPath = args[i + 1];
-      i++;
-    } else if (arg === '--timeout' && i + 1 < args.length) {
-      const rawValue = args[i + 1] as string;
-      const ms = parseInt(rawValue, 10);
-      if (!isNaN(ms) && ms > 0) {
-        timeoutMs = ms;
-      } else {
-        console.error(
-          `Invalid --timeout value: ${rawValue} (must be a positive integer in milliseconds)`
-        );
-        process.exit(1);
-      }
-      i++;
-    } else if (arg === '--verbose' || arg === '-v') {
-      verbose = true;
-    } else if (arg === '--write') {
-      writeFlagSeen = true;
-    } else if (arg === '--live-reads') {
-      liveReadsEnabled = true;
-    } else if (arg === '--browser' || arg === '--browser-profile' || arg === '--browser-data-dir') {
-      const value = args[i + 1];
-      if (value === undefined || value.startsWith('--') || !value.trim()) {
-        failArgs(`${arg} requires a value`);
-      }
-      if (arg === '--browser') browserFlag = value;
-      else if (arg === '--browser-profile') profileFlag = value;
-      else dataDirFlag = value;
-      i++;
-    } else if (arg === '--help' || arg === '-h') {
-      console.error(`
+/** Print the usage text to stderr (stdout carries the MCP protocol). */
+function printHelp(): void {
+  console.error(`
 Copilot Money MCP Server - Expose financial data through MCP
 
 Usage:
@@ -114,9 +61,54 @@ Environment:
   The server uses stdio transport and logs to stderr.
   Claude Desktop will communicate with it via stdin/stdout.
 `);
-      process.exit(0);
-    }
+}
+
+/**
+ * Parse command-line arguments.
+ */
+function parseArgs(): {
+  dbPath?: string;
+  verbose: boolean;
+  timeoutMs?: number;
+  writeFlagSeen: boolean;
+  liveReadsEnabled: boolean;
+  browserSelection?: BrowserSelection;
+  selectionWarning?: string;
+  argWarnings: string[];
+} {
+  let parsed: ParsedCliArgs;
+  try {
+    parsed = parseCliArgs(process.argv.slice(2));
+  } catch (err) {
+    if (!(err instanceof CliArgError)) throw err;
+    failArgs(err.message);
   }
+  const { values, booleans } = parsed;
+
+  if (booleans['--help']) {
+    printHelp();
+    process.exit(0);
+  }
+
+  let timeoutMs: number | undefined;
+  const rawTimeout = values['--timeout'];
+  if (rawTimeout !== undefined) {
+    const ms = parseInt(rawTimeout, 10);
+    if (isNaN(ms) || ms <= 0) {
+      failArgs(
+        `Invalid --timeout value: ${rawTimeout} (must be a positive integer in milliseconds)`
+      );
+    }
+    timeoutMs = ms;
+  }
+
+  const dbPath = values['--db-path'];
+  const verbose = booleans['--verbose'] === true;
+  const writeFlagSeen = booleans['--write'] === true;
+  let liveReadsEnabled = booleans['--live-reads'] === true;
+  const browserFlag = values['--browser'];
+  const profileFlag = values['--browser-profile'];
+  const dataDirFlag = values['--browser-data-dir'];
 
   if (writeFlagSeen) {
     liveReadsEnabled = true;
@@ -135,6 +127,7 @@ Environment:
     liveReadsEnabled,
     browserSelection,
     selectionWarning,
+    argWarnings: parsed.warnings,
   };
 }
 
@@ -206,11 +199,13 @@ async function main(): Promise<void> {
     liveReadsEnabled,
     browserSelection,
     selectionWarning,
+    argWarnings,
   } = parseArgs();
 
   configureLogging(verbose);
 
   // Always shown (stderr), whatever the verbosity: the selection was ignored.
+  for (const warning of argWarnings) console.error(warning);
   if (selectionWarning) console.error(selectionWarning);
 
   try {

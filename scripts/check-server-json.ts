@@ -12,6 +12,13 @@
  *     description and a boolean isRequired; a `named` one has a `--flag` name and
  *     a `positional` one a value or valueHint (a typo there would otherwise only
  *     surface as a 422 in the registry publish step)
+ *   - the named arguments describe the CLI's own flags (`CLI_FLAGS` in
+ *     src/cli-args.ts), both ways: every published flag is listed and every
+ *     listed one is published; an on/off flag says `format: "boolean"`, a
+ *     value-taking one carries the flag's `format` (`filepath` for a path) and
+ *     its exact `choices` (`--browser`: `validBrowserNames()`). A client that
+ *     follows server.json renders the command line from these fields, so a flag
+ *     described as the wrong kind is passed in a form the CLI does not read.
  *
  * Add new constraints here as they are discovered.
  */
@@ -19,6 +26,7 @@
 import { readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { CLI_FLAGS } from '../src/cli-args.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Overridable so tests can drive the real script against a synthetic server.json.
@@ -46,6 +54,33 @@ if (typeof description !== 'string') {
   );
 }
 
+/** Compare one named server.json argument with the CLI flag of that name. */
+function checkAgainstCli(where: string, arg: Record<string, unknown>, name: string): void {
+  const flag = CLI_FLAGS.find((f) => f.name === name);
+  if (!flag) {
+    issues.push(`${where}.name ${name} is not a flag the CLI parses (CLI_FLAGS, src/cli-args.ts)`);
+    return;
+  }
+  if (!flag.published) {
+    issues.push(`${where}.name ${name} is listed but CLI_FLAGS marks it unpublished`);
+  }
+  const expectedFormat = !flag.takesValue ? 'boolean' : 'format' in flag ? flag.format : 'string';
+  const format = arg.format ?? 'string';
+  if (format !== expectedFormat) {
+    issues.push(
+      `${where} (${name}).format is ${JSON.stringify(arg.format)}, expected "${expectedFormat}"` +
+        (flag.takesValue ? '' : ' (an on/off flag; the CLI reads it bare or as =true / =false)')
+    );
+  }
+  const expectedChoices = 'choices' in flag ? flag.choices() : undefined;
+  if (JSON.stringify(arg.choices) !== JSON.stringify(expectedChoices)) {
+    issues.push(
+      `${where} (${name}).choices is ${JSON.stringify(arg.choices)}, expected ` +
+        `${JSON.stringify(expectedChoices)} (from CLI_FLAGS, src/cli-args.ts)`
+    );
+  }
+}
+
 const packages: unknown = server.packages;
 if (!Array.isArray(packages)) {
   issues.push('packages is missing or not an array');
@@ -61,6 +96,7 @@ if (!Array.isArray(packages)) {
       issues.push(`packages[${p}].packageArguments is not an array`);
       return;
     }
+    const listed = new Set<string>();
     args.forEach((arg: unknown, a: number) => {
       const where = `packages[${p}].packageArguments[${a}]`;
       if (!isObject(arg)) {
@@ -86,7 +122,18 @@ if (!Array.isArray(packages)) {
       if (typeof arg.isRequired !== 'boolean') {
         issues.push(`${where}.isRequired is not a boolean`);
       }
+      if (arg.type === 'named' && typeof arg.name === 'string') {
+        checkAgainstCli(where, arg, arg.name);
+        listed.add(arg.name);
+      }
     });
+    for (const flag of CLI_FLAGS) {
+      if (flag.published && !listed.has(flag.name)) {
+        issues.push(
+          `packages[${p}].packageArguments has no ${flag.name}, which CLI_FLAGS marks published`
+        );
+      }
+    }
   });
 }
 

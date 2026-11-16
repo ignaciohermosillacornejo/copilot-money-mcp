@@ -7,6 +7,7 @@
 
 import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
+import { CLI_FLAGS } from '../../src/cli-args.js';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
@@ -98,13 +99,18 @@ describe('CLI entry point', () => {
       expect(stderr).toContain('Invalid --timeout value: -5');
     });
 
-    test('--timeout at end of args without value does not crash', async () => {
-      // When --timeout is the last arg, there's no following value.
-      // The condition `i + 1 < args.length` is false, so --timeout is
-      // silently ignored. The process should not crash on arg parsing.
-      const { stderr } = await runCli(['--timeout']);
+    test('--timeout at end of args without a value exits 1 instead of being ignored', async () => {
+      const { exitCode, stderr } = await runCli(['--timeout']);
 
-      expect(stderr).not.toContain('Invalid --timeout');
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('--timeout requires a value');
+    });
+
+    test('--timeout=<ms> is validated like --timeout <ms>', async () => {
+      const { exitCode, stderr } = await runCli(['--timeout=abc']);
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Invalid --timeout value: abc');
     });
   });
 
@@ -167,6 +173,69 @@ describe('CLI entry point', () => {
 
       expect(stderr).toContain('Write tools enabled');
       expect(stderr).toContain('Live reads enabled');
+    });
+  });
+
+  describe('--flag=value (the MCP registry form)', () => {
+    test('--help documents every flag in the flag table', async () => {
+      const { stderr } = await runCli(['--help']);
+
+      for (const flag of CLI_FLAGS) expect(stderr).toContain(flag.name);
+    });
+
+    test('--browser=<name> is read, not ignored', async () => {
+      const { exitCode, stderr } = await runCli(['--browser=netscape', '--live-reads=true']);
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Unknown browser "netscape"');
+    });
+
+    test('--write=true enables writes and --live-reads=false does not undo it', async () => {
+      const { stderr } = await runCli(['--write=true', '--live-reads=false', '-v']);
+
+      expect(stderr).toContain('Write tools enabled');
+      expect(stderr).toContain('Live reads enabled');
+    });
+
+    test('--write=false leaves writes off', async () => {
+      const { stderr } = await runCli(['--write=false', '-v']);
+
+      expect(stderr).not.toContain('Write tools enabled');
+      expect(stderr).not.toContain('Live reads enabled');
+    });
+
+    test('--write=yes exits 1', async () => {
+      const { exitCode, stderr } = await runCli(['--write=yes']);
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('--write takes no value, or =true / =false (got "yes")');
+    });
+
+    test('--db-path=<path> is used', async () => {
+      const { stderr } = await runCli(['--db-path=/tmp/cmm-fake-db', '-v']);
+
+      expect(stderr).toContain('Using database path: /tmp/cmm-fake-db');
+    });
+
+    test('a bare --db-path exits 1 instead of being ignored', async () => {
+      const { exitCode, stderr } = await runCli(['--db-path']);
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('--db-path requires a value');
+    });
+
+    test('an unknown --flag=value exits 1', async () => {
+      const { exitCode, stderr } = await runCli(['--db-paht=/tmp/x']);
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Unknown option --db-paht');
+    });
+
+    test('an unknown bare flag is warned about, even without -v', async () => {
+      const { exitCode, stderr } = await runCli(['--frobnicate']);
+
+      expect(exitCode).not.toBe(1);
+      expect(stderr).toContain('Ignoring unrecognised argument "--frobnicate"');
     });
   });
 

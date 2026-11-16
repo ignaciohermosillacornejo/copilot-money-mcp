@@ -276,6 +276,8 @@ Or, equivalently, `"env": { "COPILOT_BROWSER": "brave", "COPILOT_BROWSER_PROFILE
 "args": ["--live-reads", "--browser", "chrome", "--browser-data-dir", "/home/me/chrome-profile/Fork-18"]
 ```
 
+Every flag that takes a value also accepts the `--flag=value` form (`--browser=chrome`), and an on/off flag such as `--write` or `--live-reads` also accepts `=true` / `=false`. A value-taking flag given without a value, or an unknown `--flag=value`, stops the server at startup instead of being ignored.
+
 Default mode requires no authentication and makes zero network requests — reads come from the local LevelDB cache.
 
 ### `--live-reads`: real-time reads via GraphQL
