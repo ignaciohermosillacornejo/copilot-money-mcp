@@ -1052,6 +1052,30 @@ describe('validateOrWarn — nested value repair (#902)', () => {
     expect(gaveUp).toHaveLength(2);
   });
 
+  test('the same give-up shape under a different issue code gets its own gave-up warn', () => {
+    // Same path for both documents; only the Zod issue code differs, so the
+    // code segment of the gave-up key is the only thing that can tell them
+    // apart (the schema-drop warn is keyed the same way).
+    const Refined = z
+      .object({ id: z.string(), items: z.array(z.object({ name: z.string() })) })
+      .superRefine((doc, ctx2) => {
+        const path = ['items', 0, 'name', 'a', 'b'];
+        if (doc.id === 'a') {
+          ctx2.addIssue({ code: 'custom', path, message: 'bad' });
+        } else {
+          ctx2.addIssue({ code: 'invalid_type', expected: 'number', path, message: 'bad' });
+        }
+      });
+
+    validateOrWarn(Refined, { id: 'a', items: [{ name: 'n' }] }, ctx);
+    validateOrWarn(Refined, { id: 'z', items: [{ name: 'n' }] }, { ...ctx, docId: 'doc2' });
+
+    const gaveUp = warnSpy.mock.calls
+      .map((c) => c[0] as string)
+      .filter((m) => m.includes('nested repair gave up'));
+    expect(gaveUp).toHaveLength(2);
+  });
+
   test('date-keyed failures under different dates share one warn', () => {
     const GoalHistoryLike = z.object({
       goal_id: z.string(),

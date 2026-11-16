@@ -215,13 +215,18 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
   // top-level failure: without this line it would look exactly like the
   // pre-#902 drop, a nested path in a `schema drop` warn with no hint that a
   // repair ran. Say so separately.
+  // Zod always provides ≥1 issue on failure; the guards below are defensive
+  // only. Both paired warns key off this one issue and one shape, so the
+  // gave-up line cannot drift from the `schema drop` line in granularity.
+  const first = result.error.issues[0];
+  const pathStr = first?.path.join('.') ?? '';
+  const dropShape = dedupeShape(pathStr);
+
   if (repair.reason !== 'top-level') {
     // Keyed by the drop's own failure shape and code too — the same
     // granularity as the `schema drop` warn it accompanies — so every distinct
     // drop still gets its companion line.
-    const firstIssue = result.error.issues[0];
-    const shape = dedupeShape(firstIssue?.path.join('.') ?? '');
-    const key = `${ctx.collection}::gave-up::${repair.reason}::${shape}::${firstIssue?.code}`;
+    const key = `${ctx.collection}::gave-up::${repair.reason}::${dropShape}::${first?.code}`;
     if (!warnedNestedKeys.has(key)) {
       warnedNestedKeys.add(key);
       const why =
@@ -238,11 +243,8 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
   // so the counters reflect the true number of missing documents.
   statsFor(ctx.collection).dropped++;
 
-  // Zod always provides ≥1 issue on failure; guard is defensive only.
-  const first = result.error.issues[0];
   if (first) {
-    const pathStr = first.path.join('.');
-    const key = `${ctx.collection}::${dedupeShape(pathStr)}::${first.code}`;
+    const key = `${ctx.collection}::${dropShape}::${first.code}`;
     if (!warnedKeys.has(key)) {
       warnedKeys.add(key);
       // console.warn writes to stderr in Node, safe for MCP stdio transport.
