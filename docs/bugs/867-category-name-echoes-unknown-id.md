@@ -70,7 +70,10 @@ The user name map already skips a category with a missing or empty name, as live
 does (#860). `getCategoryDisplayName()` had no caller left and was deleted. Routing every
 view through one rule also exposed a stale copy of the name map held by `CopilotMoneyTools`,
 which only `refresh_database` dropped; it is gone, and the database's own map (dropped on a
-cache reload or a category write) is the only one. The
+cache reload or a category write) is the only one. Its sibling, the excluded-category-id set,
+had the same shape and moved amounts rather than names; it now lives in the database next to
+the name map and is dropped with it. Both are pinned by rename / exclude tests in the parity
+file. The
 finance-pulse skill, which used "no `category_name`" to mean uncategorized, now tests
 `category_id` instead, so a row in a deleted category still counts as spending.
 

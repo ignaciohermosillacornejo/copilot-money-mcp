@@ -304,6 +304,7 @@ export class CopilotDatabase {
   private _items: Item[] | null = null;
   private _userCategories: Category[] | null = null;
   private _categoryNameMap: Map<string, string> | null = null;
+  private _excludedCategoryIds: Set<string> | null = null;
   private _accountNameMap: Map<string, string> | null = null;
   private _securities: Security[] | null = null;
   private _tags: Tag[] | null = null;
@@ -486,6 +487,7 @@ export class CopilotDatabase {
     this._items = null;
     this._userCategories = null;
     this._categoryNameMap = null;
+    this._excludedCategoryIds = null;
     this._accountNameMap = null;
     this._securities = null;
     this._holdingsHistory = null;
@@ -566,6 +568,7 @@ export class CopilotDatabase {
     // than leaving a fixture whose two halves disagree.
     if (data.categoryNameMap !== undefined) this._categoryNameMap = data.categoryNameMap;
     else if (data.userCategories !== undefined) this._categoryNameMap = null;
+    if (data.userCategories !== undefined) this._excludedCategoryIds = null;
     if (data.accountNameMap !== undefined) this._accountNameMap = data.accountNameMap;
     // Unions, like every decode: injecting [] does not reset the accumulated
     // split-parent ids — only forgetSplitParentIds() does.
@@ -697,8 +700,8 @@ export class CopilotDatabase {
 
   /**
    * Insert or merge a category in the in-memory cache. Invalidates the
-   * derived `_categoryNameMap` so the next read rebuilds it. No-op if the
-   * cache has not been loaded yet.
+   * derived `_categoryNameMap` and `_excludedCategoryIds` so the next read
+   * rebuilds them. No-op if the cache has not been loaded yet.
    */
   patchCachedCategoryUpsert(category: Category): void {
     if (!this._userCategories) return;
@@ -709,11 +712,13 @@ export class CopilotDatabase {
       this._userCategories.push(category);
     }
     this._categoryNameMap = null;
+    this._excludedCategoryIds = null;
   }
 
   /**
    * Remove a category from the in-memory cache. Invalidates the derived
-   * name map. Returns false if the cache isn't loaded or the id isn't found.
+   * name map and excluded-id set. Returns false if the cache isn't loaded or
+   * the id isn't found.
    */
   patchCachedCategoryDelete(categoryId: string): boolean {
     if (!this._userCategories) return false;
@@ -721,6 +726,7 @@ export class CopilotDatabase {
     this._userCategories = this._userCategories.filter((c) => c.category_id !== categoryId);
     if (this._userCategories.length < before) {
       this._categoryNameMap = null;
+      this._excludedCategoryIds = null;
       return true;
     }
     return false;
@@ -1566,6 +1572,28 @@ export class CopilotDatabase {
   async getTags(): Promise<Tag[]> {
     await this.loadAllCollections();
     return [...(this._tags ?? [])];
+  }
+
+  /**
+   * The ids of the user's categories marked "exclude from spending".
+   *
+   * Memoized and derived from the user categories like getCategoryNameMap(),
+   * and dropped with it on a cache reload or a category write, so a category
+   * excluded or un-excluded in the app takes effect once the cache reloads.
+   * (It used to be memoized in CopilotMoneyTools, where only
+   * refresh_database dropped it, #909 review.)
+   *
+   * @returns Set of excluded category IDs
+   */
+  async getExcludedCategoryIds(): Promise<Set<string>> {
+    if (this._excludedCategoryIds !== null) {
+      return this._excludedCategoryIds;
+    }
+    const userCategories = await this.loadUserCategories();
+    this._excludedCategoryIds = new Set(
+      userCategories.filter((cat) => cat.excluded === true).map((cat) => cat.category_id)
+    );
+    return this._excludedCategoryIds;
   }
 
   /**
