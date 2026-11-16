@@ -4,7 +4,7 @@ title: A null price on one holding silently removed a whole retirement account a
 class: wire-type-drift
 status: fixed
 detected: user-report # reporter saw decode_health degraded with one dropped account and filed the stderr schema-drop line
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/916
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/902
 date: 2026-11-16
 ---
@@ -99,8 +99,9 @@ again. Removing the value gives consumers the absence they already handle.
 
 `tests/core/nested-field-sweep.test.ts`: walks **every object schema exported from
 `src/models/`**, builds a valid document with every field populated, then at every node
-below the top level (array elements, record entries, nested-object fields and each leaf
-in them) injects `null`, a wrong-type primitive, and for numbers `Infinity`, and asserts
+below the top level (array elements, record entries and record keys, nested-object fields
+and each leaf in them) injects `null`, a wrong-type primitive, for numbers `Infinity`, and
+for record keys a key the key schema rejects, and asserts
 the document still decodes through `validateOrWarn` with all of its top-level fields and
 zero drops. Cases are derived from the schemas, so a nested field or model added later is
 swept the day it lands; a schema the sampler cannot build fails a named test instead of
@@ -108,7 +109,7 @@ escaping. A control half asserts that a required top-level field set to `null` s
 drops, so the repair cannot quietly swallow top-level drift.
 
 **Mutation-verified**: disabling the nested repair in `validateOrWarn` (keeping #659's
-non-finite strip) turns 141 of the sweep's 193 tests red, and all three end-to-end
+non-finite strip) turns 142 of the sweep's 218 tests red, and all three end-to-end
 regression tests in `tests/core/nested-repair-decode.test.ts`.
 
 Siblings checked: the nested containers in `AccountSchema.holdings`,

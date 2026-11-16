@@ -38,6 +38,20 @@
  * a nested path to a top-level one is refused for the same reason: the repair
  * may empty `holdings`, but it never deletes `holdings` itself.
  *
+ * One consequence, unreachable today and stated so a red sweep is easy to
+ * read: a required field inside an OPTIONAL top-level object (`details:
+ * z.object({ total: z.number() }).optional()` with a bad `total`) would climb
+ * to `details` and stop, dropping the document even though removing
+ * `details` would have validated. No model has a top-level object field — all
+ * nested containers are arrays or records, whose entries sit at depth 2 — and
+ * `tests/core/nested-field-sweep.test.ts` goes red the day one is added. The
+ * fix then is to allow the climb when that top-level field accepts
+ * `undefined`.
+ *
+ * Record KEYS are covered too: Zod v4 reports a key that fails its key schema
+ * as `invalid_key` at `[record, badKey]` — depth 2, and present — so the bad
+ * entry is removed like any other.
+ *
  * Nothing here is silent: `validateOrWarn` logs every removed path and counts
  * the document as `repaired`, which `decode_health` reports as partial loss.
  */
@@ -150,33 +164,61 @@ function removeAll(value: unknown, targets: readonly (readonly Segment[])[]): un
   return walk(value, []);
 }
 
+/** Why a document could not be repaired. */
+export type NestedRepairFailureReason =
+  /** An issue (or the node a climb would remove) is a top-level field. */
+  | 'top-level'
+  /** A round found nothing it could remove. */
+  | 'no-progress'
+  /** `MAX_ROUNDS` ran out before the document validated. */
+  | 'exhausted';
+
+export interface NestedRepairFailure {
+  ok: false;
+  reason: NestedRepairFailureReason;
+}
+
+export type NestedRepairOutcome<T> = ({ ok: true } & NestedRepairResult<T>) | NestedRepairFailure;
+
 /**
  * Parse `data`; if it fails only below the top level, remove the offending
  * nested nodes until it validates.
  *
- * @returns the parsed document and what was removed, or `null` when the
- *   document cannot be repaired (a top-level failure, or nothing left to
- *   remove). Never mutates `data`.
+ * `firstIssues` lets a caller that has already parsed `data` (and seen it
+ * fail) skip the first, identical parse.
+ *
+ * @returns `{ ok: true, data, removed }`, or `{ ok: false, reason }` when the
+ *   document cannot be repaired. The reason is reported so a caller can tell
+ *   the expected refusal (`top-level`) from the repair giving up
+ *   (`exhausted`), which would otherwise look exactly like the pre-#902 drop.
+ *   Never mutates `data`.
  */
 export function repairNestedIssues<T>(
   schema: ZodType<T>,
-  data: unknown
-): NestedRepairResult<T> | null {
+  data: unknown,
+  firstIssues?: readonly { path: PropertyKey[]; code: string; message: string }[]
+): NestedRepairOutcome<T> {
   let current = data;
   const removed: NestedRemoval[] = [];
+  let pending = firstIssues;
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
-    const result = schema.safeParse(current);
-    if (result.success) return { data: result.data, removed };
+    let issues = pending;
+    pending = undefined;
+    if (!issues) {
+      const result = schema.safeParse(current);
+      if (result.success) return { ok: true, data: result.data, removed };
+      issues = result.error.issues;
+    }
 
     const targets: Segment[][] = [];
     const seen = new Set<string>();
-    for (const issue of result.error.issues) {
-      if (issue.path.length < MIN_REPAIR_DEPTH) return null;
+    for (const issue of issues) {
+      if (issue.path.length < MIN_REPAIR_DEPTH) return { ok: false, reason: 'top-level' };
       // A present-but-rejected value is removed; an absent one (required
       // field) takes its enclosing node with it.
       const target = exists(current, issue.path) ? [...issue.path] : issue.path.slice(0, -1);
-      if (target.length < MIN_REPAIR_DEPTH) return null;
+      if (target.length < MIN_REPAIR_DEPTH) return { ok: false, reason: 'top-level' };
       const key = keyOf(target);
       if (seen.has(key)) continue;
       seen.add(key);
@@ -189,9 +231,13 @@ export function repairNestedIssues<T>(
     }
 
     const next = removeAll(current, targets);
-    if (next === current) return null;
+    if (next === current) return { ok: false, reason: 'no-progress' };
     current = next;
   }
 
-  return null;
+  // One last parse: the final round's removal may have been the one that
+  // made the document valid.
+  const last = schema.safeParse(current);
+  if (last.success) return { ok: true, data: last.data, removed };
+  return { ok: false, reason: 'exhausted' };
 }

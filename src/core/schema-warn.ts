@@ -99,6 +99,24 @@ function dedupeShape(path: string): string {
   return path.replace(/(^|\.)\d+(?=\.|$)/g, '$1<n>');
 }
 
+/**
+ * Dedupe-key form of a list of path shapes: distinct and sorted, so a
+ * document with three unpriced holdings keys the same as one with one, and
+ * document order does not matter.
+ */
+function shapeKey(shapes: readonly string[]): string {
+  return [...new Set(shapes)].sort().join(',');
+}
+
+/** Paths listed in a warn, capped so one large document cannot flood stderr. */
+const MAX_LISTED_PATHS = 10;
+
+function listPaths(paths: readonly string[]): string {
+  const shown = paths.slice(0, MAX_LISTED_PATHS).join(',');
+  const rest = paths.length - MAX_LISTED_PATHS;
+  return rest > 0 ? `${shown} (+${rest} more)` : shown;
+}
+
 // Dedupe key = `${collection}::${shape(firstIssue.path)}::${firstIssue.code}`.
 // One warn per unique key per process. Prevents log flood when Copilot ships
 // a new field shape that affects every doc in a collection. Note: only the
@@ -144,37 +162,61 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
   // Top-level failures are not repaired — those fields come from the
   // decoder's typed getters, so a mismatch there is real shape drift and still
   // drops and warns below.
+  //
+  // `stripNonFiniteNumbers` returns the input reference when nothing was
+  // stripped, so in that case the parse above already holds round 0's issues
+  // and the repair need not re-parse.
   const stripped = stripNonFiniteNumbers(data);
-  const candidate = stripped.paths.length > 0 ? stripped.value : data;
-  const repair = repairNestedIssues(schema, candidate);
-  if (repair) {
+  const repair = repairNestedIssues(
+    schema,
+    stripped.value,
+    stripped.paths.length === 0 ? result.error.issues : undefined
+  );
+  if (repair.ok) {
     const stats = statsFor(ctx.collection);
     stats.decoded++;
     stats.repaired++;
 
     if (stripped.paths.length > 0) {
-      const pathList = stripped.paths.join(',');
-      const key = `${ctx.collection}::${stripped.paths.map(dedupeShape).join(',')}`;
+      const key = `${ctx.collection}::${shapeKey(stripped.paths.map(dedupeShape))}`;
       if (!warnedNonFiniteKeys.has(key)) {
         warnedNonFiniteKeys.add(key);
         console.warn(
-          `[copilot-money-mcp] non-finite field: collection=${ctx.collection} docId=${ctx.docId} paths=${pathList} — value was NaN or ±Infinity in the cache; field dropped, document kept`
+          `[copilot-money-mcp] non-finite field: collection=${ctx.collection} docId=${ctx.docId} paths=${listPaths(stripped.paths)} — value was NaN or ±Infinity in the cache; field dropped, document kept`
         );
       }
     }
 
     if (repair.removed.length > 0) {
-      const pathList = repair.removed.map((r) => r.path).join(',');
-      const key = `${ctx.collection}::${repair.removed.map((r) => `${dedupeShape(r.path)}:${r.code}`).join(',')}`;
+      const key = `${ctx.collection}::${shapeKey(repair.removed.map((r) => `${dedupeShape(r.path)}:${r.code}`))}`;
       if (!warnedNestedKeys.has(key)) {
         warnedNestedKeys.add(key);
         const firstRemoval = repair.removed[0];
+        // `message` is Zod's issue text. For the issue codes a nested repair
+        // removes it names TYPES and bounds ("expected number, received
+        // null"), not the received value — same reasoning as the schema-drop
+        // warn below — and the paths are field names, indices and map keys
+        // (dates / epoch-ms), never amounts.
         console.warn(
-          `[copilot-money-mcp] invalid nested field: collection=${ctx.collection} docId=${ctx.docId} paths=${pathList} code=${firstRemoval?.code} message="${firstRemoval?.message}" — value did not match the schema; removed, document kept`
+          `[copilot-money-mcp] invalid nested field: collection=${ctx.collection} docId=${ctx.docId} paths=${listPaths(repair.removed.map((r) => r.path))} code=${firstRemoval?.code} message="${firstRemoval?.message}" — value did not match the schema; removed, document kept`
         );
       }
     }
     return repair.data;
+  }
+
+  // The repair giving up after its round bound is NOT the expected refusal of
+  // a top-level failure: without this line it would look exactly like the
+  // pre-#902 drop, a nested path in a `schema drop` warn with no hint that a
+  // repair ran. Say so separately.
+  if (repair.reason === 'exhausted') {
+    const key = `${ctx.collection}::exhausted`;
+    if (!warnedNestedKeys.has(key)) {
+      warnedNestedKeys.add(key);
+      console.warn(
+        `[copilot-money-mcp] nested repair exhausted: collection=${ctx.collection} docId=${ctx.docId} — the nested-value repair hit its round limit before the document validated; it is dropped (see the schema drop warn). This is a bug in copilot-money-mcp, please report it.`
+      );
+    }
   }
 
   // Count every dropped doc — drops are NOT deduped like the warnings below,
