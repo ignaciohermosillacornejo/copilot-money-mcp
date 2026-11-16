@@ -336,16 +336,24 @@ const CASES: Case[] = [
   },
 ];
 
+/** Each case's rows, computed once and shared by its tests. */
+const rowsMemo = new Map<Case, Promise<Map<string, Row[]>>>();
+const rowsOf = (c: Case): Promise<Map<string, Row[]>> => {
+  let rows = rowsMemo.get(c);
+  if (!rows) rowsMemo.set(c, (rows = c.rows()));
+  return rows;
+};
+
 describe('category_name for an id in neither name map (#867)', () => {
   describe.each(CASES)('$tool ($mode)', (c) => {
     test('the known id resolves to its name', async () => {
-      const rows = (await c.rows()).get(CAT_KNOWN) ?? [];
+      const rows = (await rowsOf(c)).get(CAT_KNOWN) ?? [];
       expect(rows.length).toBeGreaterThan(0);
       for (const row of rows) expect(row.category_name).toBe(KNOWN_NAME);
     });
 
     test.each(UNKNOWN_IDS)('unknown id %s yields no name', async (id) => {
-      const rows = (await c.rows()).get(id) ?? [];
+      const rows = (await rowsOf(c)).get(id) ?? [];
       // The row must still be returned — the fix drops the name, not the row.
       expect(rows.length).toBeGreaterThan(0);
       for (const row of rows) {

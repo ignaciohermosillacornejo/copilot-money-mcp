@@ -4,7 +4,7 @@ title: Cache-mode category_name returned a raw or title-cased category id as the
 class: identity-resolution
 status: fixed
 detected: code-review  # the #854 review noticed the transaction_type rules and the returned field disagreed on what "no name" meant
-fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/867
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/909
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/867
 date: 2026-10-30
 ---
@@ -55,8 +55,11 @@ known-names-only rule the `transaction_type` rules use — and its callers emit 
 way each tool already emits it for an uncategorized row: the key is absent on
 transaction, recurring and budget rows (matching `get_transactions_live`, which omits it),
 and `null` on `get_categories` list rows, whose other absent values are already `null`.
-`getCategoryName()` keeps its fallback; nothing that returns a name to a client calls it any
-more.
+`getCategoryName()` keeps its fallback, but its reach is closed: the last other `src/` caller,
+`CopilotDatabase.getCategories()` (no production caller, but public), now uses
+`lookupKnownCategoryName()` as well and leaves `name` absent for an unknown id. The
+finance-pulse skill, which used "no `category_name`" to mean uncategorized, now tests
+`category_id` instead, so a row in a deleted category still counts as spending.
 
 ## Detector
 
@@ -69,11 +72,18 @@ for either unknown id, and cache and live `get_transactions` must agree row-for-
 Verified against the defect: before the fix, every cache case failed and every live case
 passed.
 
-Partial: the table is hand-listed, so a new tool that returns `category_name` joins it only
-if its author adds a row.
+The table is hand-listed, so a new tool that returns `category_name` joins it only if its
+author adds a row. The class-level half is `tests/no-guessing-category-name.test.ts`: an AST
+sweep that fails if any `src/` file other than `src/utils/categories.ts` references
+`getCategoryName` (import, renamed import, namespace access, re-export or call). A new tool
+cannot reach the guessing fallback without failing it, whether or not it joins the table.
+Mutation-checked: re-importing it in `src/core/database.ts` fails the sweep.
 
 ## Lesson
 
 A name resolver with a "make something up" fallback should not be reachable from a field a
 client reads. #69 and #91 were the same failure in other callers; the fallback outlived
-both fixes because each removed one caller instead of the fallback's reach.
+both fixes because each removed one caller instead of the fallback's reach. This fix
+closes the reach and gates it. A predicate written on the old behaviour ("no name" meaning
+"no category") has to move with it, so search for consumers of the field's absence, not
+only producers of the field.

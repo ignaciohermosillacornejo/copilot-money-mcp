@@ -81,7 +81,7 @@ Run two passes. The first catches the highest-signal cases; the second sweeps up
 
 **Pass A — Cross-category merchants (do this FIRST).**
 
-Group all transactions by `normalized_merchant` over the 6-month history (it is in the Phase 1 pull's `fields` list — it is not in the default row). For each merchant, count the number of distinct `category_name` values used. Flag every merchant with **≥2 distinct categories** as a high-confidence miscategorization candidate — when the same merchant has been filed under multiple buckets, at least one of those categorizations is almost certainly wrong.
+Group all transactions by `normalized_merchant` over the 6-month history (it is in the Phase 1 pull's `fields` list — it is not in the default row). For each merchant, count the number of distinct `category_name` values used. A row with no `category_name` (uncategorized, or in a deleted category) adds no category to that count. Flag every merchant with **≥2 distinct categories** as a high-confidence miscategorization candidate — when the same merchant has been filed under multiple buckets, at least one of those categorizations is almost certainly wrong.
 
 Threshold notes:
 - ≥3 distinct categories is almost always a miscategorization somewhere; present these first.

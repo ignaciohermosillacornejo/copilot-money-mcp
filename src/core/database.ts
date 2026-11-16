@@ -45,7 +45,7 @@ import type {
 } from '../models/index.js';
 import type { BalanceHistory } from '../models/balance-history.js';
 import { preferredAccountName } from '../models/account.js';
-import { getCategoryName } from '../utils/categories.js';
+import { lookupKnownCategoryName } from '../utils/categories.js';
 import { retryInterrupted, isRetryableErrno } from './fs-retry.js';
 
 /**
@@ -1640,7 +1640,8 @@ export class CopilotDatabase {
    * referenced in transactions. User-defined categories take precedence
    * for naming.
    *
-   * @returns List of unique categories with human-readable names
+   * @returns List of unique categories; `name` is absent for an id in neither
+   *   the user's categories nor the Plaid taxonomy
    */
   async getCategories(): Promise<Category[]> {
     const [transactions, userCategories] = await Promise.all([
@@ -1675,10 +1676,11 @@ export class CopilotDatabase {
     // Then add any transaction categories not in user-defined list
     for (const categoryId of categoryIdsFromTxns) {
       if (!seenIds.has(categoryId)) {
-        // Fall back to static mapping for standard Plaid categories
+        // Fall back to the Plaid taxonomy; an id in neither map gets no name
+        // rather than a made-up one (#867).
         const category: Category = {
           category_id: categoryId,
-          name: getCategoryName(categoryId),
+          name: lookupKnownCategoryName(categoryId) ?? undefined,
         };
         uniqueCategories.push(category);
         seenIds.add(categoryId);

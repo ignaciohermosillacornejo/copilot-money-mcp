@@ -1245,7 +1245,9 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   // `pending`, no `internal_transfer` — against live's 10, which is why the
   // measured headline in CHANGELOG.md reads 9 and not 10. An UNCATEGORIZED
   // cache row is 7: `category_name` resolves to `undefined` and serialization
-  // drops it, the same mechanism that makes an uncategorized live row 9.
+  // drops it, the same mechanism that makes an uncategorized live row 9. Since
+  // #867 the same happens to a cache row whose category id is in neither the
+  // user's categories nor the Plaid taxonomy (e.g. a deleted category).
   // Live's 10 is itself a ceiling rather than a constant: `category_name`
   // resolves to `undefined` for a row with no category, or one whose category
   // id is missing from the index, and JSON.stringify drops the key — so an
