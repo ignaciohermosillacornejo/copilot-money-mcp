@@ -43,11 +43,12 @@
  *     character — any Unicode letter or digit, `_` or `-`. A sibling such as
  *     `${home}.bak/x` becomes `~.bak/x`: the path keeps its shape and loses the
  *     name.
- *   - At or above a root (`/`, `/Users`, `/home`, or one of them with trailing
- *     slashes — a degenerate `HOME`), the home is not used at all. Matched
- *     literally it would turn `/Users/bob/x` into `~/bob/x`: the name survives
- *     and reads as the current user's home, where the prefix rule alone gives
- *     `/Users/<user>/x`.
+ *   - At or above a root (`/`, `/Users`, `/home`), or relative (`Users`) — a
+ *     degenerate `HOME` — the home is not used at all. Matched literally it
+ *     would turn `/Users/bob/x` into `~/bob/x` (or `/~/bob/x`): the name
+ *     survives and reads as the current user's home, where the prefix rule
+ *     alone gives `/Users/<user>/x`. Trailing slashes are stripped first, for
+ *     both this check and the match, so `/opt/bob/` is matched as `/opt/bob`.
  *
  * The strict boundary is built from the prefix rule's stop class on purpose.
  * The invariant: the boundary accepts exactly `SEGMENT_END` plus
@@ -122,27 +123,41 @@ const SEGMENT_END = `/\\s'",)`;
  */
 const BOUNDARY_ONLY = `:;\\]}?!`;
 
-/** The directories whose children the prefix rule treats as usernames. */
-const USER_ROOTS = ['Users', 'home'];
+/**
+ * The directories whose children the prefix rule treats as usernames. Each
+ * entry is interpolated unescaped into regex alternation source, so an entry
+ * must be a plain directory name with no regex metacharacters.
+ */
+const USER_ROOTS: readonly string[] = ['Users', 'home'];
 const USER_ROOT_SOURCE = USER_ROOTS.join('|');
 
 const USER_PREFIX = new RegExp(`/(${USER_ROOT_SOURCE})/[^${SEGMENT_END}]+`, 'g');
 
+/** A home directly under a user root, where the strict boundary applies. */
+const UNDER_USER_ROOT = new RegExp(`^/(${USER_ROOT_SOURCE})/[^/]+$`);
+
 export function redactUserPaths(text: string, home: string = safeHomedir()): string {
   let out = text;
-  if (isMatchableHome(home)) out = out.replace(homePattern(home), '~');
+  // One normalized home for both the gate and the pattern, so they never
+  // disagree about what the home is: `/opt/bob/` is matched as `/opt/bob`.
+  const normalized = home.replace(/\/+$/, '');
+  if (isMatchableHome(normalized)) out = out.replace(homePattern(normalized), '~');
   return out.replace(USER_PREFIX, '/$1/<user>');
 }
 
 /**
- * Whether `home` is worth matching literally. Not when it is empty, or when it
- * is a user root or an ancestor of one (`/` included): replacing it there
- * would consume the root and leave the username for the prefix rule to miss.
+ * Whether `home` (trailing slashes already stripped) is worth matching
+ * literally. Not when it is relative or empty (`/` included): `os.homedir()`
+ * returns `$HOME` verbatim, and a relative `HOME=Users` would turn
+ * `/Users/bob/x` into `/~/bob/x`. Nor when it is a user root or an ancestor of
+ * one: replacing it there would consume the root and leave the username for
+ * the prefix rule to miss.
  */
 function isMatchableHome(home: string): boolean {
-  const trimmed = home.replace(/\/+$/, '');
+  // mutation-guard: a relative home is never matched
+  if (!home.startsWith('/')) return false;
   // mutation-guard: a home at or above a user root is never matched
-  return trimmed !== '' && !USER_ROOTS.some((root) => `/${root}/`.startsWith(`${trimmed}/`));
+  return !USER_ROOTS.some((root) => `/${root}/`.startsWith(`${home}/`));
 }
 
 /**
@@ -157,7 +172,7 @@ function homePattern(home: string): RegExp {
   if (cachedHome !== home || !cachedPattern) {
     // See the module docblock: strict where the prefix rule can take over,
     // broad (and Unicode-aware) only where it cannot.
-    const underUserRoot = new RegExp(`^/(${USER_ROOT_SOURCE})/[^/]+$`).test(home);
+    const underUserRoot = UNDER_USER_ROOT.test(home);
     const boundary = underUserRoot
       ? `(?=[${SEGMENT_END}${BOUNDARY_ONLY}]|$)`
       : '(?![\\p{L}\\p{N}_-])';

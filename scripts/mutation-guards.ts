@@ -1074,14 +1074,33 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'replace',
       find:
         '  // mutation-guard: a home at or above a user root is never matched\n' +
-        "  return trimmed !== '' && !USER_ROOTS.some(",
+        '  return !USER_ROOTS.some(',
       with:
         '  // mutation-guard: a home at or above a user root is never matched\n' +
-        "  return trimmed !== '' && !USER_ROOTS.slice(0, 0).some(",
+        '  return !USER_ROOTS.slice(0, 0).some(',
     },
     expectFailingTests: [
       'a home at or above a /Users or /home root is ignored, so the prefix rule still scrubs the name',
     ],
+    expectFails: 'tests/utils/redact-paths.test.ts',
+  },
+  {
+    name: 'a relative home is never matched',
+    file: 'src/utils/redact-paths.ts',
+    invariant:
+      'redactUserPaths matches the home literally only when it is absolute. os.homedir() ' +
+      'returns $HOME verbatim, so HOME=Users is possible, and matched literally it turns ' +
+      '/Users/bob/x into /~/bob/x: the root is consumed, the prefix rule misses, and the ' +
+      'username survives (#888 review). A disclosure invariant, like the row above.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '  // mutation-guard: a relative home is never matched\n' +
+        "  if (!home.startsWith('/')) return false;",
+      with:
+        '  // mutation-guard: a relative home is never matched\n' + '  if (false) return false;',
+    },
+    expectFailingTests: ['a relative home is ignored, so the prefix rule still scrubs the name'],
     expectFails: 'tests/utils/redact-paths.test.ts',
   },
   {

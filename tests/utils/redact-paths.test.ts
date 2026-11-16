@@ -253,6 +253,43 @@ describe('redactUserPaths', () => {
     // A real home directly under a root is still used.
     expect(redactUserPaths('/Users/bob/x', '/Users/bob')).toBe('~/x');
   });
+
+  test('a relative home is ignored, so the prefix rule still scrubs the name', () => {
+    // `os.homedir()` returns `$HOME` verbatim, absolute or not. Matched
+    // literally, `HOME=Users` would rewrite `/Users/bob/x` to `/~/bob/x`.
+    for (const home of ['Users', 'home', 'Users/', 'bob', 'Users/bob']) {
+      for (const text of ["open '/Users/bob/x'", 'open /home/bob: EACCES', 'cwd is /Users/bob']) {
+        expect({ home, out: redactUserPaths(text, home) }).toEqual({
+          home,
+          out: redactUserPaths(text, ''),
+        });
+      }
+    }
+  });
+
+  test('a trailing slash on the home changes nothing, under a user root and outside one', () => {
+    const texts = [
+      "open '/Users/bob/x'",
+      'cwd is /Users/bob',
+      'open /opt/svc/data: EACCES',
+      "stat '/opt/svc'",
+    ];
+    for (const [home, slashed] of [
+      ['/Users/bob', '/Users/bob/'],
+      ['/opt/svc', '/opt/svc//'],
+    ]) {
+      for (const text of texts) {
+        expect({ slashed, text, out: redactUserPaths(text, slashed) }).toEqual({
+          slashed,
+          text,
+          out: redactUserPaths(text, home),
+        });
+      }
+    }
+    // Outside the user roots the prefix rule is blind, so the literal match is
+    // the only thing that removes the name.
+    expect(redactUserPaths('open /opt/svc/data', '/opt/svc/')).toBe('open ~/data');
+  });
 });
 
 describe('handleCallTool relays a thrown error without the username', () => {
