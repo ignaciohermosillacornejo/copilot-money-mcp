@@ -288,18 +288,26 @@ async function ensureCategory(ctx: RoundtripContext): Promise<string> {
   return ctx.state.categoryId;
 }
 
+/**
+ * Create a marker transaction and register it for cleanup. Defaults to a
+ * REGULAR row in the run's category; `uncategorized` sends the given type
+ * with `categoryId: ''`, which is what create_transaction sends for INCOME /
+ * INTERNAL_TRANSFER when the caller gives no category_id.
+ */
 async function createSmokeTransaction(
   ctx: RoundtripContext,
   suffix: string,
-  amount: number
+  amount: number,
+  uncategorized?: { type: 'INCOME' | 'INTERNAL_TRANSFER' }
 ): Promise<{ id: string } & RoundtripAccountRef> {
   const account = await ensureAccount(ctx);
-  const categoryId = await ensureCategory(ctx);
+  const categoryId = uncategorized ? '' : await ensureCategory(ctx);
+  const type = uncategorized?.type ?? 'REGULAR';
   const name = `${ctx.state.marker}-${suffix}`;
   const created = await createTransaction(ctx.client, {
     accountId: account.accountId,
     itemId: account.itemId,
-    input: { name, date: todayIso(), amount, categoryId, type: 'REGULAR' },
+    input: { name, date: todayIso(), amount, categoryId, type },
   });
   const ref = { id: created.id, ...account };
   ctx.registry.add({
@@ -509,7 +517,7 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
   {
     tool: 'create_transaction',
     domain: 'transactions',
-    flow: 'create marker transaction (amount 100) on the first account → verify via Transactions re-read (deleted by delete_transaction)',
+    flow: 'create marker transaction (amount 100) on the first account → verify via Transactions re-read (deleted by delete_transaction); create a marker INCOME row with an empty categoryId → verify type and no category via re-read (deleted by cleanup)',
     appliesSurfaces: ['Mutation.createTransaction:applies'],
     run: async (ctx) => {
       const txn = await ensureTxnA(ctx);
@@ -530,6 +538,26 @@ export const ROUNDTRIP_CHECKS: readonly RoundtripCheck[] = [
         'create_transaction: re-read categoryId does not match the requested category'
       );
       check(after.type === 'REGULAR', `create_transaction: re-read type '${after.type}'`);
+
+      // INCOME with no category: CreateTransactionInput.categoryId is `ID!`,
+      // so create_transaction sends `categoryId: ''` for it. Re-verifies the
+      // ledger's Mutation.createTransaction:empty-category-for-income.
+      // createSmokeTransaction registers the row, so cleanup deletes it even
+      // when an assertion below fails.
+      const income = await createSmokeTransaction(ctx, 'txn-income', 200, { type: 'INCOME' });
+      const incomeAfter = await readTransactionById(ctx.client, ctx.state.marker, income.id);
+      check(
+        incomeAfter,
+        `create_transaction: INCOME row ${income.id} (empty categoryId) missing from Transactions re-read`
+      );
+      check(
+        incomeAfter.type === 'INCOME',
+        `create_transaction: INCOME row (empty categoryId) re-read type '${incomeAfter.type}', expected INCOME`
+      );
+      check(
+        !incomeAfter.categoryId,
+        `create_transaction: INCOME row (empty categoryId) re-read with category '${String(incomeAfter.categoryId)}', expected none`
+      );
       return undefined;
     },
   },

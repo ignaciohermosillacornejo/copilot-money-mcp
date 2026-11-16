@@ -78,6 +78,13 @@ need it.
   row's FAIL) or `; expectation changed by PR #N, needs re-run` (the old result no
   longer tests what the row says). A run that repeats such a row replaces the
   whole cell with its new result.
+- 2026-11-16: write-path follow-ups (#869). W-03 now creates INCOME and
+  INTERNAL_TRANSFER without a category (passing one is refused, new ERR-20);
+  ERR-09 and COH-06 state the behaviour after #855 and #864. A manual account's
+  balance ignores rows dated before its last balance reset (#848), so P-04
+  records that date, test rows are dated after it, and W-12, CL-04 and CL-07
+  count only rows after it; their 2026-10-18 results were reset to `not run`.
+  W-24 groups the #861 split-target probes into one round-trip.
 
 ## P — Preflight
 
@@ -86,7 +93,7 @@ need it.
 | P-01 | [P1] MCP server runs the current build | The checkout the server runs from (`~/.claude.json`, `copilot-money` entry) is at `origin/main`; `ps -o lstart,command -ax \| grep src/cli.ts` shows a process started after that commit. If not, ask the user to `/mcp` reconnect `copilot-money`. | Server process newer than HEAD | 2026-10-18 PASS |
 | P-02 | [P1] Live and write mode are on | Tool list has `get_accounts_live` and `create_transaction`, and not the cache-mode get_accounts | Both present | 2026-10-18 PASS |
 | P-03 | [P1] Web session | Chrome tab on `https://app.copilot.money/accounts` renders the account list | Logged in | 2026-10-18 PASS |
-| P-04 | [P1] Manual account baseline | Ask the user which account is the test account; `get_accounts_live { account_type: "other", fields: ["id","itemId","name","balance","isManual"] }`; list its transactions over all dates | `isManual: true`. Record id, item id, balance, and every existing transaction id (DO NOT TOUCH) | 2026-10-18 PASS |
+| P-04 | [P1] Manual account baseline | Ask the user which account is the test account; `get_accounts_live { account_type: "other", fields: ["id","itemId","name","balance","isManual"] }`; list its transactions over all dates; ask the user for the date of the account's last balance reset | `isManual: true`. Record id, item id, balance, the last balance-reset date, and every existing transaction id (DO NOT TOUCH) | 2026-10-18 PASS |
 | P-05 | [P1] No API drift before comparing | `bun run smoke` then `bun run smoke:cache` from the server's checkout | All PASS. A drift verdict ends the run: otherwise drift shows up as dozens of parity FAILs | 2026-10-18 PASS |
 | P-06 | [P1] Cache side and live side run the same code | `git rev-parse HEAD` where `cache-call.ts` runs equals the server checkout's HEAD; `bun install` done | Equal | 2026-10-18 PASS |
 | P-07 | [P2] The cache is fresh | `cache-call.ts getCacheInfo` newest transaction date vs live's newest | Within 1 day; otherwise every cache comparison this run is SKIP (stale), not PASS or FAIL. This compares transaction dates only: an account balance can lag on its own, so cache balances are checked per row in ACC-01 | 2026-10-18 PASS (finding: one account balance lagged, see ACC-01) |
@@ -224,7 +231,7 @@ Log every write in the ledger **before** sending it (SKILL.md Guardrail 2).
 |---|---|---|---|---|
 | W-01 | [P1] Create tag and category | `create_tag` (emoji name), `create_category` | Appear in `get_tags_live` / `get_categories_live` and the web | 2026-10-18 PASS |
 | W-02 | [P1] Create REGULAR with every optional field | Unicode, emoji, quotes, `<` `>`, `&` in the name; multi-line note with a URL and trailing spaces; a tag | Round-trips exactly | 2026-10-18 PASS |
-| W-03 | [P1] Create INCOME and INTERNAL_TRANSFER with a `category_id` | — | Live `category_id` is `null` (the API's `""` is normalised since #860), `category_name` absent, `type` as written; web shows no category (API inconsistency #825) | 2026-10-18 PASS; expectation changed by PR #860, needs re-run |
+| W-03 | [P1] Create INCOME and INTERNAL_TRANSFER with no `category_id` | `create_transaction` once per type, leaving out `category_id` (passing one is refused, ERR-20); read both back with `get_transactions_live` | Both created; live `category_id` is `null` (the API's `""` is normalised since #860), `category_name` absent, `type` as written; web shows no category (API inconsistency #825) | not run |
 | W-04 | [P2] Future date, $0.01 | — | Stored; counted in the web balance | 2026-10-14 PASS |
 | W-05 | [P1] Update | Rename (emoji), clear note (`""`), clear tags (`[]`), `reviewed: false`, date and amount | All land; web shows them | 2026-10-18 PASS |
 | W-06 | [P1] Bulk | `bulk_edit_transactions` add tag; `review_transactions {rows, reviewed:false}` | Tag added and existing tags kept; reviewed as written | 2026-10-18 PASS |
@@ -233,7 +240,7 @@ Log every write in the ledger **before** sending it (SKILL.md Guardrail 2).
 | W-09 | [P1] Link a transaction | `add_transaction_to_recurring` | `recurring_id` set on the row (`get_transactions_live {fields:["default","recurring_id"]}`) and the web recurring detail lists it. Not `get_recurring_live` `payments`: that holds only the next scheduled payment (#847/#856) | 2026-10-18 PASS (category changes, #848); expectation changed by PR #860, needs re-run |
 | W-10 | [P2] Update and pause recurring | `update_recurring` (name + rule), `set_recurring_state PAUSED` | Read back exactly | 2026-10-14 PASS |
 | W-11 | [P2] Budget override for one month | `set_budget {month}` on the test category for the current month, then a non-current month; read each; restore | Shows in the web for that month, then restores (the two months take different live-cache paths, `live-database.ts` ~755-794) | 2026-10-14 PASS (current month only); not re-run 2026-10-18 |
-| W-12 | [P1] Manual balance follows its transactions | Web balance vs baseline after the creates | Baseline minus expenses plus income | 2026-10-18 FAIL: Copilot ignores rows dated before the last balance reset (#848) |
+| W-12 | [P1] Manual balance follows its transactions | Web balance vs baseline after the creates. Rows are dated after the account's last balance reset (P-04, SKILL.md Phase 2) | Baseline minus expenses plus income, counting only rows dated after the last balance reset: Copilot ignores a row dated before it (#848), so such a row (W-19's, or a cold-month COH row when the reset is recent) is logged with a balance effect of 0 | not run |
 | W-13 | [P2] `update_category` and `update_tag` | Rename, colour, emoji, `is_excluded: true` then false on the test category; rename + colour on the test tag | Round-trip in live and web; while excluded the test row is expected to drop out of default reads (whether it also leaves the `get_monthly_spend_live` series is unmeasured — CAT-11 records it, so do not FAIL W-13 on monthly spend alone); `get_transactions_live` with `tag: <old name>` errors, new name works | not run |
 | W-14 | [P2] Create with `note` and `recurring_id` | `create_transaction` with both | Round-trip; the row carries the note and `recurring_id`, and the web recurring detail lists it (`payments` holds only the next payment, #847/#856) | not run |
 | W-15 | [P2] Budget all-months default | `set_budget` without `month`; read current and next month in live and web; restore | Both months show it (the live cache patch touches only the current month, `live-database.ts` ~742: expected FAIL for other months) | not run |
@@ -245,6 +252,7 @@ Log every write in the ledger **before** sending it (SKILL.md Guardrail 2).
 | W-21 | [P2] Parallel writes | In one turn: two `update_transaction` on one test row (name, tags) and two `create_transaction` | Both edits land; each create exists once; balance change equals their sum | not run |
 | W-22 | [P2] Delete a category, tag or recurring still in use | Delete each while a test row references it | The row's category / tags / `recurring_id` in both modes match the web; no dangling ids; `tagged` filter has no ghost | not run |
 | W-23 | [P1] Split parent cannot be deleted (#822) | Split a test row, then `delete_transaction` on the parent; delete both children; `refresh_cache` that month, then `get_transactions_live` for it with fields: ["default", "parent_transaction_id"] and require `_cache_hit: false` (a cached read proves nothing: the parent was evicted locally at split time); `refresh_cache` again; `delete_transaction` on the parent again; `/mcp` reconnect and `delete_transaction` on the parent a third time. Every parent delete is expected to be REFUSED by the client before anything is sent, which is why this row may call it despite Guardrail 4. If any is accepted, #822/#842 has regressed: stop, record the balance delta, do not retry. See also CL-06 | All three parent deletes refused and nothing sent — including after the children are gone, when the fresh read shows the parent id as an ordinary row (expected: ledger row `Transaction.parentId:childlessParentReappears`), and after the reconnect (persisted record, #842); web balance back to the baseline | 2026-10-18 FAIL #842 (blocker) |
+| W-24 | [P2] Split-target probes (#861): settle the unverified ledger entries `Mutation.editTransaction:split-parent-balance-fields`, `Mutation.editTransaction:split-child-amount`, `Mutation.splitTransaction:resplit`, `Mutation.splitTransaction:split-child`, `Mutation.addTransactionToRecurring:split-parent` | Needs the user's explicit yes for this run. The MCP tools refuse every one of these calls, so the probes send the raw mutations from a scratch script that calls the wrappers in `src/core/graphql/transactions.ts` against one throwaway REGULAR test row dated after the balance reset. Split it into two children, then in turn: change the parent's amount; change one child's amount so the children no longer sum to the parent; split the parent again; split a child; link the parent to the test recurring. Read the web balance and the row's children in live and web before and after each step; stop at the first unexplained balance move (Guardrail 6). Never delete the parent (Guardrail 4) | For each step, the report records what the server did (accepted, rejected, rebalanced) and the balance delta, and each ledger entry moves to `verified-once` with that evidence (synthetic figures only) | not run |
 
 ## COH — Coherence (writes must be visible to the next read)
 
@@ -258,7 +266,7 @@ read once first so it is cached. Check `_cache_hit` and `_cache_oldest_fetched_a
 | COH-03 | [P1] `update_transaction` date/amount moving a row into a cold month | Shows at the new date | 2026-10-18 PASS |
 | COH-04 | [P1] `bulk_edit_transactions` tag / `review_transactions` on a cold-month row | New tag / reviewed state visible | 2026-10-18 PASS (#821 fixed) |
 | COH-05 | [P1] `update_transaction` category / note / tags on a cold-month row | Visible | 2026-10-18 PASS |
-| COH-06 | [P1] `add_transaction_to_recurring` on a cold-month row | `recurring_id` visible | 2026-10-18 PASS |
+| COH-06 | [P1] `add_transaction_to_recurring` on a cold-month row | `recurring_id` visible, and the row's category has changed to the recurring's category (#864) | 2026-10-18 PASS; expectation changed by PR #864, needs re-run |
 | COH-07 | [P1] `delete_transaction` on a cold-month row | Gone | 2026-10-18 PASS |
 | COH-08 | [P2] Manual account balance after a transaction write | `get_accounts_live` shows it | 2026-10-14 FAIL (1h stale) #825; not re-run 2026-10-18 |
 | COH-09 | [P1] Edits made in the **web**, read through the MCP: Edit a cold-month test row in the web (category, note, tag, amount) and create one there; read live | Visible; expected FAIL (cold months cached a week). At minimum `refresh_cache` fixes it | 2026-10-18 FAIL as expected; refresh_cache fixes it |
@@ -280,7 +288,7 @@ read once first so it is cached. Check `_cache_hit` and `_cache_oldest_fetched_a
 | ERR-06 | [P2] `set_budget` negative amount | Rejected | 2026-10-14 PASS |
 | ERR-07 | [P2] Reversed date range | Rejected with both dates | 2026-10-14 PASS |
 | ERR-08 | [P2] Unknown `period` | Rejected, listing valid periods | 2026-10-18 FAIL #825 |
-| ERR-09 | [P1] Well-formed but nonexistent `category_id` on `create_transaction` / a `split_transaction` child | Rejected before the write; expected FAIL by code (only the shape is checked, and the server accepts unknown ids) | 2026-10-18 FAIL #846 |
+| ERR-09 | [P1] Well-formed but nonexistent `category_id` on `create_transaction` / a `split_transaction` child | Rejected before the write (validated client-side; the server stores an unknown id verbatim) | 2026-10-18 FAIL #846 |
 | ERR-10 | [P2] Nonexistent `recurring_id` on `create_transaction` | Rejected before the write | not run |
 | ERR-11 | [P1] `delete_transaction` / `split_transaction` on a split parent | Rejected client-side (#822) | 2026-10-18 PASS (delete while children exist); re-split SKIP (not run, #836) |
 | ERR-12 | [P1] `delete_transaction` with the right id and a wrong `item_id` | An error, not `success: true, deleted: false`; the row is still there | 2026-10-18 PASS |
@@ -291,6 +299,7 @@ read once first so it is cached. Check `_cache_hit` and `_cache_oldest_fetched_a
 | ERR-17 | [P2] Unknown tag id in `bulk_edit_transactions`; the same id in add and remove; `account_id` without `item_id` | Each rejected before any write | not run |
 | ERR-18 | [P3] Amount `12.345`, `0`, above the maximum | Rejected, or round-trips exactly as the web shows | not run |
 | ERR-19 | [P3] `get_investment_prices_live` unheld `security_id`; `refresh_cache {months:["2026-1"]}`; `set_budget {month:"2026-1"}` | Each a clean, named error | not run |
+| ERR-20 | [P1] `create_transaction` `category_id` + `type: INCOME`, then the same with `type: INTERNAL_TRANSFER` | Each rejected client-side with the reason; nothing created | not run |
 
 ## SES — Session and environment
 
@@ -323,9 +332,9 @@ web for that month, and list every write-tool call in the subagent's transcript.
 | CL-01 | [P1] Recurring items deleted; budget overrides restored to their baseline values (not `"0"`) | Gone / restored in live and web | 2026-10-18 PASS |
 | CL-02 | [P1] Transactions deleted in reverse creation order, split **children only** (#822) | No run-prefixed rows in live; cache catches up (CL-09) | 2026-10-18 PASS |
 | CL-03 | [P1] Test category and tag deleted | Gone | 2026-10-18 PASS |
-| CL-04 | [P1] Manual balance equals the P-04 baseline | Equal in live (after `refresh_cache {scope:"accounts"}`) and web | 2026-10-18 FAIL −5, explained by the reset-date rule (#848) |
+| CL-04 | [P1] Manual balance equals the P-04 baseline | Equal in live (after `refresh_cache {scope:"accounts"}`) and web. A row dated before the account's last balance reset never moved the balance, so deleting it credits nothing back (#848) | not run |
 | CL-05 | [P1] Real-account settings changed during the run restored | Restored | 2026-10-18 PASS |
 | CL-06 | [P1] Split parents after their children are gone | Record each parent's state in live and web; never delete one; a remaining parent is a known leftover. W-23 checks the same parents through the delete guard | 2026-10-18 PASS (finding: a childless parent becomes an ordinary row, #842) |
-| CL-07 | [P1] Balance after every cleanup group | Baseline plus the effects of the ledger rows still present; the first drifting step is named | 2026-10-18 PASS |
+| CL-07 | [P1] Balance after every cleanup group | Baseline plus the effects of the ledger rows still present, where a row dated before the account's last balance reset has no effect (#848); the first drifting step is named | not run |
 | CL-08 | [P2] Real categories touched by the test | Web month totals back to their before-test values | not run |
 | CL-09 | [P2] Cache catches up | After the desktop app syncs, no test rows in the cache; wait at most 15 minutes, then SKIP (stale) | not run |

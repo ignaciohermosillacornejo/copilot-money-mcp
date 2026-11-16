@@ -495,15 +495,17 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   {
     surface: 'Mutation.createTransaction:empty-category-for-income',
     kind: 'operation',
-    oracle: null,
-    class: 'verified-once',
+    oracle: 'smoke:roundtrip',
+    class: 'gated',
     evidence:
       'live probe 2026-10-19, #857/#869: create_transaction makes category_id optional for ' +
       'INCOME / INTERNAL_TRANSFER (#825) and sends `categoryId: ""` then, because ' +
       'CreateTransactionInput.categoryId is `ID!`. On a manual test account (synthetic rows, ' +
       'deleted right after, balance unchanged) createTransaction with `categoryId: ""` ' +
       'succeeded for both INCOME and INTERNAL_TRANSFER, and the returned row carried ' +
-      '`categoryId: ""` and the requested type. Nothing re-checks it.',
+      '`categoryId: ""` and the requested type. smoke:roundtrip\'s create_transaction check ' +
+      're-verifies it on every run: it creates a marker INCOME row with `categoryId: ""`, ' +
+      're-reads it, asserts type INCOME and no category, and deletes it in cleanup.',
   },
   {
     surface: 'Mutation.splitTransaction:no-referential-validation',
