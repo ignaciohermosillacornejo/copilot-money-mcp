@@ -53,30 +53,37 @@ function cacheFor(
   return live.getRecurringCache() as never;
 }
 
+type DerivedKey =
+  | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number]
+  | (typeof LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS)[number];
+
 /**
- * The snapshots a recurring write derives (#868), keyed like
- * LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS; a key added there without
- * one here is a type error. A possibly-applied recurring write drops them
- * with the recurring snapshot (#911 review).
+ * The snapshots a recurring (#868) or category (#911 review) write derives;
+ * a key added to either list without one here is a type error. A
+ * possibly-applied write drops its scope's list with its own snapshot.
  */
-const RECURRING_DERIVED: Record<
-  (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number],
-  (live: LiveCopilotDatabase) => SnapshotCache<unknown>
-> = {
+const DERIVED: Record<DerivedKey, (live: LiveCopilotDatabase) => SnapshotCache<unknown>> = {
   upcoming_recurrings: (live) => live.getUpcomingRecurringsCache() as never,
   monthly_spend: (live) => live.getMonthlySpendCache() as never,
 };
 
-/** Which recurring-derived snapshots are still cached, by key. */
-function recurringDerivedWarm(live: LiveCopilotDatabase): Record<string, boolean> {
+/** The derived snapshots each scope's possibly-applied write drops. */
+const DERIVED_BY_SCOPE: Record<Scope, readonly DerivedKey[]> = {
+  recurring: LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS,
+  categories: LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS,
+  tags: [],
+};
+
+/** Which derived snapshots are still cached, by key. */
+function derivedWarm(live: LiveCopilotDatabase): Record<string, boolean> {
   return Object.fromEntries(
-    Object.entries(RECURRING_DERIVED).map(([key, get]) => [key, get(live).peek() !== undefined])
+    Object.entries(DERIVED).map(([key, get]) => [key, get(live).peek() !== undefined])
   );
 }
 
-/** Every recurring-derived snapshot is warm, or every one was dropped. */
-function allRecurringDerived(warm: boolean): Record<string, boolean> {
-  return Object.fromEntries(Object.keys(RECURRING_DERIVED).map((key) => [key, warm]));
+/** Every derived snapshot warm except the ones `dropped` names. */
+function warmExcept(dropped: readonly string[]): Record<string, boolean> {
+  return Object.fromEntries(Object.keys(DERIVED).map((key) => [key, !dropped.includes(key)]));
 }
 
 const CASES: Array<[string, string, Scope, (t: CopilotMoneyTools) => Promise<unknown>]> = [
@@ -160,8 +167,8 @@ async function setup(op: string, error: Error) {
     const id = scope === 'categories' ? CAT_ID : scope === 'tags' ? TAG_ID : REC_ID;
     await cacheFor(live, scope).read(async () => [{ id, name: 'Seed' }]);
   }
-  for (const get of Object.values(RECURRING_DERIVED)) await get(live).read(async () => []);
-  expect(recurringDerivedWarm(live)).toEqual(allRecurringDerived(true));
+  for (const get of Object.values(DERIVED)) await get(live).read(async () => []);
+  expect(derivedWarm(live)).toEqual(warmExcept([]));
   return { tools: new CopilotMoneyTools(db, client, live), live };
 }
 
@@ -174,8 +181,8 @@ describe('a probably-landed entity write drops its live snapshot (#887)', () => 
     for (const other of (['categories', 'tags', 'recurring'] as const).filter((s) => s !== scope)) {
       expect(cacheFor(live, other).peek()).toBeDefined();
     }
-    // A recurring write also drops what it derives (#868); the others leave it.
-    expect(recurringDerivedWarm(live)).toEqual(allRecurringDerived(scope !== 'recurring'));
+    // It also drops what its scope derives (#868, #911 review), and only that.
+    expect(derivedWarm(live)).toEqual(warmExcept(DERIVED_BY_SCOPE[scope]));
   });
 
   test.each(CASES)(
@@ -191,7 +198,7 @@ describe('a probably-landed entity write drops its live snapshot (#887)', () => 
       const { tools, live } = await setup(op, ambiguous);
       await expect(call(tools)).rejects.toThrow(/may or may not have applied/);
       expect(cacheFor(live, scope).peek()).toBeUndefined();
-      expect(recurringDerivedWarm(live)).toEqual(allRecurringDerived(scope !== 'recurring'));
+      expect(derivedWarm(live)).toEqual(warmExcept(DERIVED_BY_SCOPE[scope]));
     }
   );
 
@@ -204,7 +211,7 @@ describe('a probably-landed entity write drops its live snapshot (#887)', () => 
       const { tools, live } = await setup(op, rejected);
       await expect(call(tools)).rejects.toThrow(/rejected the request/);
       expect(cacheFor(live, scope).peek()).toBeDefined();
-      expect(recurringDerivedWarm(live)).toEqual(allRecurringDerived(true));
+      expect(derivedWarm(live)).toEqual(warmExcept([]));
     }
   );
 });

@@ -75,10 +75,11 @@ export interface BalanceHistoryCacheEntry {
   expires_at: number;
 }
 
-/** A snapshot some write family drops (see the two *_DERIVED_SNAPSHOTS lists). */
+/** A snapshot some write family drops (see the *_DERIVED_SNAPSHOTS lists). */
 type DerivedSnapshotKey =
   | (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number]
-  | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number];
+  | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number]
+  | (typeof LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS)[number];
 
 export class LiveCopilotDatabase {
   private readonly verbose: boolean;
@@ -1081,11 +1082,13 @@ export class LiveCopilotDatabase {
   static readonly SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES: Readonly<Record<string, string>> = {
     recurring: "the write's own snapshot, patched in place on success",
     // Not a claim that no row changes server-side: a create links its seed
-    // transaction (create_recurring drops that row's cached month itself), and
-    // a delete may unlink the series' rows, which the write cannot find by id;
-    // those stay cached until their TTL. Both unverified (see the ledger
-    // entries Mutation.createRecurring:links-seed-transaction and
-    // Mutation.deleteRecurring:unlinks-transactions).
+    // transaction (create_recurring drops that row's cached month itself), a
+    // delete may unlink the series' rows, and an update of the category may
+    // recategorize them; the write cannot find those rows by id, so they stay
+    // cached until their TTL. All unverified (see the ledger entries
+    // Mutation.createRecurring:links-seed-transaction,
+    // Mutation.deleteRecurring:unlinks-transactions and
+    // Mutation.editRecurring:recategorizes-series).
     transactions:
       'a month-keyed window, not a snapshot; create_recurring drops the seed row month itself',
     accounts: 'balances come from transactions, which a recurring write does not change',
@@ -1093,6 +1096,43 @@ export class LiveCopilotDatabase {
     balance_history: 'account balances over time (same reason)',
     categories: 'reference data',
     budgets: 'served from the categories list',
+    tags: 'reference data',
+    user: 'account settings',
+    holdings: 'priced from market data',
+    investment_allocation: 'priced from market data',
+    top_movers: 'priced from market data',
+    aggregated_holdings: 'priced from market data',
+    investment_balance: 'priced from market data',
+    investment_prices: 'market data',
+  };
+
+  /**
+   * The snapshots a category write (update, delete, set budget) can make
+   * stale (#911 review): `monthly_spend` (1 h), whose latest
+   * `comparisonAmount` equals the Dashboard's budget figure (measured, #844;
+   * set_budget moves it), which leaves out uncategorized rows (measured,
+   * #844; deleting a category may uncategorize its rows, unverified:
+   * Mutation.deleteCategory:uncategorizes-transactions) and transactions in
+   * excluded categories (update_category's `is_excluded`). create_category
+   * drops nothing: a new category holds no transactions yet. The categories
+   * snapshot itself is patched in place. Every other refresh_cache scope is
+   * in SNAPSHOTS_NOT_DROPPED_BY_CATEGORY_WRITES, checked the same way.
+   */
+  static readonly CATEGORY_DERIVED_SNAPSHOTS = ['monthly_spend'] as const;
+
+  /** refresh_cache scopes a category write leaves alone, and why. */
+  static readonly SNAPSHOTS_NOT_DROPPED_BY_CATEGORY_WRITES: Readonly<Record<string, string>> = {
+    categories: "the write's own snapshot, patched in place on success",
+    budgets: 'served from the categories list, patched in place by set_budget',
+    // Not a claim that no row changes server-side: a deleted category's rows
+    // may be uncategorized (unverified: Mutation.deleteCategory:uncategorizes-
+    // transactions); they are not known by id, so their months keep their TTL.
+    transactions: 'a month-keyed window, not a snapshot; affected rows are not known by id',
+    accounts: 'balances come from amounts, which a category write does not change',
+    networth: 'a sum of account balances (same reason)',
+    balance_history: 'account balances over time (same reason)',
+    recurring: 'a recurring keeps its own category id',
+    upcoming_recurrings: 'computed from recurring amounts and dates',
     tags: 'reference data',
     user: 'account settings',
     holdings: 'priced from market data',
@@ -1144,6 +1184,17 @@ export class LiveCopilotDatabase {
   invalidateRecurringDerivedSnapshots(): void {
     const byKey = this.derivedSnapshots();
     for (const key of LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS) byKey[key].invalidate();
+  }
+
+  /**
+   * Drop every snapshot a category write can make stale (see
+   * CATEGORY_DERIVED_SNAPSHOTS). Called after an update, delete or budget
+   * write the server accepted, and after any category write that may have
+   * applied.
+   */
+  invalidateCategoryDerivedSnapshots(): void {
+    const byKey = this.derivedSnapshots();
+    for (const key of LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS) byKey[key].invalidate();
   }
 
   /**
