@@ -1062,6 +1062,29 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/tools/update-transactions-batching.test.ts',
   },
   {
+    name: 'a home at or above a user root is never matched',
+    file: 'src/utils/redact-paths.ts',
+    invariant:
+      'redactUserPaths matches the home literally before the /Users and /home prefix rule ' +
+      'runs. A degenerate HOME such as /Users or /home would turn /Users/bob/x into ' +
+      '~/bob/x, consuming the root the prefix rule needs, so the username survives and reads ' +
+      "as the current user's home (#888). Not a write-safety invariant: a disclosure one, " +
+      'upstream of both redaction call sites above.',
+    mutation: {
+      kind: 'replace',
+      find:
+        '  // mutation-guard: a home at or above a user root is never matched\n' +
+        "  return trimmed !== '' && !USER_ROOTS.some(",
+      with:
+        '  // mutation-guard: a home at or above a user root is never matched\n' +
+        "  return trimmed !== '' && !USER_ROOTS.slice(0, 0).some(",
+    },
+    expectFailingTests: [
+      'a home at or above a /Users or /home root is ignored, so the prefix rule still scrubs the name',
+    ],
+    expectFails: 'tests/utils/redact-paths.test.ts',
+  },
+  {
     name: "a committed write's unusable payload is classified as applied",
     file: 'src/core/graphql/graphql-error.ts',
     invariant:
