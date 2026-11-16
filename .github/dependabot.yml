@@ -57,8 +57,9 @@ updates:
       interval: 'weekly'
       day: 'monday'
     # Same 2-week stability cooldown as npm (see above). Dependabot rejects
-    # the semver-* cooldown keys for this ecosystem, so majors get the same
-    # 14 days here.
+    # the semver-* cooldown keys for this ecosystem ("The property
+    # '#/updates/1/cooldown/semver-major-days' is not supported for the
+    # package ecosystem 'github-actions'"), so majors get the same 14 days here.
     cooldown:
       default-days: 14
     # Assignees for workflow PRs
