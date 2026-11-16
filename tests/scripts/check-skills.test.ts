@@ -561,7 +561,7 @@ Call \`get_transactions\` and then \`delete_everything\`.
       ({ code, stdout, stderr }) => {
         expect(stderr).not.toContain('FAIL');
         expect(code).toBe(0);
-        expect(stdout).toContain('1 tables checked');
+        expect(stdout).toContain(', 1 tables checked,');
       }
     );
   });
@@ -580,7 +580,25 @@ Call \`get_transactions\` and then \`delete_everything\`.
       ({ code, stdout, stderr }) => {
         expect(stderr).not.toContain('FAIL');
         expect(code).toBe(0);
-        expect(stdout).toContain('0 tables checked');
+        expect(stdout).toContain(', 0 tables checked,');
+      }
+    );
+  });
+
+  test('a fence opened in a blockquote closes when the blockquote ends', async () => {
+    // GFM closes a quoted fence when its blockquote ends. Nothing closed it
+    // here, so every unquoted line after it was skipped as code and the rest
+    // of the file went unchecked.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: {
+          'test-matrix.md': '> ```\n> code\n\n| ID | Case |\n|---|---|\n| A-1 | ok | extra |\n',
+        },
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('demo/test-matrix.md:6: table row has 3 cells, its header has 2');
       }
     );
   });
@@ -596,7 +614,7 @@ Call \`get_transactions\` and then \`delete_everything\`.
       },
       ({ code, stdout }) => {
         expect(code).toBe(0);
-        expect(stdout).toContain('2 tables checked');
+        expect(stdout).toContain(', 2 tables checked,');
       }
     );
   });
@@ -631,7 +649,7 @@ Call \`get_transactions\` and then \`delete_everything\`.
       },
       ({ code, stdout }) => {
         expect(code).toBe(0);
-        expect(stdout).toContain('1 tables checked, 1 table floors enforced');
+        expect(stdout).toContain(', 1 tables checked, 1 table floors enforced)');
       }
     );
   });
@@ -1216,6 +1234,6 @@ describe('the real repository', () => {
       )
     ).filter((text) => /<!--\s*check-skills:/.test(text)).length;
     expect(markers).toBeGreaterThanOrEqual(2);
-    expect(stdout).toContain(`${markers} table floors enforced`);
+    expect(stdout).toContain(`, ${markers} table floors enforced)`);
   });
 });

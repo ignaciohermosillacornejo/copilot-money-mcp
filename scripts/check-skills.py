@@ -630,7 +630,7 @@ def check_tables(skill_dir: Path) -> tuple[list[str], int, int]:
     pipes is not seen at all; `\\|` (an escaped backslash before a real cell
     boundary) counts one cell short. Lines inside fenced code blocks are
     skipped, since they do not render as tables; a fence closes only at the
-    blockquote depth it opened at.
+    blockquote depth it opened at, or when that blockquote ends.
     """
     errors: list[str] = []
     tables = 0
@@ -645,10 +645,14 @@ def check_tables(skill_dir: Path) -> tuple[list[str], int, int]:
         for i, stripped in enumerate(lines):
             if fence is not None:
                 depth, rest = _unquote(raw[i], fence_depth)
-                closes = rest.startswith(fence) and not rest.lstrip(fence[0]).strip()
-                if depth == fence_depth and closes:
+                if depth < fence_depth:
+                    # The blockquote holding the fence has ended, and GFM
+                    # closes the fence with it: this line is ordinary content.
                     fence = None
-                continue
+                else:
+                    if rest.startswith(fence) and not rest.lstrip(fence[0]).strip():
+                        fence = None
+                    continue
             opening = _FENCE.match(stripped)
             if opening:
                 fence = opening.group(1)
