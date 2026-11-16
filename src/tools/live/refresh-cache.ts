@@ -232,9 +232,9 @@ export class RefreshCacheTool {
         flushed.investment_balance = true;
         break;
       case 'balance_history':
-        // The cache lives on LiveBalanceHistoryTools (Map<tuple, snapshot>),
-        // not on LiveCopilotDatabase — the keying is tightly coupled to the
-        // tool's call shape. clearCache() drops every cached tuple at once.
+        // A Map<tuple, snapshot> keyed by LiveBalanceHistoryTools (held on
+        // LiveCopilotDatabase so transaction writes can drop it too).
+        // clearCache() drops every cached tuple at once.
         // Only set flushed.balance_history when the tool was actually wired
         // (no-op semantics: "was flushed" not "operation acknowledged").
         if (this.balanceHistory) {
@@ -244,8 +244,8 @@ export class RefreshCacheTool {
         break;
       case 'investment_prices':
         // The cache lives on LiveInvestmentPricesTools (two Maps — intraday
-        // + daily), not on LiveCopilotDatabase, for the same reason as
-        // balance_history. clearCache() drops every cached entry across
+        // + daily), not on LiveCopilotDatabase: the keying is tightly coupled
+        // to the tool's call shape. clearCache() drops every cached entry across
         // both maps. Only flag flushed.investment_prices when the tool was
         // actually wired (no-op semantics: "was flushed" not "operation
         // acknowledged").

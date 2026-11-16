@@ -44,6 +44,7 @@ import {
   writeRowMapperArities,
   type WriteRowField,
 } from '../../src/tools/live/transactions.js';
+import { LiveBalanceHistoryTools } from '../../src/tools/live/balance-history.js';
 import { TOOL_REGISTRY, WRITE_TOOL_DEFS } from '../../src/tools/registry/index.js';
 import * as transactionRegistry from '../../src/tools/registry/transactions.js';
 import type { LiveToolContext, ToolContext } from '../../src/tools/registry/types.js';
@@ -1285,7 +1286,10 @@ describe('a transaction write that throws leaves the next read to the server (#8
 // snapshot LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS names, on
 // success and on a throw alike; same derived tool key set.
 
-type SnapshotKey = (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number];
+/** Every snapshot some write family drops: transaction- or recurring-derived. */
+type SnapshotKey =
+  | (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number]
+  | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number];
 
 /**
  * How to warm and inspect each named snapshot. A key added to the list
@@ -1320,6 +1324,13 @@ const SNAPSHOT_PROBES: Record<
   recurring: {
     warm: (db) => db.getRecurringCache().read(async () => [{ id: RECURRING_ID } as RecurringNode]),
     peek: (db) => db.getRecurringCache().peek(),
+  },
+  balance_history: {
+    warm: async (db) => {
+      db.getBalanceHistoryCache().set('probe', { rows: [], fetched_at: Date.now() });
+    },
+    // Undefined once empty, like a dropped SnapshotCache.
+    peek: (db) => (db.getBalanceHistoryCache().size > 0 ? db.getBalanceHistoryCache() : undefined),
   },
 };
 
@@ -1724,4 +1735,203 @@ describe('a malformed returned row is never cached (#864 review)', () => {
       expect(fetches()).toBe(2);
     }
   );
+});
+
+// ── Every write drops what its family derives (#868, #870) ──────────────────
+//
+// A write that changes what a live snapshot is computed from must drop that
+// snapshot, or the snapshot keeps serving pre-write figures until its TTL.
+// #825 fixed it for transaction writes; recurring writes still left
+// upcoming_recurrings stale (#868), and no write could reach
+// get_balance_history_live's cache (#870). The class is "a write and a
+// derived snapshot nobody paired", so the detector pairs them all: every
+// write tool in WRITE_TOOL_DEFS is given a family, every family names the
+// snapshots it drops, and each case warms EVERY probed snapshot, runs the
+// write, and asserts exactly its family's snapshots were dropped. A new write
+// tool fails the first test until it is classified; a new derived snapshot
+// fails the scope-classification tests until a family list names it or
+// exempts it with a reason.
+
+type WriteFamily = 'transaction' | 'recurring' | 'reference';
+
+const FAMILY_DROPS: Record<WriteFamily, readonly SnapshotKey[]> = {
+  transaction: LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS,
+  recurring: LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS,
+  // Categories, tags and budgets: each write patches its own reference
+  // snapshot (categories / tags), which none of the probed ones derives from.
+  reference: [],
+};
+
+const RECURRING_RESPONSE = {
+  id: RECURRING_ID,
+  name: 'Gym',
+  categoryId: CAT_OLD,
+  frequency: 'MONTHLY',
+  state: 'ACTIVE',
+};
+
+/** Success mocks and arguments for every write that is not a transaction write. */
+const NON_TRANSACTION_WRITES: Record<
+  string,
+  {
+    family: Exclude<WriteFamily, 'transaction'>;
+    mocks: MockResponsesByOp;
+    args: Record<string, unknown>;
+  }
+> = {
+  create_recurring: {
+    family: 'recurring',
+    mocks: {
+      CreateRecurring: {
+        createRecurring: { id: RECURRING_ID, name: 'Gym', state: 'ACTIVE', frequency: 'MONTHLY' },
+      },
+    },
+    args: { ...routing, transaction_id: TX_RECURRING, frequency: 'MONTHLY' },
+  },
+  update_recurring: {
+    family: 'recurring',
+    mocks: { EditRecurring: { editRecurring: { recurring: RECURRING_RESPONSE } } },
+    args: { recurring_id: RECURRING_ID, name: 'Gym' },
+  },
+  set_recurring_state: {
+    family: 'recurring',
+    mocks: {
+      EditRecurring: { editRecurring: { recurring: { ...RECURRING_RESPONSE, state: 'PAUSED' } } },
+    },
+    args: { recurring_id: RECURRING_ID, state: 'PAUSED' },
+  },
+  delete_recurring: {
+    family: 'recurring',
+    mocks: { DeleteRecurring: { deleteRecurring: true } },
+    args: { recurring_id: RECURRING_ID },
+  },
+  create_category: {
+    family: 'reference',
+    mocks: {
+      CreateCategory: {
+        createCategory: { id: 'bN4mV7cX1zL8kJ5hG2fD', name: 'Pets', colorName: 'BLUE1' },
+      },
+    },
+    args: { name: 'Pets', color_name: 'BLUE1', emoji: '🐶' },
+  },
+  update_category: {
+    family: 'reference',
+    mocks: {
+      EditCategory: {
+        editCategory: { category: { id: CAT_OLD, name: 'Food', colorName: 'RED1' } },
+      },
+    },
+    args: { category_id: CAT_OLD, name: 'Food' },
+  },
+  delete_category: {
+    family: 'reference',
+    mocks: { DeleteCategory: { deleteCategory: true } },
+    args: { category_id: CAT_NEW },
+  },
+  set_budget: {
+    family: 'reference',
+    mocks: { EditBudget: { editCategoryBudget: true } },
+    args: { category_id: CAT_OLD, amount: '100' },
+  },
+  create_tag: {
+    family: 'reference',
+    mocks: {
+      CreateTag: { createTag: { id: 'dF6gH9jK2lZ5xC8vB1nM', name: 'Work', colorName: 'RED1' } },
+    },
+    args: { name: 'Work', color_name: 'RED1' },
+  },
+  update_tag: {
+    family: 'reference',
+    mocks: { EditTag: { editTag: { ...TAG_NODE, name: 'Trip 2' } } },
+    args: { tag_id: TAG_ID, name: 'Trip 2' },
+  },
+  delete_tag: {
+    family: 'reference',
+    mocks: { DeleteTag: { deleteTag: true } },
+    args: { tag_id: TAG_ID },
+  },
+};
+
+/** Every write tool, its family, and how to run it successfully. */
+function writeTable(): Record<
+  string,
+  { family: WriteFamily; mocks: MockResponsesByOp; args: Record<string, unknown> }
+> {
+  const table: ReturnType<typeof writeTable> = { ...NON_TRANSACTION_WRITES };
+  for (const [name, c] of Object.entries(CASES)) {
+    table[name] = { family: 'transaction', mocks: c.mocks, args: c.args };
+  }
+  return table;
+}
+
+describe('every write drops the snapshots its family derives (#868, #870)', () => {
+  test('every write tool in the registry is classified, and only those', () => {
+    const writeTools = WRITE_TOOL_DEFS.map((def) => def.name).sort();
+    expect(writeTools.length).toBeGreaterThan(0);
+    expect(Object.keys(writeTable()).sort()).toEqual(writeTools);
+  });
+
+  test("every derived snapshot has a probe, and every probe is some family's", () => {
+    const derived = new Set<string>(Object.values(FAMILY_DROPS).flat());
+    expect(Object.keys(SNAPSHOT_PROBES).sort()).toEqual([...derived].sort());
+  });
+
+  test('every refresh_cache scope is classified for recurring writes too', () => {
+    const scopeSchema = TOOL_REGISTRY.get('refresh_cache')!.schema.inputSchema.properties as {
+      scope: { enum: string[] };
+    };
+    const scopes = scopeSchema.scope.enum.filter((sc) => sc !== 'all').sort();
+    const dropped: readonly string[] = LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS;
+    const exempt = Object.keys(LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES);
+    expect(dropped.filter((k) => exempt.includes(k))).toEqual([]);
+    expect([...dropped, ...exempt].sort()).toEqual(scopes);
+    for (const reason of Object.values(
+      LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES
+    )) {
+      expect(reason.length).toBeGreaterThan(0);
+    }
+  });
+
+  test.each(Object.keys(writeTable()))(
+    "%s: success drops exactly its family's snapshots",
+    async (toolName) => {
+      const c = writeTable()[toolName]!;
+      const { call, read, liveDb } = setup(c.mocks);
+      await read();
+      const keys = Object.keys(SNAPSHOT_PROBES) as SnapshotKey[];
+      for (const key of keys) {
+        await SNAPSHOT_PROBES[key].warm(liveDb);
+        expect({ key, warm: SNAPSHOT_PROBES[key].peek(liveDb) !== undefined }).toEqual({
+          key,
+          warm: true,
+        });
+      }
+
+      await call(toolName, c.args);
+
+      const dropped = keys.filter((key) => SNAPSHOT_PROBES[key].peek(liveDb) === undefined);
+      expect(dropped.sort()).toEqual([...FAMILY_DROPS[c.family]].sort());
+    }
+  );
+
+  test('get_balance_history_live refetches after a transaction write (#870)', async () => {
+    let historyFetches = 0;
+    const { call, read, liveDb } = setup({
+      ...CASES.update_transaction!.mocks,
+      BalanceHistory: () => {
+        historyFetches += 1;
+        return { accountBalanceHistory: [{ date: SEED_DATE, balance: 5000 }] };
+      },
+    });
+    await read();
+    const history = new LiveBalanceHistoryTools(liveDb);
+    const args = { item_id: ITEM_ID, account_id: ACCOUNT_ID };
+    expect((await history.getBalanceHistory(args))._cache_hit).toBe(false);
+    expect((await history.getBalanceHistory(args))._cache_hit).toBe(true);
+
+    await call('update_transaction', CASES.update_transaction!.args);
+
+    expect((await history.getBalanceHistory(args))._cache_hit).toBe(false);
+    expect(historyFetches).toBe(2);
+  });
 });

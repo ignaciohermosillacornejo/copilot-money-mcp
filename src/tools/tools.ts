@@ -922,7 +922,7 @@ export class CopilotMoneyTools {
       tags: () => live.getTagsCache().invalidate(),
       recurring: () => {
         live.getRecurringCache().invalidate();
-        live.getUpcomingRecurringsCache().invalidate();
+        live.invalidateRecurringDerivedSnapshots();
       },
     };
     drop[scope]();
@@ -935,6 +935,15 @@ export class CopilotMoneyTools {
    */
   private afterTransactionWrite(): void {
     this.liveDb?.invalidateTransactionDerivedSnapshots();
+  }
+
+  /**
+   * After a recurring write the server ACCEPTED: drop the live snapshots it
+   * can have made stale (LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS;
+   * #868). The recurring snapshot itself is patched by each write.
+   */
+  private afterRecurringWrite(): void {
+    this.liveDb?.invalidateRecurringDerivedSnapshots();
   }
 
   /** YYYY-MM of `date` when it is a string long enough to have one. */
@@ -5977,6 +5986,7 @@ export class CopilotMoneyTools {
           this.liveDb.patchLiveRecurringUpsert(merged);
         }
       }
+      this.afterRecurringWrite();
       return { success: true, recurring_id: result.id, state: args.state };
     } catch (e) {
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
@@ -5998,6 +6008,7 @@ export class CopilotMoneyTools {
       const result = await gqlDeleteRecurring(client, { id: args.recurring_id });
       this.db.patchCachedRecurringDelete(args.recurring_id);
       this.liveDb?.patchLiveRecurringDelete(args.recurring_id);
+      this.afterRecurringWrite();
       return { success: true, recurring_id: result.id, deleted: true };
     } catch (e) {
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
@@ -6184,6 +6195,7 @@ export class CopilotMoneyTools {
         rule: null,
         payments: [],
       });
+      this.afterRecurringWrite();
       return {
         success: true,
         recurring_id: result.id,
@@ -6319,6 +6331,7 @@ export class CopilotMoneyTools {
           this.liveDb.patchLiveRecurringUpsert(merged);
         }
       }
+      this.afterRecurringWrite();
       return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');

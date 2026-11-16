@@ -67,6 +67,7 @@ function stubLiveDb(graphqlClient: unknown) {
     ),
     upsertLiveTransaction: () => {},
     invalidateTransactionDerivedSnapshots: () => {},
+    invalidateRecurringDerivedSnapshots: () => {},
     invalidateLiveMonthKeys: () => {},
     invalidateLiveTransactionMonths: () => {},
     patchLiveRecurringUpsert: () => {},

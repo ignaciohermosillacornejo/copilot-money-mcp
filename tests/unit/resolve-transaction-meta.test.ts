@@ -98,6 +98,7 @@ function stubLiveDb(overrides: {
     getTransactions,
     upsertLiveTransaction: () => {},
     invalidateTransactionDerivedSnapshots: () => {},
+    invalidateRecurringDerivedSnapshots: () => {},
     invalidateLiveMonthKeys: () => {},
     invalidateLiveTransactionMonths: () => {},
     // create_recurring's split-parent check (#836): no split evidence here.
