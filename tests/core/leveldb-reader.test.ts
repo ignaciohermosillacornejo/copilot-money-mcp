@@ -324,6 +324,45 @@ describe('leveldb-reader', () => {
         });
       });
 
+      test('an unreadable segment rejects the key rather than shortening the path', () => {
+        // Two complete segments plus a truncated one: skipping the truncated
+        // one would leave an EVEN count and hand back the different document
+        // users/u1.
+        const truncated = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, 'u1'),
+          Buffer.from([0xbe]),
+          Buffer.from('tags', 'utf8'),
+        ]);
+        expect(parseDocumentKey(truncated)).toBeNull();
+        // Same with a control character in the third segment.
+        const control = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, 'u1'),
+          stringComponent(0xbe, 'ta\x07gs'),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(control)).toBeNull();
+      });
+
+      test('a table name followed by 0x00 and a byte other than 0x01 is not the table', () => {
+        // 0x00 0xFF is ordered-code's escape for a literal NUL inside a string,
+        // so the name continues past `remote_document`.
+        const key = Buffer.concat([
+          Buffer.from([0x85]),
+          Buffer.from('remote_document', 'utf8'),
+          Buffer.from([0x00, 0xff]),
+          Buffer.from('x', 'utf8'),
+          Buffer.from([0x00, 0x01]),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, ITEM),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(key)).toBeNull();
+      });
+
       test('an unterminated trailing segment is not a segment', () => {
         // A truncated key: the last string has no 0x00 0x01 terminator.
         const truncated = Buffer.concat([
