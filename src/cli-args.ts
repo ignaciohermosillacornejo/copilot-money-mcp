@@ -123,18 +123,21 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
     const flag = BY_SPELLING.get(spelling);
 
     if (!flag) {
+      // The hint looks the name up with its dashes normalised and its case
+      // folded, so a missing, extra or doubled dash (`write`, `-write`, `--v`)
+      // or a capital (`--Write`) is caught too. The suggestion is always a
+      // CLI_FLAGS member, a closed set, so printing it echoes nothing new.
+      const bare = spelling.replace(/^-+/, '').toLowerCase();
+      const meant = BY_SPELLING.get(`--${bare}`) ?? BY_SPELLING.get(`-${bare}`);
       if (inline !== undefined) {
         // The value is not echoed: it may be a secret or a path with a username.
-        throw new CliArgError(`Unknown option ${spelling}. Run with --help.`);
+        const hint = meant ? ` Did you mean ${meant.name}?` : '';
+        throw new CliArgError(`Unknown option ${spelling}.${hint} Run with --help.`);
       }
       // A dashed token is echoed (it cannot carry "=value" here: that threw
       // above), and so is a known flag written without its dashes, since that
       // is a closed set. Anything else may be a path or a secret, so it is
       // named by position only.
-      // The hint looks the token up with its dashes normalised, so a missing,
-      // extra or doubled dash (`write`, `-write`, `--v`) is caught too.
-      const bare = arg.replace(/^-+/, '');
-      const meant = BY_SPELLING.get(`--${bare}`) ?? BY_SPELLING.get(`-${bare}`);
       warnings.push(
         meant
           ? `Ignoring unrecognised argument "${arg}" (did you mean ${meant.name}?)`

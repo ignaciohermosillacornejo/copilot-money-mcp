@@ -184,6 +184,28 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['--v']).warnings).toEqual([
       'Ignoring unrecognised argument "--v" (did you mean --verbose?)',
     ]);
+    // So does a capital, matching the case-insensitive boolean values.
+    expect(parseCliArgs(['--Write']).warnings).toEqual([
+      'Ignoring unrecognised argument "--Write" (did you mean --write?)',
+    ]);
+  });
+
+  test('a mistyped flag carrying a value gets the hint on the error, without its value', () => {
+    for (const [arg, flag] of [
+      ['-write=true', '--write'],
+      ['-db-path=/Users/someone/secret', '--db-path'],
+      ['--DB-PATH=/Users/someone/secret', '--db-path'],
+    ] as const) {
+      let message = '';
+      try {
+        parseCliArgs([arg]);
+      } catch (e) {
+        message = (e as Error).message;
+      }
+      expect(message).toContain(`Did you mean ${flag}?`);
+      expect(message).not.toContain('secret');
+      expect(message).not.toContain('=');
+    }
   });
 
   test('a stray non-dashed token is reported by position, never echoed', () => {

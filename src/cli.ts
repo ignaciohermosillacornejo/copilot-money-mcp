@@ -97,7 +97,9 @@ function parseArgs(): {
   let timeoutMs: number | undefined;
   const rawTimeout = values['--timeout'];
   if (rawTimeout !== undefined) {
-    const ms = parseInt(rawTimeout, 10);
+    // Digits only: parseInt would read "5000ms" or "5e3" as a number and
+    // silently drop the rest.
+    const ms = /^\d+$/.test(rawTimeout) ? Number(rawTimeout) : NaN;
     if (isNaN(ms) || ms <= 0) {
       failArgs(
         `Invalid --timeout value: ${rawTimeout} (must be a positive integer in milliseconds)`
