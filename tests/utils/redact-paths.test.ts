@@ -236,6 +236,23 @@ describe('redactUserPaths', () => {
     expect(redactUserPaths('a/b /c', '')).toBe('a/b /c');
     expect(redactUserPaths('a/b /c', '/')).toBe('a/b /c');
   });
+
+  test('a home at or above a /Users or /home root is ignored, so the prefix rule still scrubs the name', () => {
+    // Matching such a home literally would rewrite `/Users/bob/x` to `~/bob/x`:
+    // the name survives, and reads as the current user's home. Each degenerate
+    // home must give exactly what no home at all gives.
+    const degenerate = ['/Users', '/home', '/Users/', '/home//', '//', '/'];
+    for (const home of degenerate) {
+      for (const text of ["open '/Users/bob/x'", 'open /home/bob: EACCES', 'cwd is /Users/bob']) {
+        expect({ home, out: redactUserPaths(text, home) }).toEqual({
+          home,
+          out: redactUserPaths(text, ''),
+        });
+      }
+    }
+    // A real home directly under a root is still used.
+    expect(redactUserPaths('/Users/bob/x', '/Users/bob')).toBe('~/x');
+  });
 });
 
 describe('handleCallTool relays a thrown error without the username', () => {

@@ -13,8 +13,8 @@
  * identifies the user: the current home directory, matched literally (so a
  * space inside it is no obstacle) and only where it is not the start of a
  * longer name — see the two boundaries below — and any other `/Users/<name>`
- * or `/home/<name>` prefix. What follows the prefix is kept, because it is what says which file
- * failed.
+ * or `/home/<name>` prefix. What follows the prefix is kept, because it is
+ * what says which file failed.
  *
  * Not the same scrub as `scrubPaths` in `src/core/database.ts`, on purpose.
  * That one builds the dispatch gate's "could not read" message, which names an
@@ -25,25 +25,29 @@
  * How the home is matched depends on where it lives, because the generic
  * prefix rule only sees `/Users` and `/home`:
  *
- *   - Under `/Users` or `/home`, the home matches only where a username
- *     segment ends (`SEGMENT_END`): before `/`, whitespace, a quote, `,` or
- *     `)`, or at the end of the text — the characters that end a path in an
- *     error message (`open '/Users/bob'`, `/Users/bob, …`, `cwd is /Users/bob
- *     and …`) — and also before `:`, `;`, `]`, `}`, `?` or `!`
- *     (`BOUNDARY_ONLY`), which no username can contain (`open /Users/bob:
- *     EACCES`, `[/Users/bob]`, `did you mean /Users/bob?`).
- *     Any sibling — `/Users/bob.smith`, `/Users/bob2`,
- *     `/Users/bob.bak` — is left to the prefix rule, which replaces the whole
- *     name segment. Matching more loosely here would turn `/Users/bob.smith/x`
- *     into `~.smith/x` and leak another user's name tail. The quote and the
- *     whitespace matter for a home containing a space: without them the prefix
- *     rule would stop at the space and leave the rest of the name behind
- *     (`/Users/<user> smith'`, `/Users/<user> smith and …`).
+ *   - Under `/Users` or `/home`, the home matches only where a username segment
+ *     ends (`SEGMENT_END`): before `/`, whitespace, a quote, `,` or `)`, or at
+ *     the end of the text — the characters that end a path in an error message
+ *     (`open '/Users/bob'`, `/Users/bob, …`, `cwd is /Users/bob and …`) — and
+ *     also before `:`, `;`, `]`, `}`, `?` or `!` (`BOUNDARY_ONLY`), which no
+ *     username can contain (`open /Users/bob: EACCES`, `[/Users/bob]`,
+ *     `did you mean /Users/bob?`). Any sibling — `/Users/bob.smith`,
+ *     `/Users/bob2`, `/Users/bob.bak` — is left to the prefix rule, which
+ *     replaces the whole name segment. Matching more loosely here would turn
+ *     `/Users/bob.smith/x` into `~.smith/x` and leak another user's name tail.
+ *     The quote and the whitespace matter for a home containing a space:
+ *     without them the prefix rule would stop at the space and leave the rest
+ *     of the name behind (`/Users/<user> smith'`, `/Users/<user> smith and …`).
  *   - Anywhere else (`/var/root`, a container's home), the prefix rule is
  *     blind, so the home matches wherever it is not continued by a name
  *     character — any Unicode letter or digit, `_` or `-`. A sibling such as
  *     `${home}.bak/x` becomes `~.bak/x`: the path keeps its shape and loses the
  *     name.
+ *   - At or above a root (`/`, `/Users`, `/home`, or one of them with trailing
+ *     slashes — a degenerate `HOME`), the home is not used at all. Matched
+ *     literally it would turn `/Users/bob/x` into `~/bob/x`: the name survives
+ *     and reads as the current user's home, where the prefix rule alone gives
+ *     `/Users/<user>/x`.
  *
  * The strict boundary is built from the prefix rule's stop class on purpose.
  * The invariant: the boundary accepts exactly `SEGMENT_END` plus
@@ -118,12 +122,27 @@ const SEGMENT_END = `/\\s'",)`;
  */
 const BOUNDARY_ONLY = `:;\\]}?!`;
 
-const USER_PREFIX = new RegExp(`/(Users|home)/[^${SEGMENT_END}]+`, 'g');
+/** The directories whose children the prefix rule treats as usernames. */
+const USER_ROOTS = ['Users', 'home'];
+const USER_ROOT_SOURCE = USER_ROOTS.join('|');
+
+const USER_PREFIX = new RegExp(`/(${USER_ROOT_SOURCE})/[^${SEGMENT_END}]+`, 'g');
 
 export function redactUserPaths(text: string, home: string = safeHomedir()): string {
   let out = text;
-  if (home && home !== '/') out = out.replace(homePattern(home), '~');
+  if (isMatchableHome(home)) out = out.replace(homePattern(home), '~');
   return out.replace(USER_PREFIX, '/$1/<user>');
+}
+
+/**
+ * Whether `home` is worth matching literally. Not when it is empty, or when it
+ * is a user root or an ancestor of one (`/` included): replacing it there
+ * would consume the root and leave the username for the prefix rule to miss.
+ */
+function isMatchableHome(home: string): boolean {
+  const trimmed = home.replace(/\/+$/, '');
+  // mutation-guard: a home at or above a user root is never matched
+  return trimmed !== '' && !USER_ROOTS.some((root) => `/${root}/`.startsWith(`${trimmed}/`));
 }
 
 /**
@@ -138,7 +157,7 @@ function homePattern(home: string): RegExp {
   if (cachedHome !== home || !cachedPattern) {
     // See the module docblock: strict where the prefix rule can take over,
     // broad (and Unicode-aware) only where it cannot.
-    const underUserRoot = /^\/(Users|home)\/[^/]+$/.test(home);
+    const underUserRoot = new RegExp(`^/(${USER_ROOT_SOURCE})/[^/]+$`).test(home);
     const boundary = underUserRoot
       ? `(?=[${SEGMENT_END}${BOUNDARY_ONLY}]|$)`
       : '(?![\\p{L}\\p{N}_-])';
