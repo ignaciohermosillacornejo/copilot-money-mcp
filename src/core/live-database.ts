@@ -1154,9 +1154,10 @@ export class LiveCopilotDatabase {
     // recurring snapshots serving the dead id (category_name null) for their
     // TTL (6 h / 1 h). Accepted for now; the fix is to drop these two
     // snapshots from delete_category alone, not from every category write.
-    recurring: "unverified: a recurring keeps its category id; the snapshot's TTL is accepted",
+    recurring:
+      'unverified: Mutation.deleteCategory:leaves-recurrings-categorized; the TTL is accepted',
     upcoming_recurrings:
-      "unverified: computed from recurrings, same assumption; the snapshot's TTL is accepted",
+      'unverified: computed from recurrings (same ledger entry); the TTL is accepted',
     tags: 'reference data',
     user: 'account settings',
     holdings: 'priced from market data',

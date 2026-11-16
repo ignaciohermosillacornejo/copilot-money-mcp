@@ -789,14 +789,18 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'row whose categoryId matches.',
   },
   {
-    surface: 'Mutation.deleteTag:untags-transactions',
+    surface: 'Mutation.deleteCategory:leaves-recurrings-categorized',
     kind: 'operation',
     oracle: null,
     class: 'unverified',
     evidence:
-      'ASSUMED (#911 review): deleting a tag removes it from the transactions that carried ' +
-      'it. Not probed. delete_tag drops the cached live months holding a row that carries ' +
-      'the tag, so the next read refetches them; one request per month if wrong.',
+      'ASSUMED (#911 review): deleting a category leaves the recurrings that use it with ' +
+      'their categoryId unchanged. DeleteCategory takes no replacement, so the server may ' +
+      'instead null or reassign it. Not probed. The code relies on this being true: ' +
+      'delete_category keeps the recurring (6 h) and upcoming_recurrings (1 h) snapshots ' +
+      '(SNAPSHOTS_NOT_DROPPED_BY_CATEGORY_WRITES), so if it is false those tools serve the ' +
+      'dead id with no category_name until the TTL. The fix then: drop those two snapshots ' +
+      'from delete_category alone.',
   },
   {
     surface: 'Mutation.addTransactionToRecurring:sets-category',
@@ -864,7 +868,9 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'carry it. Transaction rows report tag ids off the row itself, not against the tag ' +
       'list, so if the server keeps a deleted id on its rows, removing it would need ' +
       "bulk_edit_transactions' remove_tag_ids to accept an id the tag list no longer has. " +
-      'Today removal is validated like addition. Never probed.',
+      'Today removal is validated like addition. Never probed. Since #911, delete_tag drops ' +
+      'the cached live months holding a row that carries the tag, so the cache is right ' +
+      'whichever way this resolves (one refetch per month if the server keeps the id).',
   },
 
   // ----- Categories ---------------------------------------------------------
