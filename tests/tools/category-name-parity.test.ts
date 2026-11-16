@@ -450,20 +450,40 @@ describe('category_name for an id in neither name map (#867)', () => {
         const list = wire(await t.getCategories({ view: 'list', ...RANGE }));
         const tree = wire(await t.getCategories({ view: 'tree' }));
         const search = wire(await t.getCategories({ view: 'search', query: 'shop' }));
+        const subs = wire(await t.getCategories({ parent_id: CAT_KNOWN }));
         const pick = (rows: Row[]) => rows.find((c) => c.category_id === CAT_KNOWN)?.category_name;
         return [
           pick((list.data as { categories: Row[] }).categories),
           pick((tree.data as { categories: Row[] }).categories),
           pick((search.data as { categories: Row[] }).categories),
+          (subs.data as { parent_name: unknown }).parent_name,
         ];
       };
-      expect(await nameIn()).toEqual([KNOWN_NAME, KNOWN_NAME, KNOWN_NAME]);
+      expect(await nameIn()).toEqual([KNOWN_NAME, KNOWN_NAME, KNOWN_NAME, KNOWN_NAME]);
       db._injectDataForTesting({
         userCategories: USER_CATEGORIES.map((c) =>
           c.category_id === CAT_KNOWN ? { ...c, name: 'Shop Renamed' } : c
         ),
       });
-      expect(await nameIn()).toEqual(['Shop Renamed', 'Shop Renamed', 'Shop Renamed']);
+      expect(await nameIn()).toEqual(Array(4).fill('Shop Renamed'));
+    });
+
+    test('excluding a category takes effect once the database reloads its categories', async () => {
+      // Same shape as the name map: the excluded-id set was memoized in the
+      // tools class and only refresh_database dropped it, so a category
+      // excluded in the app kept counting as spending in default reads.
+      const { db, tools: t } = fixture();
+      const knownRow = async (): Promise<Row | undefined> => {
+        const r = wire(await t.getTransactions({ ...RANGE }));
+        return (r.transactions as Row[]).find((row) => row.category_name === KNOWN_NAME);
+      };
+      expect(await knownRow()).toBeDefined();
+      db._injectDataForTesting({
+        userCategories: USER_CATEGORIES.map((c) =>
+          c.category_id === CAT_KNOWN ? { ...c, excluded: true } : c
+        ),
+      });
+      expect(await knownRow()).toBeUndefined();
     });
   });
 

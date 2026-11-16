@@ -834,7 +834,6 @@ export class CopilotMoneyTools {
   private db: CopilotDatabase;
   private graphqlClient: GraphQLClient | null;
   private liveDb: LiveCopilotDatabase | undefined;
-  private _excludedCategoryIds: Set<string> | null = null;
   /**
    * Split-parent ids this server has learned about (#822): every parent
    * split_transaction split, and the parent of every split child
@@ -1168,38 +1167,6 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Get the user-defined category name map.
-   *
-   * This map contains custom category names defined by the user in Copilot Money,
-   * which take precedence over the standard Plaid category names.
-   *
-   * @returns Map from category_id to category name
-   */
-  private async getUserCategoryMap(): Promise<Map<string, string>> {
-    // No copy here: the database memoises this map and drops it whenever the
-    // cache goes stale or a category write patches it. A copy held by this
-    // class kept serving old names after either (#909 review).
-    return this.db.getCategoryNameMap();
-  }
-
-  /**
-   * Get the set of category IDs that are marked as excluded.
-   *
-   * Transactions in these categories should be excluded from spending calculations.
-   *
-   * @returns Set of excluded category IDs
-   */
-  private async getExcludedCategoryIds(): Promise<Set<string>> {
-    if (this._excludedCategoryIds === null) {
-      const userCategories = await this.db.getUserCategories();
-      this._excludedCategoryIds = new Set(
-        userCategories.filter((cat) => cat.excluded === true).map((cat) => cat.category_id)
-      );
-    }
-    return this._excludedCategoryIds;
-  }
-
-  /**
    * Cache-mode side of the shared `category` filter (#845): the same
    * resolveCategoryFilter live mode uses, over the user's categories.
    *
@@ -1302,15 +1269,16 @@ export class CopilotMoneyTools {
       }
     >
   > {
-    const excludedCategoryIds = await this.getExcludedCategoryIds();
-    return Promise.all(
+    const excludedCategoryIds = await this.db.getExcludedCategoryIds();
+    const nameOf = await this.knownCategoryNamer();
+    return (
       // `income` is internal — see INTERNAL_TRANSACTION_FIELDS. The Omit in the
       // return type makes surfacing it a compile error; the guard row makes it
       // a test failure.
       // mutation-guard: the internal income flag is never returned
-      transactions.map(async ({ income: _internal, ...txn }) => ({
+      transactions.map(({ income: _internal, ...txn }) => ({
         ...txn,
-        category_name: await this.resolveCategoryName(txn.category_id),
+        category_name: nameOf(txn.category_id) ?? undefined,
         normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
         // `excluded` answers "is this row excluded from spending?", which is
         // the question a caller doing spend math is asking — NOT "is the raw
@@ -1365,37 +1333,27 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * The name a category id is known by — the user's name for it, else the
-   * Plaid-taxonomy name — or `undefined` when it is in neither map.
+   * The one category-naming rule, as a synchronous lookup: the user's name for
+   * a category id, else its Plaid-taxonomy name, else `null` (and `null` for no
+   * id). Every category_name and parent_name this class returns comes from it,
+   * and callers resolve it once per response, then name rows without awaiting.
    *
    * Deliberately NOT getCategoryName(): its fallback title-cases a snake_case
    * id and echoes any other id, so a deleted or unsynced category came back
-   * with its raw id as the "name". Live mode returns no name for such a row,
-   * and the transaction_type rules already treat it as nameless; every
-   * category_name this class returns follows the same rule.
+   * with its raw id as the "name" (#867). Live mode returns no name for such a
+   * row, and the transaction_type rules already treat it as nameless. A user
+   * category with a missing or empty name is not in the user name map
+   * (getCategoryNameMap skips it, as live mode's map does, #860), so it gets
+   * null or its Plaid-taxonomy name, never its id or "".
    *
-   * @param categoryId - The category ID to look up
-   * @returns The known name, or undefined
+   * The map is the database's own, not a copy: the database drops it whenever
+   * the cache reloads or a category write patches it. A copy held here kept
+   * serving old names after either (#909 review).
    */
-  private async resolveCategoryName(categoryId: string | undefined): Promise<string | undefined> {
-    if (!categoryId) return undefined;
-    return (await this.knownCategoryNamer())(categoryId) ?? undefined;
-  }
-
-  /**
-   * The one category-naming rule, as a synchronous lookup for code that names
-   * many categories inside `.map()`s: the known name, or `null`.
-   * resolveCategoryName() is this with `undefined` for no name.
-   *
-   * get_categories uses it in every view so one category gets one name
-   * whichever view returns it. A user category with a missing or empty name
-   * is not in the user name map (getCategoryNameMap skips it, as live mode's
-   * map does, #860), so it gets null or its Plaid-taxonomy name, never its id
-   * or "" (#867).
-   */
-  private async knownCategoryNamer(): Promise<(categoryId: string) => string | null> {
-    const userCategoryMap = await this.getUserCategoryMap();
-    return (categoryId) => lookupKnownCategoryName(categoryId, userCategoryMap);
+  private async knownCategoryNamer(): Promise<(categoryId: string | undefined) => string | null> {
+    const userCategoryMap = await this.db.getCategoryNameMap();
+    return (categoryId) =>
+      categoryId ? lookupKnownCategoryName(categoryId, userCategoryMap) : null;
   }
 
   /**
@@ -1676,11 +1634,11 @@ export class CopilotMoneyTools {
 
     // Filter out user-excluded transactions — the same union
     // enrichCacheTransactions() derives the `excluded` FIELD from, which is
-    // what makes the field agree with its own tool's filtering. The set is
-    // memoized on the instance, so asking for it here and again during
-    // enrichment costs one read.
+    // what makes the field agree with its own tool's filtering. The database
+    // memoizes the set, so asking for it here and again during enrichment
+    // costs one read.
     if (exclude_excluded) {
-      const excludedCategoryIds = await this.getExcludedCategoryIds();
+      const excludedCategoryIds = await this.db.getExcludedCategoryIds();
       transactions = transactions.filter(
         (txn) => !txn.excluded && !(txn.category_id && excludedCategoryIds.has(txn.category_id))
       );
@@ -1746,7 +1704,7 @@ export class CopilotMoneyTools {
       const result = this._filterByTransactionType(
         transactions,
         transaction_type,
-        await this.getUserCategoryMap()
+        await this.db.getCategoryNameMap()
       );
       transactions = result.transactions;
       typeSpecificData = result.typeSpecificData;
@@ -1992,9 +1950,6 @@ export class CopilotMoneyTools {
   }> {
     // Clear the cache
     const clearResult = this.db.clearCache();
-
-    // Also clear the local category/account maps in tools
-    this._excludedCategoryIds = null;
 
     // Trigger a reload by fetching cache info (which loads transactions)
     const cacheInfo = await this.db.getCacheInfo();
@@ -2302,8 +2257,8 @@ export class CopilotMoneyTools {
         const searchTerm = query.trim().toLowerCase();
         const userCats = await this.db.getUserCategories();
         const matches = userCats.filter((c) => c.name?.toLowerCase().includes(searchTerm));
-        // Never null here: a match has a non-empty name, so it is in the user
-        // name map. Same rule as the other views all the same.
+        // A match has a non-empty name, so it is in the user name map and
+        // nameOf never returns null here; it is used for consistency.
         const nameOf = await this.knownCategoryNamer();
 
         return {
@@ -2546,6 +2501,7 @@ export class CopilotMoneyTools {
     // Analyze each merchant for recurring patterns
     const recurring: DetectedRecurringRow[] = [];
 
+    const nameOf = await this.knownCategoryNamer();
     for (const [merchant, data] of merchantTransactions) {
       if (data.transactions.length < min_occurrences) continue;
 
@@ -2649,7 +2605,7 @@ export class CopilotMoneyTools {
           frequency,
           confidence,
           confidence_reason: confidenceReasons.join(', '),
-          category_name: await this.resolveCategoryName(data.categoryId),
+          category_name: nameOf(data.categoryId) ?? undefined,
           last_date: lastTxn.date,
           next_expected_date: nextExpectedDate,
           transactions: sortedTxns.slice(-5).map((t) => ({
@@ -2761,7 +2717,7 @@ export class CopilotMoneyTools {
             emoji: rec.emoji,
             amount: rec.amount,
             frequency: rec.frequency,
-            category_name: await this.resolveCategoryName(rec.category_id),
+            category_name: nameOf(rec.category_id) ?? undefined,
             state: rec.state ?? 'active',
             next_date: rec.next_date,
             last_date: rec.last_date,
@@ -2802,13 +2758,13 @@ export class CopilotMoneyTools {
         const archived = copilotRecurring.filter((r) => r.state === 'archived');
 
         // Helper to resolve category and create base item
-        const createItem = async (rec: (typeof copilotRecurring)[0]) => ({
+        const createItem = (rec: (typeof copilotRecurring)[0]) => ({
           recurring_id: rec.recurring_id,
           name: getRecurringDisplayName(rec),
           emoji: rec.emoji,
           amount: rec.amount,
           frequency: rec.frequency,
-          category_name: await this.resolveCategoryName(rec.category_id),
+          category_name: nameOf(rec.category_id) ?? undefined,
         });
 
         // Classify active items into this_month, overdue, future
@@ -2846,7 +2802,7 @@ export class CopilotMoneyTools {
         let monthlyCostEstimate = 0;
 
         for (const rec of active) {
-          const baseItem = await createItem(rec);
+          const baseItem = createItem(rec);
 
           // Calculate monthly cost estimate
           if (rec.amount) {
@@ -2913,8 +2869,8 @@ export class CopilotMoneyTools {
         futureItems.sort((a, b) => (a.next_date || 'z').localeCompare(b.next_date || 'z'));
 
         // Create paused and archived arrays
-        const pausedItems = await Promise.all(paused.map(createItem));
-        const archivedItems = await Promise.all(archived.map(createItem));
+        const pausedItems = paused.map(createItem);
+        const archivedItems = archived.map(createItem);
 
         // Sort by name
         pausedItems.sort((a, b) => a.name.localeCompare(b.name));
@@ -3011,7 +2967,8 @@ export class CopilotMoneyTools {
     );
 
     // Filter out budgets with orphaned category references (deleted categories)
-    const categoryMap = await this.getUserCategoryMap();
+    const categoryMap = await this.db.getCategoryNameMap();
+    const nameOf = await this.knownCategoryNamer();
     const budgets = nonTombstone.filter((b) => {
       if (!b.category_id) return true; // Keep budgets without category
       // Keep if category exists in user categories or Plaid categories
@@ -3038,21 +2995,19 @@ export class CopilotMoneyTools {
       }
     }
 
-    const enrichedBudgets = await Promise.all(
-      budgets.map(async (b) => ({
-        budget_id: b.budget_id,
-        name: b.name,
-        amount: effectiveAmount(b),
-        ...(b.amounts ? { amounts: b.amounts } : {}),
-        period: b.period,
-        category_id: b.category_id,
-        category_name: await this.resolveCategoryName(b.category_id),
-        start_date: b.start_date,
-        end_date: b.end_date,
-        is_active: b.is_active,
-        iso_currency_code: b.iso_currency_code,
-      }))
-    );
+    const enrichedBudgets = budgets.map((b) => ({
+      budget_id: b.budget_id,
+      name: b.name,
+      amount: effectiveAmount(b),
+      ...(b.amounts ? { amounts: b.amounts } : {}),
+      period: b.period,
+      category_id: b.category_id,
+      category_name: nameOf(b.category_id) ?? undefined,
+      start_date: b.start_date,
+      end_date: b.end_date,
+      is_active: b.is_active,
+      iso_currency_code: b.iso_currency_code,
+    }));
 
     return {
       count: budgets.length,
