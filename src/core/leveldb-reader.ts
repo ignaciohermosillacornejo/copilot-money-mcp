@@ -519,7 +519,9 @@ const SUBCOLLECTION_KEY_REGEX = /documents\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/
  * Also handles simple string path format for test databases:
  * remote_document/.../documents/{collection}/{doc_id}
  *
- * We extract the last two non-empty segments as collection and document ID.
+ * The last string segment is the document ID and the rest the collection path.
+ * Only keys from the `remote_document` table itself whose path has an even
+ * number of segments are documents; anything else returns null.
  */
 function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: string } | null {
   const keyStr = keyBuffer.toString('utf8');
@@ -558,6 +560,16 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
   const remoteDocStr = 'remote_document';
   const remoteDocIndex = keyBuffer.indexOf(remoteDocStr, 0, 'utf8');
   if (remoteDocIndex === -1) {
+    return null;
+  }
+  // The table name must be exactly `remote_document`: its string component
+  // ends in the 0x00 0x01 terminator right after the name. A substring match
+  // also accepts sibling tables such as `remote_document_read_time`, whose keys
+  // hold a collection path in string segments and the document id under a
+  // non-string label, so they would parse as a "document" named after the
+  // collection (#807).
+  const tableEnd = remoteDocIndex + remoteDocStr.length;
+  if (keyBuffer[tableEnd] !== 0x00 || keyBuffer[tableEnd + 1] !== 0x01) {
     return null;
   }
 
@@ -603,8 +615,10 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
     }
   }
 
-  // Need at least: collection, doc_id
-  if (segments.length < 2) {
+  // Need at least: collection, doc_id. A document path has an even number of
+  // segments (collection/id pairs); an odd count is a collection path, never a
+  // document, so it is rejected here rather than left for processors to skip.
+  if (segments.length < 2 || segments.length % 2 !== 0) {
     return null;
   }
 
@@ -804,6 +818,79 @@ export async function getAllCollections(dbPath: string): Promise<Map<string, Lev
   }
 
   return collections;
+}
+
+/**
+ * Key range of the binary `remote_document` table: the ordered-code string
+ * component `0x85 remote_document 0x00 0x01`, up to (not including) the same
+ * bytes with a final `0x02`. The sibling `remote_document_read_time` table
+ * sorts after it (`_` > `0x00`), so it is outside the range.
+ */
+const DOCUMENT_TABLE_GTE = Buffer.concat([
+  Buffer.from([0x85]),
+  Buffer.from('remote_document', 'utf8'),
+  Buffer.from([0x00, 0x01]),
+]);
+const DOCUMENT_TABLE_LT = Buffer.concat([DOCUMENT_TABLE_GTE.subarray(0, -1), Buffer.from([0x02])]);
+
+/** What {@link auditDocumentTable} counted. Counts only, so it is PII-safe to log. */
+export interface DocumentTableAudit {
+  /** Keys in the binary `remote_document` table. */
+  tableKeys: number;
+  /** Of those, keys that carry a non-empty value but that the key parser rejects. */
+  rejectedNonEmpty: number;
+}
+
+/**
+ * Count the binary `remote_document` table's keys that hold data the reader
+ * will never yield (#807).
+ *
+ * The key parser rejects any key whose path has an odd segment count, which
+ * keeps collection-path keys out of the processors. The cost of that guard is
+ * the reverse failure: a real document whose key the parser cannot read (a
+ * segment it drops, a shape it does not expect) now vanishes silently instead
+ * of being misread. `smoke:cache` calls this so that loss is loud.
+ *
+ * Reads a temp copy, like {@link iterateDocuments}.
+ */
+export async function auditDocumentTable(dbPath: string): Promise<DocumentTableAudit> {
+  const tempDbPath = copyDatabaseToTemp(dbPath);
+  const db = new ClassicLevel<Buffer, Buffer>(tempDbPath, {
+    createIfMissing: false,
+    keyEncoding: 'buffer',
+    valueEncoding: 'buffer',
+  });
+  const audit: DocumentTableAudit = { tableKeys: 0, rejectedNonEmpty: 0 };
+  try {
+    for await (const [key, value] of db.iterator({
+      gte: DOCUMENT_TABLE_GTE,
+      lt: DOCUMENT_TABLE_LT,
+    })) {
+      audit.tableKeys++;
+      if (value.length > 0 && parseDocumentKey(key) === null) audit.rejectedNonEmpty++;
+    }
+  } finally {
+    await db.close();
+    releaseTempDatabase(dbPath);
+  }
+  return audit;
+}
+
+/**
+ * Is this yielded document key from the `remote_document` table itself (#807)?
+ *
+ * True when the first `remote_document` in the key is followed by the binary
+ * component terminator (`0x00`) or, in the string-path format test databases
+ * use, by `/`. A key from a sibling table such as `remote_document_read_time`
+ * fails it. `smoke:cache` uses this as an oracle that does not go through the
+ * key parser's own table check.
+ */
+export function isDocumentTableKey(key: string): boolean {
+  const name = 'remote_document';
+  const at = key.indexOf(name);
+  if (at === -1) return false;
+  const next = key.charAt(at + name.length);
+  return next === '\u0000' || next === '/';
 }
 
 /**

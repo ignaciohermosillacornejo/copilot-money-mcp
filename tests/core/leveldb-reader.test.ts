@@ -13,7 +13,10 @@ import {
   createTestDatabase,
   cleanupAllTempDatabases,
   _getTempDbCache,
+  auditDocumentTable,
+  isDocumentTableKey,
 } from '../../src/core/leveldb-reader.js';
+import { encodeFirestoreDocument } from '../../src/core/protobuf-parser.js';
 import path from 'node:path';
 import fs from 'node:fs';
 
@@ -139,6 +142,185 @@ describe('leveldb-reader', () => {
       const result = parseDocumentKey(key);
 
       expect(result).toBeNull();
+    });
+
+    describe('document path parity', () => {
+      // A Firestore document path has an even number of segments; an odd count
+      // is a collection path. Real caches hold two tables whose names contain
+      // `remote_document`: the document table itself, and the sibling
+      // `remote_document_read_time` index, whose keys carry a COLLECTION path as
+      // string segments followed by a numeric read time and a non-string
+      // document id. The parser keeps only the string segments, so a sibling
+      // key used to come back as a "document" whose id is the collection name.
+
+      /** Encode an ordered-code string component: label byte, bytes, 0x00 0x01. */
+      function stringComponent(label: number, value: string): Buffer {
+        return Buffer.concat([
+          Buffer.from([label]),
+          Buffer.from(value, 'utf8'),
+          Buffer.from([0x00, 0x01]),
+        ]);
+      }
+
+      /** A `remote_document` table key with the given path segments. */
+      function documentTableKey(segments: string[]): Buffer {
+        return Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          ...segments.map((s) => stringComponent(0xbe, s)),
+          Buffer.from([0x80]),
+        ]);
+      }
+
+      /**
+       * A `remote_document_read_time` key shaped like the real ones: table
+       * name, collection path segments, a numeric read-time component, and a
+       * document id under a non-string label, then the terminator.
+       */
+      function readTimeTableKey(collectionSegments: string[]): Buffer {
+        return Buffer.concat([
+          stringComponent(0x85, 'remote_document_read_time'),
+          ...collectionSegments.map((s) => stringComponent(0xbe, s)),
+          Buffer.from([0x90, 0x81, 0x02, 0x83, 0x04]),
+          Buffer.from([0x98]),
+          Buffer.from('k3Jd9QpX2mZ7wL', 'utf8'),
+          Buffer.from([0x80]),
+        ]);
+      }
+
+      const ITEM = 'Xq7pLm2NvR8sKd4TbW1a';
+      const ACCOUNT = 'Ze3yHg6JcU9oFi5Vn0Qr';
+      const HASH = 'a3f9c2e17b8d4065';
+
+      // Every key the reader can meet, odd and even, from both tables.
+      const KEYS: Array<{ label: string; key: Buffer }> = [
+        { label: 'doc table, 2 segments', key: documentTableKey(['users', ITEM]) },
+        {
+          label: 'doc table, 4 segments',
+          key: documentTableKey(['items', ITEM, 'accounts', ACCOUNT]),
+        },
+        {
+          label: 'doc table, 6 segments',
+          key: documentTableKey(['items', ITEM, 'accounts', ACCOUNT, 'transactions', 'tx1']),
+        },
+        {
+          label: 'doc table, 3 segments (collection path)',
+          key: documentTableKey(['items', ITEM, 'accounts']),
+        },
+        {
+          label: 'doc table, 5 segments (collection path)',
+          key: documentTableKey(['items', ITEM, 'accounts', ACCOUNT, 'balance_history']),
+        },
+        { label: 'read_time, 1 segment', key: readTimeTableKey(['users']) },
+        { label: 'read_time, 3 segments', key: readTimeTableKey(['users', ITEM, 'categories']) },
+        {
+          label: 'read_time, 5 segments',
+          key: readTimeTableKey(['items', ITEM, 'accounts', ACCOUNT, 'transactions']),
+        },
+        {
+          label: 'read_time, 7 segments',
+          key: readTimeTableKey([
+            'items',
+            ITEM,
+            'accounts',
+            ACCOUNT,
+            'holdings_history',
+            HASH,
+            'history',
+          ]),
+        },
+      ];
+
+      test('every parsed key has an even segment count', () => {
+        const odd = KEYS.flatMap(({ label, key }) => {
+          const parsed = parseDocumentKey(key);
+          if (!parsed) return [];
+          const segments = parsed.collection.split('/').length + 1;
+          return segments % 2 === 0 ? [] : [`${label}: ${segments} segments`];
+        });
+        expect(odd).toEqual([]);
+      });
+
+      test('even document-table keys still parse', () => {
+        expect(parseDocumentKey(documentTableKey(['users', ITEM]))).toEqual({
+          collection: 'users',
+          documentId: ITEM,
+        });
+        expect(
+          parseDocumentKey(
+            documentTableKey(['items', ITEM, 'accounts', ACCOUNT, 'transactions', 'tx1'])
+          )
+        ).toEqual({
+          collection: `items/${ITEM}/accounts/${ACCOUNT}/transactions`,
+          documentId: 'tx1',
+        });
+      });
+
+      test('sibling remote_document_read_time keys are never documents', () => {
+        // Even when the string segments happen to be even in number, a key from
+        // another table is not a document.
+        expect(parseDocumentKey(readTimeTableKey(['users', ITEM]))).toBeNull();
+        expect(parseDocumentKey(readTimeTableKey(['items', ITEM, 'accounts']))).toBeNull();
+      });
+
+      test('iterateDocuments emits no odd-segment or sibling-table document', async () => {
+        const dbPath = path.join(FIXTURES_DIR, 'parity-db');
+        const { ClassicLevel } = await import('classic-level');
+        const db = new ClassicLevel<Buffer, Buffer>(dbPath, {
+          keyEncoding: 'buffer',
+          valueEncoding: 'buffer',
+          createIfMissing: true,
+        });
+        await db.open();
+        // A NON-empty value on every key: a misparsed key with real fields is
+        // exactly the case processor fields.size guards cannot neutralise.
+        const value = encodeFirestoreDocument({ name: 'Synthetic', amount: 100 });
+        for (const { key } of KEYS) await db.put(key, value);
+        await db.close();
+
+        const emitted: string[] = [];
+        for await (const doc of iterateDocuments(dbPath)) {
+          emitted.push(`${doc.collection}/${doc.documentId}`);
+        }
+        const odd = emitted.filter((p) => p.split('/').length % 2 !== 0);
+        expect(odd).toEqual([]);
+        expect(emitted.sort()).toEqual(
+          [
+            `users/${ITEM}`,
+            `items/${ITEM}/accounts/${ACCOUNT}`,
+            `items/${ITEM}/accounts/${ACCOUNT}/transactions/tx1`,
+          ].sort()
+        );
+      });
+
+      test('auditDocumentTable counts only document-table keys, and the rejected ones with data', async () => {
+        const dbPath = path.join(FIXTURES_DIR, 'parity-audit-db');
+        const { ClassicLevel } = await import('classic-level');
+        const db = new ClassicLevel<Buffer, Buffer>(dbPath, {
+          keyEncoding: 'buffer',
+          valueEncoding: 'buffer',
+          createIfMissing: true,
+        });
+        await db.open();
+        const value = encodeFirestoreDocument({ name: 'Synthetic', amount: 100 });
+        for (const { key } of KEYS) await db.put(key, value);
+        // A rejected document-table key with an EMPTY value is not data loss.
+        await db.put(documentTableKey(['items', ITEM, 'holdings_history']), Buffer.alloc(0));
+        await db.close();
+
+        // 5 document-table keys in KEYS plus the empty one; the 4 read_time
+        // keys are outside the table's range. Rejected with data: the 3- and
+        // 5-segment document-table keys.
+        expect(await auditDocumentTable(dbPath)).toEqual({ tableKeys: 6, rejectedNonEmpty: 2 });
+      });
+
+      test('isDocumentTableKey tells the document table from its sibling', () => {
+        expect(isDocumentTableKey(documentTableKey(['users', ITEM]).toString('utf8'))).toBe(true);
+        expect(isDocumentTableKey(readTimeTableKey(['users']).toString('utf8'))).toBe(false);
+        expect(
+          isDocumentTableKey('remote_document/projects/p/databases/(default)/documents/users/u1')
+        ).toBe(true);
+        expect(isDocumentTableKey('target_document')).toBe(false);
+      });
     });
 
     test('string path parser does not filter skip collections', () => {

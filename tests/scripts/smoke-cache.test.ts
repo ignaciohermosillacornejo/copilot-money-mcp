@@ -34,6 +34,7 @@ import {
   classifyDashboardActive,
   hasCategoryOnIncomeOrTransfer,
   reportIncomeTransferCategory,
+  reportDocumentKeyShape,
 } from '../../scripts/smoke/cache.js';
 import type { CollectionRoute } from '../../src/core/decoder.js';
 import type {
@@ -632,6 +633,35 @@ describe('reportUnreadCollection', () => {
     expect(status).toBe('WARN');
     expect(detail).toContain('3 document(s)');
     expect(detail).toContain('users/*/accounts');
+  });
+});
+
+describe('reportDocumentKeyShape', () => {
+  const clean = { yielded: 100, foreignTable: 0, oddSegment: 0 };
+  const audit = { tableKeys: 120, rejectedNonEmpty: 0 };
+
+  test('PASSes when every yielded key is an even document-table key and none is lost', () => {
+    const { status, detail } = reportDocumentKeyShape(clean, audit);
+    expect(status).toBe('PASS');
+    expect(detail).toContain('all 100 yielded documents');
+  });
+
+  test('FAILs on a document from a sibling table (the #807 shape)', () => {
+    const { status, detail } = reportDocumentKeyShape({ ...clean, foreignTable: 7 }, audit);
+    expect(status).toBe('FAIL');
+    expect(detail).toContain('7 yielded document(s) come from a table other than remote_document');
+  });
+
+  test('FAILs on a document whose path is a collection path', () => {
+    const { status, detail } = reportDocumentKeyShape({ ...clean, oddSegment: 3 }, audit);
+    expect(status).toBe('FAIL');
+    expect(detail).toContain('3 yielded document(s) have an odd segment count');
+  });
+
+  test('FAILs when the parser rejects a document-table key that holds data', () => {
+    const { status, detail } = reportDocumentKeyShape(clean, { ...audit, rejectedNonEmpty: 2 });
+    expect(status).toBe('FAIL');
+    expect(detail).toContain('2 remote_document key(s) with data are rejected');
   });
 });
 
