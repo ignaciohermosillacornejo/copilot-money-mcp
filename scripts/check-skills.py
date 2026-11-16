@@ -10,8 +10,9 @@ Checks:
 4. Field references resolve against the referenced tool's DEFAULT field
    preset (#704) — see "Check 4" below.
 5. Every markdown table row, blockquoted or not, has as many cells as its
-   header, and so does its separator (review on #826); a file listed in
-   TABLE_FLOORS must yield at least that many tables. See check_tables.
+   header, and so does its separator (review on #826); a file declaring
+   `<!-- check-skills: tables >= N -->` must yield at least N tables. See
+   check_tables.
 6. Mode surface (#847): every skill declares the server mode(s) it runs in,
    and each tool and argument it names exists in those modes — see "Check 6"
    below.
@@ -579,27 +580,37 @@ _TABLE_SEPARATOR = re.compile(r"^\|(\s*:?-+:?\s*\|)*\s*:?-+:?\s*\|?\s*$")
 # A fence opens on 3+ backticks or tildes and closes only on a run of the same
 # character at least as long, with nothing after it but whitespace.
 _FENCE = re.compile(r"^(`{3,}|~{3,})")
-_BLOCKQUOTE = re.compile(r"^(>\s?)+")
 
-# Non-vacuity floors: the per-row checks pass a file whose tables the parser no
-# longer sees (a fence that never closes, an unrecognised separator), so a file
-# known to hold tables must yield at least this many. Keyed by
-# (skill folder, file); raise the number when tables are added.
-TABLE_FLOORS: dict[tuple[str, str], int] = {
-    ("release-parity-test", "test-matrix.md"): 16,
-}
+# Non-vacuity floor, declared in the file it guards: the per-row checks pass a
+# file whose tables the parser no longer sees (a fence that never closes, an
+# unrecognised separator), so a file known to hold tables carries
+# `<!-- check-skills: tables >= N -->` and must yield at least N. Living in the
+# file, a floor moves with it on a rename instead of silently going unmatched;
+# the OK line counts the floors enforced so one that stops being read shows.
+_TABLE_FLOOR = re.compile(r"<!--\s*check-skills:\s*tables\s*>=\s*(\d+)\s*-->")
+_TABLE_FLOOR_LOOSE = re.compile(r"<!--\s*check-skills\b")
 
 
 def _cell_count(line: str) -> int:
-    return len(_UNESCAPED_PIPE.split(line.strip())) - 2
+    """Cells in a `|`-led row; a trailing pipe is optional, as in GFM."""
+    parts = _UNESCAPED_PIPE.split(line.strip())[1:]
+    if parts and not parts[-1]:
+        parts.pop()
+    return len(parts)
 
 
-def _unquote(line: str) -> str:
-    """The line with indentation and any `>` blockquote markers removed."""
-    return _BLOCKQUOTE.sub("", line.strip()).strip()
+def _unquote(line: str, max_depth: int | None = None) -> tuple[int, str]:
+    """(markers removed, rest): the line without indentation and up to
+    `max_depth` leading `>` blockquote markers (all of them when None)."""
+    rest = line.strip()
+    depth = 0
+    while rest.startswith(">") and (max_depth is None or depth < max_depth):
+        rest = rest[1:].strip()
+        depth += 1
+    return depth, rest
 
 
-def check_tables(skill_dir: Path) -> tuple[list[str], int]:
+def check_tables(skill_dir: Path) -> tuple[list[str], int, int]:
     """Every markdown table row has exactly as many cells as its header.
 
     GFM drops cells past the header's count without a warning, so a row with an
@@ -609,32 +620,39 @@ def check_tables(skill_dir: Path) -> tuple[list[str], int]:
     five release-parity-test rows shipped (review on #826). A separator whose
     cell count differs from its header's is not a table in GFM at all.
 
-    Returns the errors and the number of tables checked; a file in TABLE_FLOORS
-    that yields fewer tables than its floor is an error, so a parser regression
-    that goes blind fails rather than passing vacuously.
+    Returns the errors, the number of tables checked, and the number of floor
+    markers enforced. A file that declares `<!-- check-skills: tables >= N -->`
+    and yields fewer tables is an error, so a parser regression that goes blind
+    fails rather than passing vacuously; a malformed or repeated marker is an
+    error too, since it would otherwise enforce nothing.
 
-    LIMITATIONS: tuned to this repo's `| a | b |` style. A GFM-legal row with no
-    trailing pipe counts one cell short (a false positive, never a silent miss);
-    a table with no leading pipes is not seen at all; `\\|` (an escaped
-    backslash before a real cell boundary) counts one cell short. Lines inside
-    fenced code blocks are skipped, since they do not render as tables; a fence
-    opened inside a blockquote is assumed to close inside it too.
+    LIMITATIONS: tuned to this repo's `| a | b |` style. A table with no leading
+    pipes is not seen at all; `\\|` (an escaped backslash before a real cell
+    boundary) counts one cell short. Lines inside fenced code blocks are
+    skipped, since they do not render as tables; a fence closes only at the
+    blockquote depth it opened at.
     """
     errors: list[str] = []
     tables = 0
+    floors = 0
     for doc in skill_docs(skill_dir):
-        lines = [_unquote(line) for line in doc.read_text().splitlines()]
+        raw = doc.read_text().splitlines()
+        lines = [_unquote(line)[1] for line in raw]
         header: int | None = None
         fence: str | None = None
+        fence_depth = 0
         doc_tables = 0
         for i, stripped in enumerate(lines):
             if fence is not None:
-                if stripped.startswith(fence) and not stripped.lstrip(fence[0]).strip():
+                depth, rest = _unquote(raw[i], fence_depth)
+                closes = rest.startswith(fence) and not rest.lstrip(fence[0]).strip()
+                if depth == fence_depth and closes:
                     fence = None
                 continue
             opening = _FENCE.match(stripped)
             if opening:
                 fence = opening.group(1)
+                fence_depth = _unquote(raw[i])[0]
                 header = None
                 continue
             if not stripped.startswith("|"):
@@ -668,16 +686,32 @@ def check_tables(skill_dir: Path) -> tuple[list[str], int]:
                     f"has {header}. Markdown pads the row with empty cells, so its last "
                     "column renders blank. Add the missing cells."
                 )
-        floor = TABLE_FLOORS.get((skill_dir.name, str(doc.relative_to(skill_dir))))
-        if floor is not None and doc_tables < floor:
+        markers = [(n + 1, line) for n, line in enumerate(raw) if _TABLE_FLOOR_LOOSE.search(line)]
+        for line_no, line in markers:
+            if not _TABLE_FLOOR.search(line):
+                errors.append(
+                    f"{_loc(skill_dir, doc, line_no)}: unrecognised check-skills marker; "
+                    "the only form is `<!-- check-skills: tables >= N -->`, so this one "
+                    "enforces nothing."
+                )
+        if len(markers) > 1:
             errors.append(
-                f"{_loc(skill_dir, doc)}: {doc_tables} tables checked, expected at least "
-                f"{floor}. Either the table parser stopped seeing tables (an unclosed "
-                "fence, an unrecognised separator) or tables were removed; lower "
-                "TABLE_FLOORS in scripts/check-skills.py only in the second case."
+                f"{_loc(skill_dir, doc)}: {len(markers)} check-skills markers; declare "
+                "one table floor per file."
             )
+        floor_match = _TABLE_FLOOR.search(markers[0][1]) if len(markers) == 1 else None
+        if floor_match:
+            floors += 1
+            floor = int(floor_match.group(1))
+            if doc_tables < floor:
+                errors.append(
+                    f"{_loc(skill_dir, doc)}: {doc_tables} tables checked, expected at least "
+                    f"{floor}. Either the table parser stopped seeing tables (an unclosed "
+                    "fence, an unrecognised separator) or tables were removed; lower the "
+                    "file's check-skills marker only in the second case."
+                )
         tables += doc_tables
-    return errors, tables
+    return errors, tables, floors
 
 
 def check_field_refs(
@@ -963,15 +997,17 @@ def main() -> int:
         return 1
 
     tables_checked = 0
+    floors_enforced = 0
     for skill_dir in skill_dirs:
         fm_errs = check_frontmatter(skill_dir)
         all_errors.extend(fm_errs)
         if (skill_dir / "SKILL.md").exists():
             all_errors.extend(check_tool_refs(skill_dir, known_tools))
             all_errors.extend(check_profile_path(skill_dir))
-            table_errs, table_count = check_tables(skill_dir)
+            table_errs, table_count, floor_count = check_tables(skill_dir)
             all_errors.extend(table_errs)
             tables_checked += table_count
+            floors_enforced += floor_count
             all_errors.extend(
                 check_field_refs(skill_dir, terse_tools, tool_args, vocabulary)
             )
@@ -985,7 +1021,7 @@ def main() -> int:
     print(
         f"OK: {len(skill_dirs)} skills validated "
         f"({len(terse_tools)} terse-by-default tools cross-checked, "
-        f"{tables_checked} tables checked)"
+        f"{tables_checked} tables checked, {floors_enforced} table floors enforced)"
     )
     return 0
 

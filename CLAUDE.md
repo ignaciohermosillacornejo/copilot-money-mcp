@@ -28,9 +28,10 @@ bun run fix          # Run lint:fix + format
 > field names skills reference against each terse-by-default tool's
 > `DEFAULT_*_FIELDS` preset (#704), so a skill that reads a field the v3 diet
 > dropped fails the lint instead of failing silently at use time. These checks,
-> and a table-shape check (every row has as many cells as its header), read every
-> `.md` file under a skill's folder, not just `SKILL.md` — so a skill's test
-> matrix or reference files are linted too. Every skill declares
+> and a table-shape check (every row and the separator have as many cells as
+> the header; a file with a `<!-- check-skills: tables >= N -->` marker must
+> yield at least N tables), read every `.md` file under a skill's folder, not
+> just `SKILL.md` — so a skill's test matrix or reference files are linted too. Every skill declares
 > `metadata: modes: "live, cache"` (or `"live"`) in its frontmatter, and the lint
 > fails a tool or argument those modes don't list (#847); a two-mode skill names
 > both variants, tagged: `` `get_accounts_live` (live) / `get_accounts` (cache) ``.
