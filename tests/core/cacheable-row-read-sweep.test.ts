@@ -305,27 +305,57 @@ describe('an EDIT of a cached row: whatever upsert stores survives the live read
   // The pass above inserts a new id, so the cached-copy branch never runs.
   // Here the row is already cached, so an edit response is checked with the
   // fields no write sets filled from the cached copy. Every variant is
-  // upserted; the month is either dropped (refused) or, still cached, must
-  // serve the row where its date says and survive every read.
+  // upserted, and exactly one of two things must hold: the row was refused
+  // and the cached copy's month dropped, or the row was stored and the month
+  // its date names serves it through every read.
+  const CACHED_MONTH = BASE_DATE.slice(0, 7);
+
+  /** Warm both months with the cached copy, upsert `row` as an edit, report what happened. */
+  async function editCached(row: Record<string, unknown>) {
+    const { live, tools } = setup({ cachedCopy: true });
+    await tools.getTransactions({ start_date: WARM.start, end_date: WARM.end, limit: 10 });
+    live.upsertLiveTransaction(row as unknown as CreatedTransaction);
+    const wc = live.getTransactionsWindowCache();
+    const month = namedMonth(row.date);
+    const stored =
+      month !== null &&
+      wc.hasMonth(month) &&
+      wc.entriesForMonth(month).some((r) => r.id === NEW_ID);
+    return { tools, wc, month, stored };
+  }
+
+  test('the pass is not vacuous: some edits are stored, some only via the cached copy, some refused', async () => {
+    const all = variants();
+    const outcomes = await Promise.all(all.map(async (v) => (await editCached(v.row)).stored));
+    const stored = all.filter((_, i) => outcomes[i]);
+    expect(stored.length).toBeGreaterThan(1);
+    expect(stored.length).toBeLessThan(all.length);
+    // Stored only because the cached copy filled a field the response omitted.
+    expect(stored.some((v) => !LiveCopilotDatabase.isCacheableRow(v.row))).toBe(true);
+    // And one that moved into the other warmed month.
+    expect(stored.some((v) => v.row.date === '2025-02-28')).toBe(true);
+  });
+
   test.each(variants().map((v) => [v.label, v] as const))(
-    '%s: a stored edit lands in the month its date names and no read over it throws',
+    '%s: an edit is refused with its month dropped, or stored where its date says and survives every read',
     async (_label, { row }) => {
-      const { live, tools } = setup({ cachedCopy: true });
-      await tools.getTransactions({ start_date: WARM.start, end_date: WARM.end, limit: 10 });
-
-      live.upsertLiveTransaction(row as unknown as CreatedTransaction);
-
-      const month = namedMonth(row.date) ?? BASE_DATE.slice(0, 7);
-      const base = monthRead(month);
+      const { tools, wc, month, stored } = await editCached(row);
+      if (!stored) {
+        // Refused: the cached copy's month must not keep serving the
+        // pre-write row. (Reads of a cold month only re-warm the clean mock
+        // rows, so they would prove nothing here.)
+        expect(wc.hasMonth(CACHED_MONTH)).toBe(false);
+        return;
+      }
+      const base = monthRead(month!);
       const plain = await tools.getTransactions({
         ...base,
         fields: [...LIVE_TRANSACTION_KNOWN_FIELDS],
       });
-      if (plain._cache_hit) {
-        expect(
-          plain.transactions.map((t) => (t as { transaction_id: string }).transaction_id)
-        ).toContain(NEW_ID);
-      }
+      expect(plain._cache_hit).toBe(true);
+      expect(
+        plain.transactions.map((t) => (t as { transaction_id: string }).transaction_id)
+      ).toContain(NEW_ID);
       await readEverything(tools, base);
     }
   );
