@@ -122,7 +122,9 @@ if (!Array.isArray(packages)) {
       if (typeof arg.isRequired !== 'boolean') {
         issues.push(`${where}.isRequired is not a boolean`);
       }
-      if (arg.type === 'named' && typeof arg.name === 'string') {
+      // Only a name that passed the "--flag" shape check is compared with the
+      // CLI, so a malformed one is reported once.
+      if (arg.type === 'named' && typeof arg.name === 'string' && arg.name.startsWith('--')) {
         if (listed.has(arg.name)) {
           issues.push(`${where}.name ${arg.name} is listed twice`);
         } else {

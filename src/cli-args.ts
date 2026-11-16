@@ -131,12 +131,15 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
       // above), and so is a known flag written without its dashes, since that
       // is a closed set. Anything else may be a path or a secret, so it is
       // named by position only.
-      const undashed = BY_SPELLING.get(`--${arg}`) ?? BY_SPELLING.get(`-${arg}`);
+      // The hint looks the token up with its dashes normalised, so a missing,
+      // extra or doubled dash (`write`, `-write`, `--v`) is caught too.
+      const bare = arg.replace(/^-+/, '');
+      const meant = BY_SPELLING.get(`--${bare}`) ?? BY_SPELLING.get(`-${bare}`);
       warnings.push(
-        arg.startsWith('-')
-          ? `Ignoring unrecognised argument "${arg}" (see --help)`
-          : undashed
-            ? `Ignoring unrecognised argument "${arg}" (did you mean ${undashed.name}?)`
+        meant
+          ? `Ignoring unrecognised argument "${arg}" (did you mean ${meant.name}?)`
+          : arg.startsWith('-')
+            ? `Ignoring unrecognised argument "${arg}" (see --help)`
             : `Ignoring unrecognised argument #${i + 1} (see --help)`
       );
       continue;

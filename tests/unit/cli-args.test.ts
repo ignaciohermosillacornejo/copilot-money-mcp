@@ -177,6 +177,13 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['v']).warnings).toEqual([
       'Ignoring unrecognised argument "v" (did you mean --verbose?)',
     ]);
+    // A wrong number of dashes gets the same hint.
+    expect(parseCliArgs(['-write']).warnings).toEqual([
+      'Ignoring unrecognised argument "-write" (did you mean --write?)',
+    ]);
+    expect(parseCliArgs(['--v']).warnings).toEqual([
+      'Ignoring unrecognised argument "--v" (did you mean --verbose?)',
+    ]);
   });
 
   test('a stray non-dashed token is reported by position, never echoed', () => {

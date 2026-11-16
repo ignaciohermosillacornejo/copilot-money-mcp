@@ -119,6 +119,12 @@ describe('check:server-json', () => {
     });
   }
 
+  test('a malformed name is reported once, not also as an unknown CLI flag', async () => {
+    const { stderr } = await withArgs([...REAL_ARGS, { ...NAMED, name: 'flag' }]);
+    expect(stderr).toContain('.name is "flag"');
+    expect(stderr).not.toContain('is not a flag the CLI parses');
+  });
+
   test('reports a null argument by index instead of crashing', async () => {
     const { code, stderr } = await withArgs([...REAL_ARGS, null]);
     expect(code).toBe(1);
