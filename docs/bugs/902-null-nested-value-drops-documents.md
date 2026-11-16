@@ -77,7 +77,11 @@ Root-cause fix: `validateOrWarn` now attempts a second repair after the non-fini
 any failure **below the top level**, removes the rejected value if it is present
 (an optional leaf costs that leaf), or the node enclosing it if the value is absent (a
 required nested field costs the one holding, contribution or snapshot that lacks it).
-It repeats until the document validates or nothing more can be removed. A failure at the
+It repeats until the document validates, nothing more can be removed, or a bound of eight
+rounds runs out (deeper than any current model needs). The last two cases are a give-up,
+not an expected refusal, so besides the usual `schema drop` they emit a distinct
+`nested repair gave up: … reason=exhausted|no-progress` warn rather than passing for the
+pre-fix drop. A failure at the
 top level is never repaired, and the repair never climbs to a top-level field: those come
 from the decoder's typed getters, so a mismatch there is real shape drift and still drops
 and warns as before.

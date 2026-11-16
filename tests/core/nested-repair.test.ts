@@ -41,8 +41,8 @@ describe('repairNestedIssues', () => {
   test('gives up after its round bound rather than looping', () => {
     // Every level is required, so each round can only climb one level from
     // the bad leaf. Ten levels need more rounds than the bound allows, so the
-    // repair must return null (the caller then drops and warns) instead of
-    // iterating without limit.
+    // repair must report `exhausted` (the caller then drops and warns) instead
+    // of iterating without limit.
     let leaf: z.ZodType = z.object({ value: z.number() });
     let bad: unknown = { value: null };
     for (let depth = 0; depth < 10; depth++) {
@@ -77,6 +77,21 @@ describe('repairNestedIssues', () => {
 
     expect(result).toMatchObject({ ok: true, data: { id: 'x', items: [{}] } });
     expect(result.ok && result.removed.map((r) => r.path)).toEqual(['items.0.name']);
+  });
+
+  test('reports no-progress when a round can remove nothing', () => {
+    // The issue path runs two levels past the data: neither the node nor its
+    // parent exists, so there is nothing to remove.
+    const Schema = z
+      .object({ id: z.string(), items: z.array(z.object({ name: z.string() })) })
+      .superRefine((_doc, ctx) => {
+        ctx.addIssue({ code: 'custom', path: ['items', 0, 'name', 'a', 'b'], message: 'bad' });
+      });
+
+    expect(repairNestedIssues(Schema, { id: 'x', items: [{ name: 'n' }] })).toEqual({
+      ok: false,
+      reason: 'no-progress',
+    });
   });
 
   test('refuses a top-level failure outright', () => {
