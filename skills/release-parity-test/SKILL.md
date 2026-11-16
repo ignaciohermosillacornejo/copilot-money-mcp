@@ -106,9 +106,10 @@ replaced by a SKIP (test-matrix.md, How to extend).
 3. Confirm live and write mode (P-02) and open a Chrome tab on the web app
    (P-03).
 4. Ask the user which account is the Manual test account and confirm
-   `isManual: true` (P-04). Record its id, item id, balance, and every existing
-   transaction id as DO NOT TOUCH. If it has real transactions, check balances
-   as changes from the baseline, never as absolute values.
+   `isManual: true` (P-04). Record its id, item id, balance, the date of its
+   last balance reset, and every existing transaction id as DO NOT TOUCH. If it
+   has real transactions, check balances as changes from the baseline, never as
+   absolute values.
 5. Start the local report, `docs/superpowers/RELEASE-PARITY-TEST-<YYYY-MM-DD>.md`,
    with the cleanup ledger at the top. Finish any unfinished ledger from an
    earlier run first (Guardrail 6), then clear leftovers (P-08).
@@ -148,7 +149,12 @@ description, or Copilot's own behaviour.
 ## Phase 2 — Writes and coherence (W, COH, ERR)
 
 1. Create the W-section test data in the Manual account, logging each write
-   before sending it.
+   before sending it. **Date test rows after the account's last balance reset
+   (P-04).** A manual account's balance ignores rows dated before it (#848):
+   creating, changing or deleting such a row does not move the balance. When a
+   case needs an older date (W-19, a cold-month COH row when the reset is
+   recent), log that row's expected balance effect as 0; W-12, CL-04 and CL-07
+   count only rows dated after the reset.
 2. After each write, check it in live **and** in the web.
 3. Coherence is the part most likely to regress, and it is invisible unless you
    test a **cold month** (P-09): it is cached for a week. Read it once, write

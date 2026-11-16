@@ -504,6 +504,135 @@ describe('set_recurring_state check (stubbed client)', () => {
   });
 });
 
+describe('create_transaction check (stubbed client)', () => {
+  interface CreateVars {
+    accountId: string;
+    itemId: string;
+    input: { name: string; date: string; amount: number; categoryId: string; type: string };
+  }
+
+  /**
+   * A server that stores each created row and serves it back on re-read.
+   * `storeAs` lets a test make the stored row differ from what was sent —
+   * an accepted-but-ignored write.
+   */
+  function fakeServer(
+    storeAs: (input: CreateVars['input']) => Partial<CreateVars['input']> = () => ({})
+  ) {
+    const rows: Record<string, unknown>[] = [];
+    const { client, calls } = stubClient({
+      CreateTransaction: (variables) => {
+        const { accountId, itemId, input } = variables as CreateVars;
+        const row = {
+          id: `txn-${String(rows.length + 1).padStart(17, '0')}`,
+          accountId,
+          itemId,
+          parentId: null,
+          recurringId: null,
+          isReviewed: false,
+          isPending: false,
+          userNotes: null,
+          tipAmount: null,
+          suggestedCategoryIds: [],
+          isoCurrencyCode: null,
+          createdAt: 1700000000000,
+          tags: [],
+          goal: null,
+          ...input,
+          ...storeAs(input),
+        };
+        rows.push(row);
+        return { createTransaction: row };
+      },
+      Transactions: () => transactionsPage(rows),
+    });
+    return { client, calls };
+  }
+
+  function contextWithPrereqs(client: GraphQLClient): RoundtripContext {
+    const ctx = makeContext(client);
+    ctx.state.account = { accountId: 'acct-1', itemId: 'item-1' };
+    ctx.state.categoryId = 'cat-1';
+    return ctx;
+  }
+
+  test('also creates an INCOME row with an empty categoryId, verifies it by re-read, and registers it for cleanup', async () => {
+    const { client, calls } = fakeServer();
+    const ctx = contextWithPrereqs(client);
+    const outcome = await getCheck('create_transaction').run(ctx);
+    expect(outcome).toBeUndefined();
+
+    const creates = calls
+      .filter((call) => call.operationName === 'CreateTransaction')
+      .map((call) => (call.variables as CreateVars).input);
+    const income = creates.find((input) => input.type === 'INCOME');
+    expect(income).toBeDefined();
+    // Exactly what create_transaction sends for INCOME without a category_id.
+    expect(income!.categoryId).toBe('');
+    expect(income!.name).toBe('__smoke__1700000000000-txn-income');
+
+    expect(ctx.registry.pending.map((item) => item.label)).toContain(
+      '__smoke__1700000000000-txn-income'
+    );
+  });
+
+  test('FAILS when the re-read shows the INCOME row with another type', async () => {
+    const { client } = fakeServer((input) => (input.type === 'INCOME' ? { type: 'REGULAR' } : {}));
+    const ctx = contextWithPrereqs(client);
+    await expect(getCheck('create_transaction').run(ctx)).rejects.toThrow(/INCOME.*type/);
+    // The row was created, so it is still registered for cleanup.
+    expect(ctx.registry.pending.map((item) => item.label)).toContain(
+      '__smoke__1700000000000-txn-income'
+    );
+  });
+
+  test('FAILS when the re-read shows the INCOME row with a category', async () => {
+    const { client } = fakeServer((input) =>
+      input.type === 'INCOME' ? { categoryId: 'cat-2' } : {}
+    );
+    const ctx = contextWithPrereqs(client);
+    await expect(getCheck('create_transaction').run(ctx)).rejects.toThrow(/INCOME.*category/);
+  });
+
+  test('FAILS when the INCOME row is missing from the re-read', async () => {
+    const { client } = stubClient({
+      CreateTransaction: (variables) => {
+        const { accountId, itemId, input } = variables as CreateVars;
+        return { createTransaction: { id: `txn-${input.type}`, accountId, itemId, ...input } };
+      },
+      // Serves the REGULAR row only: the INCOME create was accepted but not stored.
+      Transactions: () =>
+        transactionsPage([
+          {
+            id: 'txn-REGULAR',
+            accountId: 'acct-1',
+            itemId: 'item-1',
+            date: '2023-11-14',
+            name: '__smoke__1700000000000-txn-a',
+            parentId: null,
+            amount: 100,
+            categoryId: 'cat-1',
+            recurringId: null,
+            isReviewed: false,
+            isPending: false,
+            type: 'REGULAR',
+            userNotes: null,
+            tipAmount: null,
+            suggestedCategoryIds: [],
+            isoCurrencyCode: null,
+            createdAt: 1700000000000,
+            tags: [],
+            goal: null,
+          },
+        ]),
+    });
+    const ctx = contextWithPrereqs(client);
+    await expect(getCheck('create_transaction').run(ctx)).rejects.toThrow(
+      /INCOME.*missing from Transactions re-read/
+    );
+  });
+});
+
 describe('delete_transaction check (stubbed client)', () => {
   test('verifies absence via re-read and deregisters from cleanup', async () => {
     const { client } = stubClient({
