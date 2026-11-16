@@ -123,9 +123,12 @@ if (!Array.isArray(packages)) {
         issues.push(`${where}.isRequired is not a boolean`);
       }
       if (arg.type === 'named' && typeof arg.name === 'string') {
-        if (listed.has(arg.name)) issues.push(`${where}.name ${arg.name} is listed twice`);
-        checkAgainstCli(where, arg, arg.name);
-        listed.add(arg.name);
+        if (listed.has(arg.name)) {
+          issues.push(`${where}.name ${arg.name} is listed twice`);
+        } else {
+          checkAgainstCli(where, arg, arg.name);
+          listed.add(arg.name);
+        }
       }
     });
     for (const flag of CLI_FLAGS) {

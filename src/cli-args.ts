@@ -81,7 +81,8 @@ for (const flag of CLI_FLAGS) {
 /**
  * True when argv[i] asks for help: `--help` or `-h`, bare or `=true`, unless
  * switched off the way any boolean is (`=false`, or a following literal
- * `false`), in any case.
+ * `false`), in any case. A request at any position wins, so unlike the other
+ * booleans a later `--help=false` does not override an earlier `--help`.
  */
 function asksForHelp(arg: string, i: number, argv: readonly string[]): boolean {
   const eq = arg.indexOf('=');
@@ -127,12 +128,16 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
         throw new CliArgError(`Unknown option ${spelling}. Run with --help.`);
       }
       // A dashed token is echoed (it cannot carry "=value" here: that threw
-      // above). Anything else may be a path or a secret, so it is named by
-      // position only.
+      // above), and so is a known flag written without its dashes, since that
+      // is a closed set. Anything else may be a path or a secret, so it is
+      // named by position only.
+      const undashed = BY_SPELLING.get(`--${arg}`) ?? BY_SPELLING.get(`-${arg}`);
       warnings.push(
         arg.startsWith('-')
           ? `Ignoring unrecognised argument "${arg}" (see --help)`
-          : `Ignoring unrecognised argument #${i + 1} (see --help)`
+          : undashed
+            ? `Ignoring unrecognised argument "${arg}" (did you mean ${undashed.name}?)`
+            : `Ignoring unrecognised argument #${i + 1} (see --help)`
       );
       continue;
     }

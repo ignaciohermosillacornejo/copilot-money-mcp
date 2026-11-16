@@ -181,6 +181,8 @@ describe('CLI entry point', () => {
       const { stderr } = await runCli(['--help']);
 
       for (const flag of CLI_FLAGS) expect(stderr).toContain(flag.name);
+      expect(stderr).toContain('--option=value');
+      expect(stderr).toContain('=true / =false');
     });
 
     test('--browser=<name> is read, not ignored', async () => {
