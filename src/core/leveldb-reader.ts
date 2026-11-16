@@ -545,6 +545,8 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
   // Try simple string path format first (for test databases)
   // Format: remote_document/.../documents/{collection}/{doc_id}
   // Or subcollection: remote_document/.../documents/{parent}/{parent_id}/{sub}/{doc_id}
+  // Both regexes are anchored at `$` and capture 4 or 2 path segments, so the
+  // string branch is parity-safe by construction and skips the check below.
   const skipCollections = ['collection_parent', 'target', 'target_global', 'mutation_queue'];
 
   // Try subcollection pattern first (4 segments after documents/)
@@ -573,12 +575,11 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
   if (remoteDocIndex === -1) {
     return null;
   }
-  // The table name must be exactly `remote_document`: its string component
-  // ends in the 0x00 0x01 terminator right after the name. A substring match
-  // also accepts sibling tables such as `remote_document_read_time`, whose keys
-  // hold a collection path in string segments and the document id under a
-  // non-string label, so they would parse as a "document" named after the
-  // collection (#807).
+  // The table name's string component must end in the 0x00 0x01 terminator.
+  // `isDocumentTableKey` above has already rejected sibling tables such as
+  // `remote_document_read_time` (#807); this rejects the one binary shape it
+  // lets through, `remote_document 0x00 <byte other than 0x01>` (0x00 0xFF is
+  // ordered-code's escape for a literal NUL, so that name is not the table's).
   const tableEnd = remoteDocIndex + remoteDocStr.length;
   if (keyBuffer[tableEnd] !== 0x00 || keyBuffer[tableEnd + 1] !== 0x01) {
     return null;
@@ -611,16 +612,22 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
           while (strEnd < keyBuffer.length && keyBuffer[strEnd] !== 0x00) {
             strEnd++;
           }
-          // A segment with no terminator is a truncated key, not a segment.
-          // Invalid UTF-8 inside a segment decodes lossily (U+FFFD): the id no
-          // longer round-trips, but the segment still counts, so parity holds.
-          if (strEnd > pos && strEnd < keyBuffer.length) {
-            const str = keyBuffer.slice(pos, strEnd).toString('utf8');
-            // A control character means this is not a path segment.
-            if (!hasControlCharacter(str)) {
-              segments.push(str);
-            }
+          // A segment that cannot be read makes the whole key unreadable.
+          // Skipping it and carrying on would let parity be satisfied by
+          // subtraction: `users/u1/<truncated>` would come back as the
+          // different document `users/u1` (#807). So an empty segment, one
+          // with no terminator (a truncated key) or one holding a control
+          // character rejects the key. Invalid UTF-8 inside a segment decodes
+          // lossily (U+FFFD): the id no longer round-trips, but the segment
+          // still counts, so parity holds.
+          if (strEnd <= pos || strEnd >= keyBuffer.length) {
+            return null;
           }
+          const str = keyBuffer.slice(pos, strEnd).toString('utf8');
+          if (hasControlCharacter(str)) {
+            return null;
+          }
+          segments.push(str);
           pos = strEnd;
         }
       }
@@ -868,7 +875,9 @@ export interface DocumentTableAudit {
 
 /**
  * Count the binary `remote_document` table's keys that hold data the reader
- * will never yield (#807).
+ * will never yield (#807). A key counts whichever guard rejected it, the skip
+ * list included; those skipped names are sibling LevelDB tables rather than
+ * paths inside this one, so a hit is still worth a look.
  *
  * The key parser rejects any key whose path has an odd segment count, which
  * keeps collection-path keys out of the processors. The cost of that guard is
@@ -907,8 +916,10 @@ export async function auditDocumentTable(dbPath: string): Promise<DocumentTableA
  * Does a document at `collection`/{id} have a document path's parity (#807)?
  *
  * A Firestore document path has an even number of segments; an odd count is a
- * collection path. One definition, so the key parser's guard and the
- * `smoke:cache` oracle that checks it cannot drift apart.
+ * collection path. This is the one definition for the code that CHECKS the
+ * reader's output (`smoke:cache` check 0 and the tests). The key parser keeps
+ * its own count over the raw segments on purpose: an oracle that called the
+ * code it audits would agree with it by construction.
  */
 export function isDocumentPathParity(collection: string): boolean {
   return (collection.split('/').length + 1) % 2 === 0;
