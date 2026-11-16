@@ -67,7 +67,10 @@ row whose `category_name` was now `null` reported the deleted parent's raw id as
 name came back as the id and an empty one as `""`. Every `get_categories` view now names a
 category by `resolveCategoryName()`'s rule (user name map, then Plaid taxonomy, else `null`).
 The user name map already skips a category with a missing or empty name, as live mode's
-does (#860). `getCategoryDisplayName()` had no caller left and was deleted. The
+does (#860). `getCategoryDisplayName()` had no caller left and was deleted. Routing every
+view through one rule also exposed a stale copy of the name map held by `CopilotMoneyTools`,
+which only `refresh_database` dropped; it is gone, and the database's own map (dropped on a
+cache reload or a category write) is the only one. The
 finance-pulse skill, which used "no `category_name`" to mean uncategorized, now tests
 `category_id` instead, so a row in a deleted category still counts as spending.
 

@@ -834,7 +834,6 @@ export class CopilotMoneyTools {
   private db: CopilotDatabase;
   private graphqlClient: GraphQLClient | null;
   private liveDb: LiveCopilotDatabase | undefined;
-  private _userCategoryMap: Map<string, string> | null = null;
   private _excludedCategoryIds: Set<string> | null = null;
   /**
    * Split-parent ids this server has learned about (#822): every parent
@@ -1177,10 +1176,10 @@ export class CopilotMoneyTools {
    * @returns Map from category_id to category name
    */
   private async getUserCategoryMap(): Promise<Map<string, string>> {
-    if (this._userCategoryMap === null) {
-      this._userCategoryMap = await this.db.getCategoryNameMap();
-    }
-    return this._userCategoryMap;
+    // No copy here: the database memoises this map and drops it whenever the
+    // cache goes stale or a category write patches it. A copy held by this
+    // class kept serving old names after either (#909 review).
+    return this.db.getCategoryNameMap();
   }
 
   /**
@@ -1380,12 +1379,13 @@ export class CopilotMoneyTools {
    */
   private async resolveCategoryName(categoryId: string | undefined): Promise<string | undefined> {
     if (!categoryId) return undefined;
-    return lookupKnownCategoryName(categoryId, await this.getUserCategoryMap()) ?? undefined;
+    return (await this.knownCategoryNamer())(categoryId) ?? undefined;
   }
 
   /**
-   * resolveCategoryName()'s rule as a synchronous lookup, for code that names
-   * many categories inside nested `.map()`s: the known name, or `null`.
+   * The one category-naming rule, as a synchronous lookup for code that names
+   * many categories inside `.map()`s: the known name, or `null`.
+   * resolveCategoryName() is this with `undefined` for no name.
    *
    * get_categories uses it in every view so one category gets one name
    * whichever view returns it. A user category with a missing or empty name
@@ -1994,7 +1994,6 @@ export class CopilotMoneyTools {
     const clearResult = this.db.clearCache();
 
     // Also clear the local category/account maps in tools
-    this._userCategoryMap = null;
     this._excludedCategoryIds = null;
 
     // Trigger a reload by fetching cache info (which loads transactions)
@@ -2357,28 +2356,25 @@ export class CopilotMoneyTools {
 
         // Build a lookup from user categories for parent/emoji info
         const userCatMap = new Map(userCategories.map((c) => [c.category_id, c]));
+        const nameOf = await this.knownCategoryNamer();
 
         // Convert to list
-        const categories = (
-          await Promise.all(
-            Array.from(categoryStats.entries()).map(async ([category_id, stats]) => {
-              const userCat = userCatMap.get(category_id);
-              return {
-                category_id,
-                category_name: (await this.resolveCategoryName(category_id)) ?? null,
-                parent_category_id: userCat?.parent_category_id ?? null,
-                // A parent missing from the name maps (deleted or unsynced)
-                // gets null, not its id, the same rule as category_name.
-                parent_name: userCat?.parent_category_id
-                  ? ((await this.resolveCategoryName(userCat.parent_category_id)) ?? null)
-                  : null,
-                transaction_count: stats.count,
-                total_amount: roundAmount(stats.totalAmount),
-                emoji: userCat?.emoji ?? null,
-              };
-            })
-          )
-        ).sort((a, b) => b.total_amount - a.total_amount); // Sort by amount (like UI)
+        const categories = Array.from(categoryStats.entries())
+          .map(([category_id, stats]) => {
+            const userCat = userCatMap.get(category_id);
+            return {
+              category_id,
+              category_name: nameOf(category_id),
+              parent_category_id: userCat?.parent_category_id ?? null,
+              // A parent missing from the name maps (deleted or unsynced)
+              // gets null, not its id, the same rule as category_name.
+              parent_name: userCat?.parent_category_id ? nameOf(userCat.parent_category_id) : null,
+              transaction_count: stats.count,
+              total_amount: roundAmount(stats.totalAmount),
+              emoji: userCat?.emoji ?? null,
+            };
+          })
+          .sort((a, b) => b.total_amount - a.total_amount); // Sort by amount (like UI)
 
         return {
           view: 'list',
