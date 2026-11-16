@@ -452,6 +452,24 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/tools/live-write-coherence.test.ts',
   },
   {
+    name: 'a write row carries every live field',
+    file: 'src/tools/live/transactions.ts',
+    invariant:
+      'A transaction write row must carry every get_transactions_live field the mutation ' +
+      'response can supply. Dropping one from WRITE_ROW_FIELDS silently removes it from ' +
+      'every create/split/add-to-recurring response, so a caller that reads the field back ' +
+      'from the write gets nothing and must re-read to learn it (#889).',
+    mutation: {
+      kind: 'remove',
+      find: wholeLines(
+        '  // mutation-guard: a write row carries every live field',
+        "  'normalized_merchant',"
+      ),
+    },
+    expectFailingTests: ['every live field is a write-row field', 'and none is missing'],
+    expectFails: 'tests/tools/live-write-coherence.test.ts',
+  },
+  {
     name: 'an edit never inserts an uncached row',
     file: 'src/core/live-database.ts',
     invariant:

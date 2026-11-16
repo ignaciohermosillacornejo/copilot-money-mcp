@@ -268,6 +268,7 @@ const WRITE_ROW_FIELDS = [
   'amount',
   'date',
   'name',
+  // mutation-guard: a write row carries every live field
   'normalized_merchant',
   'type',
   'user_reviewed',
@@ -345,7 +346,11 @@ const NO_CATEGORY_INDEX = new Proxy({} as CategoryIndex, {
  * non-optional `parentId`, since without one the value would be a guess. A
  * known `null` counts — a response that selects `parentId`
  * (bulkEditTransactions) and gets null back is reporting "no parent", not
- * guessing. Production code calls
+ * guessing. That half is convention, not type-enforced: a `parentId: null`
+ * written only to satisfy the node type looks the same to the overload. No
+ * caller passes one today (the only caller, {@link liveRowFromMutation},
+ * passes a definite id or none); a caller that maps a selected null should
+ * get an explicit marker type then. Production code calls
  * {@link liveRowFromMutation}.
  *
  * `parentId` and `isoCurrencyCode` are filled with null only to satisfy the
