@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
-import { validBrowserNames } from '../../src/core/auth/browser-selection.js';
+import { BROWSER_IDS } from '../../src/core/auth/browser-selection.js';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/check-server-json.ts', import.meta.url));
 const REAL_SERVER_JSON = fileURLToPath(new URL('../../server.json', import.meta.url));
@@ -153,14 +153,14 @@ describe('check:server-json', () => {
   });
 
   describe('named arguments describe the CLI flags', () => {
-    test('--browser choices that drift from validBrowserNames() fail', async () => {
+    test('--browser choices that drift from BROWSER_IDS fail', async () => {
       const { code, stderr } = await withRealArgEdited('--browser', (arg) => ({
         ...arg,
-        choices: validBrowserNames().slice(1),
+        choices: BROWSER_IDS.slice(1),
       }));
       expect(code).toBe(1);
       expect(stderr).toContain('(--browser).choices is ');
-      expect(stderr).toContain(JSON.stringify(validBrowserNames()));
+      expect(stderr).toContain(JSON.stringify(BROWSER_IDS));
     });
 
     test('--browser without choices fails', async () => {

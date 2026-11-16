@@ -10,7 +10,13 @@
  */
 
 import { describe, expect, test } from 'bun:test';
-import { CLI_FLAGS, CliArgError, parseCliArgs, type ParsedCliArgs } from '../../src/cli-args.js';
+import {
+  CLI_FLAGS,
+  CliArgError,
+  flagSpellings,
+  parseCliArgs,
+  type ParsedCliArgs,
+} from '../../src/cli-args.js';
 
 const VALUE_FLAGS = CLI_FLAGS.filter((f) => f.takesValue);
 const BOOLEAN_FLAGS = CLI_FLAGS.filter((f) => !f.takesValue);
@@ -77,6 +83,15 @@ describe('parseCliArgs', () => {
         expect(errorOf([flag.name, '--write'])).toBe(`${flag.name} requires a value`);
       });
 
+      test(`${flag.name} followed by any other flag's spelling, short ones included, is refused`, () => {
+        for (const other of CLI_FLAGS) {
+          if (other.name === '--help') continue; // help wins; covered below
+          for (const spelling of flagSpellings(other)) {
+            expect(errorOf([flag.name, spelling])).toBe(`${flag.name} requires a value`);
+          }
+        }
+      });
+
       test(`an empty ${flag.name}= is refused`, () => {
         expect(errorOf([`${flag.name}=`])).toBe(`${flag.name} requires a value`);
         expect(errorOf([`${flag.name}=  `])).toBe(`${flag.name} requires a value`);
@@ -119,14 +134,35 @@ describe('parseCliArgs', () => {
       expect(parseCliArgs(['--write=false', '--write']).booleans['--write']).toBe(true);
     });
 
-    test('short aliases set their long flag', () => {
+    test('short aliases set their long flag, bare or with =true / =false', () => {
       expect(parseCliArgs(['-v']).booleans['--verbose']).toBe(true);
+      expect(parseCliArgs(['-v=true']).booleans['--verbose']).toBe(true);
+      expect(parseCliArgs(['-v=false']).booleans['--verbose']).toBe(false);
+      expect(parseCliArgs(['-v=true']).warnings).toEqual([]);
       expect(parseCliArgs(['-h']).booleans['--help']).toBe(true);
+      expect(parseCliArgs(['-h=true']).booleans['--help']).toBe(true);
+    });
+
+    test('true / false are read in any case', () => {
+      expect(parseCliArgs(['--write=TRUE']).booleans['--write']).toBe(true);
+      expect(parseCliArgs(['--write=False']).booleans['--write']).toBe(false);
+      expect(parseCliArgs(['--write', 'FALSE']).booleans['--write']).toBe(false);
     });
   });
 
-  test('an unknown --flag=value is refused', () => {
-    expect(errorOf(['--db-paht=/x'])).toContain('Unknown option --db-paht');
+  test('an unknown --flag=value is refused without echoing the value', () => {
+    const message = errorOf(['--db-paht=/Users/someone/secret']);
+    expect(message).toContain('Unknown option --db-paht');
+    expect(message).not.toContain('secret');
+  });
+
+  test('every spelling in the table is unique, so none shadows another', () => {
+    const spellings = CLI_FLAGS.flatMap((f) => flagSpellings(f));
+    expect(new Set(spellings).size).toBe(spellings.length);
+  });
+
+  test('a negative number after --timeout is read as its (invalid) value, not as a flag', () => {
+    expect(parseCliArgs(['--timeout', '-5']).values['--timeout']).toBe('-5');
   });
 
   test('an unknown bare flag or stray token is reported, not silently dropped', () => {
@@ -142,7 +178,16 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['--browser-profile=--odd']).values['--browser-profile']).toBe('--odd');
   });
 
-  test('--help stops parsing, so later arguments cannot fail it', () => {
-    expect(parseCliArgs(['--help', '--timeout']).booleans['--help']).toBe(true);
+  test('a help request anywhere wins, so no other argument can fail it', () => {
+    for (const argv of [
+      ['--help', '--timeout'],
+      ['--db-path', '--help'],
+      ['--db-path', '-h'],
+      ['--write=yes', '--help=true'],
+      ['--db-paht=/x', '-h'],
+    ]) {
+      expect(parseCliArgs(argv).booleans['--help']).toBe(true);
+    }
+    expect(parseCliArgs(['--help=false']).booleans['--help']).toBe(false);
   });
 });
