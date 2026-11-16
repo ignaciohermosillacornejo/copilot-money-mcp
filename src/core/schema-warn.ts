@@ -9,14 +9,16 @@
  * catch those because they never reach Zod — the decoder's allow-list filters
  * them out first.
  *
- * `validateOrWarn` also performs one repair before it gives up on a document:
- * non-finite numeric leaves (`NaN` / `±Infinity`) are stripped and the parse
- * retried, so a value Firestore can hold but Zod cannot costs one field
- * instead of the whole document (#659). See `./non-finite.ts`.
+ * `validateOrWarn` also repairs before it gives up on a document: non-finite
+ * numeric leaves (`NaN` / `±Infinity`) are stripped anywhere (#659, see
+ * `./non-finite.ts`), and any other value the schema rejects BELOW the top
+ * level is removed (#902, see `./nested-repair.ts`), so one bad nested value
+ * costs that value instead of the whole document.
  */
 
 import type { ZodType } from 'zod';
 import { stripNonFiniteNumbers } from './non-finite.js';
+import { repairNestedIssues } from './nested-repair.js';
 import type { FirestoreValue } from './protobuf-parser.js';
 
 export type DecodeContext = {
@@ -35,8 +37,10 @@ export type DecodeContext = {
  *   - `dropped`: docs that failed Zod validation and were silently omitted
  *     from results. Counted per document, NOT deduped like the warnings.
  *   - `repaired`: docs that only failed because of a non-finite numeric leaf
- *     (`NaN` / `±Infinity`) and were kept with that field removed (#659).
- *     A subset of `decoded`: the document is present, one field is not.
+ *     (`NaN` / `±Infinity`, #659) or a rejected value below the top level
+ *     (#902), and were kept with that value (or the nested element holding
+ *     it) removed. A subset of `decoded`: the document is present, part of it
+ *     is not.
  *   - `unread_field_warnings`: unique `(collection, field)` pairs present in
  *     raw docs but neither consumed nor explicitly ignored by the processor.
  */
@@ -112,6 +116,10 @@ const warnedUnreadKeys = new Set<string>();
 // Same namespace rules as the two sets above.
 const warnedNonFiniteKeys = new Set<string>();
 
+// Dedupe set for the nested-value repair warn (#902), keyed by
+// `(collection, path shapes + issue codes)`.
+const warnedNestedKeys = new Set<string>();
+
 export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: DecodeContext): T | null {
   const result = schema.safeParse(data);
   if (result.success) {
@@ -119,25 +127,32 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
     return result.data;
   }
 
-  // Before giving up on the document, try the one repair that is always safe:
-  // remove non-finite numeric leaves (#659). Firestore stores IEEE-754
-  // doubles, so `NaN` / `±Infinity` are legal on the wire and reach us
-  // verbatim — Copilot writes an `Infinity` price for a holding whose
-  // quantity is 0 — but Zod v4 rejects all three from `z.number()`. Dropping
-  // the whole document over one unusable price is the failure mode of #302
-  // all over again: an entire investment account disappeared from
-  // `get_accounts`, and 18 months of holdings history from `get_holdings`.
+  // Before giving up on the document, try two repairs. Both only ever REMOVE
+  // values, and a document is kept only if it validates afterwards.
   //
-  // Only documents that become VALID once the leaf is gone are kept, so this
-  // cannot mask an unrelated schema mismatch — those still drop and warn below.
+  // 1. Non-finite numeric leaves, anywhere (#659). Firestore stores IEEE-754
+  //    doubles, so `NaN` / `±Infinity` are legal on the wire and reach us
+  //    verbatim — Copilot writes an `Infinity` price for a holding whose
+  //    quantity is 0 — but Zod v4 rejects all three from `z.number()`.
+  // 2. Any other rejected value BELOW the top level (#902): a `null` price on
+  //    one holding of an MX-linked 401k removed the whole account from
+  //    `get_accounts`. Nested containers are copied verbatim by the decoder,
+  //    so Zod is the only type check their leaves get; one bad leaf now costs
+  //    that leaf (or, for a required nested field, the one element holding
+  //    it) instead of the document. See `./nested-repair.ts`.
+  //
+  // Top-level failures are not repaired — those fields come from the
+  // decoder's typed getters, so a mismatch there is real shape drift and still
+  // drops and warns below.
   const stripped = stripNonFiniteNumbers(data);
-  if (stripped.paths.length > 0) {
-    const retry = schema.safeParse(stripped.value);
-    if (retry.success) {
-      const stats = statsFor(ctx.collection);
-      stats.decoded++;
-      stats.repaired++;
+  const candidate = stripped.paths.length > 0 ? stripped.value : data;
+  const repair = repairNestedIssues(schema, candidate);
+  if (repair) {
+    const stats = statsFor(ctx.collection);
+    stats.decoded++;
+    stats.repaired++;
 
+    if (stripped.paths.length > 0) {
       const pathList = stripped.paths.join(',');
       const key = `${ctx.collection}::${stripped.paths.map(dedupeShape).join(',')}`;
       if (!warnedNonFiniteKeys.has(key)) {
@@ -146,8 +161,20 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
           `[copilot-money-mcp] non-finite field: collection=${ctx.collection} docId=${ctx.docId} paths=${pathList} — value was NaN or ±Infinity in the cache; field dropped, document kept`
         );
       }
-      return retry.data;
     }
+
+    if (repair.removed.length > 0) {
+      const pathList = repair.removed.map((r) => r.path).join(',');
+      const key = `${ctx.collection}::${repair.removed.map((r) => `${dedupeShape(r.path)}:${r.code}`).join(',')}`;
+      if (!warnedNestedKeys.has(key)) {
+        warnedNestedKeys.add(key);
+        const firstRemoval = repair.removed[0];
+        console.warn(
+          `[copilot-money-mcp] invalid nested field: collection=${ctx.collection} docId=${ctx.docId} paths=${pathList} code=${firstRemoval?.code} message="${firstRemoval?.message}" — value did not match the schema; removed, document kept`
+        );
+      }
+    }
+    return repair.data;
   }
 
   // Count every dropped doc — drops are NOT deduped like the warnings below,
@@ -260,5 +287,6 @@ export function __resetWarnedKeys(): void {
   warnedKeys.clear();
   warnedUnreadKeys.clear();
   warnedNonFiniteKeys.clear();
+  warnedNestedKeys.clear();
   resetDecodeStats();
 }
