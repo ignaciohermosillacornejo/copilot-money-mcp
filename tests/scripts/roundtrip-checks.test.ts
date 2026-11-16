@@ -579,7 +579,7 @@ describe('create_transaction check (stubbed client)', () => {
   test('FAILS when the re-read shows the INCOME row with another type', async () => {
     const { client } = fakeServer((input) => (input.type === 'INCOME' ? { type: 'REGULAR' } : {}));
     const ctx = contextWithPrereqs(client);
-    await expect(getCheck('create_transaction').run(ctx)).rejects.toThrow(/INCOME.*type/);
+    await expect(getCheck('create_transaction').run(ctx)).rejects.toThrow(/INCOME.*re-read type/);
     // The row was created, so it is still registered for cleanup.
     expect(ctx.registry.pending.map((item) => item.label)).toContain(
       '__smoke__1700000000000-txn-income'
@@ -591,7 +591,15 @@ describe('create_transaction check (stubbed client)', () => {
       input.type === 'INCOME' ? { categoryId: 'cat-2' } : {}
     );
     const ctx = contextWithPrereqs(client);
-    await expect(getCheck('create_transaction').run(ctx)).rejects.toThrow(/INCOME.*category/);
+    await expect(getCheck('create_transaction').run(ctx)).rejects.toThrow(
+      /INCOME.*re-read with category/
+    );
+  });
+
+  test('FAILS when the re-read shows the INCOME row with another amount', async () => {
+    const { client } = fakeServer((input) => (input.type === 'INCOME' ? { amount: 300 } : {}));
+    const ctx = contextWithPrereqs(client);
+    await expect(getCheck('create_transaction').run(ctx)).rejects.toThrow(/INCOME.*re-read amount/);
   });
 
   test('FAILS when the INCOME row is missing from the re-read', async () => {

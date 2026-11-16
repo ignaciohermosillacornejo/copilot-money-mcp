@@ -4420,7 +4420,7 @@ export class CopilotMoneyTools {
       // CreateTransactionInput.categoryId is non-null (ID!), so a type without a
       // category sends an empty id, which ends in the state the app shows for
       // these types anyway (ledger: Mutation.createTransaction:empty-category-for-income,
-      // verified once by a live probe).
+      // gated by smoke:roundtrip's create_transaction check).
       categoryId: category_id ?? '',
       type,
     };
