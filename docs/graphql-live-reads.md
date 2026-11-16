@@ -98,7 +98,7 @@ When `--live-reads` is on, reads are served through an in-memory tiered cache:
 | Recurring | flat snapshot | 6h | User-edited + Copilot auto-detects. |
 | Transactions | month-keyed window map | tiered | Current month: live (no cache); 8–21d months: 1h; >21d months: 1w. |
 
-Writes via MCP tools update both LevelDB cache and the live cache so subsequent reads reflect the change without a refresh. The MCP server intentionally does not expose `edit_account`; account-cache freshness relies on TTL invalidation + `refresh_cache`, plus one drop after every transaction write, since a manual account's balance moves with its transactions (every snapshot in `LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS` is dropped then).
+Writes via MCP tools update both LevelDB cache and the live cache so subsequent reads reflect the change without a refresh. The MCP server intentionally does not expose `edit_account`; account-cache freshness relies on TTL invalidation + `refresh_cache`, plus one drop after every transaction write, since a manual account's balance moves with its transactions (every snapshot in `LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS` is dropped then, `get_balance_history_live`'s per-account cache included). A recurring write likewise drops `LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS` (the upcoming-recurrings snapshot).
 
 ## Freshness fields
 

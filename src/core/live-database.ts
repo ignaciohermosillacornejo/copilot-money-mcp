@@ -52,6 +52,7 @@ import type { AllocationNode } from './graphql/queries/investment-allocation.js'
 import type { TopMoverNode } from './graphql/queries/top-movers.js';
 import type { AggregatedHoldingNode } from './graphql/queries/aggregated-holdings.js';
 import type { InvestmentBalanceNode } from './graphql/queries/investment-balance.js';
+import type { BalanceHistoryPointNode } from './graphql/queries/balance-history.js';
 import { fetchUser, type UserNode } from './graphql/queries/user.js';
 import type { CreatedTransaction } from './graphql/transactions.js';
 import { ONE_HOUR_MS, SIX_HOURS_MS, ONE_DAY_MS, ONE_WEEK_MS } from '../utils/durations.js';
@@ -65,6 +66,12 @@ export interface LiveDatabaseOptions {
 }
 
 const DEFAULT_MAX_TX_ROWS = 20_000;
+
+/** One cached get_balance_history_live response; see getBalanceHistoryCache. */
+export interface BalanceHistoryCacheEntry {
+  rows: BalanceHistoryPointNode[];
+  fetched_at: number;
+}
 
 export class LiveCopilotDatabase {
   private readonly verbose: boolean;
@@ -130,6 +137,11 @@ export class LiveCopilotDatabase {
   // doesn't needlessly drop the live point.
   private readonly investmentLiveBalanceCache: SnapshotCache<InvestmentBalanceNode>;
   private readonly transactionsWindowCache: TransactionWindowCache<TransactionNode>;
+  // Backs get_balance_history_live: one entry per (itemId, accountId,
+  // timeFrame) tuple, which a single-snapshot SnapshotCache cannot hold. The
+  // tool owns the keying and the TTL check; it lives here so a transaction
+  // write can drop it with the other derived snapshots (#870).
+  private readonly balanceHistoryCache = new Map<string, BalanceHistoryCacheEntry>();
   /**
    * Append-only id → (accountId, itemId) index fed by every live
    * transaction fetch. The mapping is immutable server-side (a transaction
@@ -544,6 +556,11 @@ export class LiveCopilotDatabase {
 
   getInvestmentLiveBalanceCache(): SnapshotCache<InvestmentBalanceNode> {
     return this.investmentLiveBalanceCache;
+  }
+
+  /** get_balance_history_live's per-tuple cache, keyed by LiveBalanceHistoryTools. */
+  getBalanceHistoryCache(): Map<string, BalanceHistoryCacheEntry> {
+    return this.balanceHistoryCache;
   }
 
   /**
@@ -1000,7 +1017,9 @@ export class LiveCopilotDatabase {
    *  - `upcoming_recurrings` (1 h) and `recurring` (6 h): linking a
    *    transaction to a recurring can mark a payment as made, which is a
    *    `payments[].isPaid` flip and a `nextPaymentDate` move on the recurring
-   *    (unverified: Mutation.addTransactionToRecurring:marks-payment-paid).
+   *    (unverified: Mutation.addTransactionToRecurring:marks-payment-paid);
+   *  - `balance_history` (1 h): on a manual account today's point is the
+   *    balance, which moves with the write as `accounts` does (#870).
    * Each would keep serving the pre-write figures until its TTL. Every
    * other refresh_cache scope is listed, with its reason, in
    * SNAPSHOTS_NOT_DROPPED_BY_TRANSACTION_WRITES; a test requires each scope
@@ -1013,6 +1032,7 @@ export class LiveCopilotDatabase {
     'monthly_spend',
     'upcoming_recurrings',
     'recurring',
+    'balance_history',
   ] as const;
 
   /** refresh_cache scopes a transaction write leaves alone, and why. */
@@ -1029,12 +1049,58 @@ export class LiveCopilotDatabase {
     aggregated_holdings: 'priced from market data',
     investment_balance: 'priced from market data',
     investment_prices: 'market data',
-    // NOT a claim that it is unaffected: on a manual account today's point
-    // moves with a write. Its cache lives on LiveBalanceHistoryTools, which
-    // the write path holds no handle on, so it cannot be dropped from here
-    // yet (follow-up issue #870); until then it lags up to its 1-hour TTL.
-    balance_history: 'transaction-affected but unreachable from the write path; see #870',
   };
+
+  /**
+   * The snapshots a recurring write (create, update, set state, delete) can
+   * make stale (#868): `upcoming_recurrings` (1 h) is computed from each
+   * recurring's amount, next date and state. The `recurring` snapshot itself
+   * is not here: each write patches it in place, and drops it only on a
+   * failure that may have applied. Linking a transaction is a transaction
+   * write and drops TRANSACTION_DERIVED_SNAPSHOTS, which include this list.
+   * Every other refresh_cache scope is in
+   * SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES, checked the same way.
+   */
+  static readonly RECURRING_DERIVED_SNAPSHOTS = ['upcoming_recurrings'] as const;
+
+  /** refresh_cache scopes a recurring write leaves alone, and why. */
+  static readonly SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES: Readonly<Record<string, string>> = {
+    recurring: "the write's own snapshot, patched in place on success",
+    transactions: 'a recurring write sends no transaction edit',
+    accounts: 'balances come from transactions, which a recurring write does not change',
+    networth: 'a sum of account balances (same reason)',
+    monthly_spend: 'the spend series comes from transactions (same reason)',
+    balance_history: 'account balances over time (same reason)',
+    categories: 'reference data',
+    budgets: 'served from the categories list',
+    tags: 'reference data',
+    user: 'account settings',
+    holdings: 'priced from market data',
+    investment_allocation: 'priced from market data',
+    top_movers: 'priced from market data',
+    aggregated_holdings: 'priced from market data',
+    investment_balance: 'priced from market data',
+    investment_prices: 'market data',
+  };
+
+  /**
+   * Every derived snapshot by key. A Record over both lists, so a key added to
+   * either without a cache here is a type error rather than a silent miss.
+   */
+  private derivedSnapshots(): Record<
+    | (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number]
+    | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number],
+    { invalidate(): void }
+  > {
+    return {
+      accounts: this.accountsCache,
+      networth: this.networthCache,
+      monthly_spend: this.monthlySpendCache,
+      upcoming_recurrings: this.upcomingRecurringsCache,
+      recurring: this.recurringCache,
+      balance_history: { invalidate: () => this.balanceHistoryCache.clear() },
+    };
+  }
 
   /**
    * Drop every snapshot a transaction write can make stale (see
@@ -1045,17 +1111,18 @@ export class LiveCopilotDatabase {
    * next read only.
    */
   invalidateTransactionDerivedSnapshots(): void {
-    const byKey: Record<
-      (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number],
-      { invalidate(): void }
-    > = {
-      accounts: this.accountsCache,
-      networth: this.networthCache,
-      monthly_spend: this.monthlySpendCache,
-      upcoming_recurrings: this.upcomingRecurringsCache,
-      recurring: this.recurringCache,
-    };
+    const byKey = this.derivedSnapshots();
     for (const key of LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS) byKey[key].invalidate();
+  }
+
+  /**
+   * Drop every snapshot a recurring write can make stale (see
+   * RECURRING_DERIVED_SNAPSHOTS). Called after every recurring write the
+   * server accepted, and after one that may have applied.
+   */
+  invalidateRecurringDerivedSnapshots(): void {
+    const byKey = this.derivedSnapshots();
+    for (const key of LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS) byKey[key].invalidate();
   }
 
   /**

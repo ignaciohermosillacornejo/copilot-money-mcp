@@ -27,10 +27,11 @@
  * --------------
  * Each `(itemId, accountId, timeFrame)` tuple is a distinct snapshot —
  * `SnapshotCache<T>` (single-snapshot per entity) doesn't fit. We use a
- * bespoke per-instance `Map` keyed on the tuple string. The cache lives
- * on this class (not `LiveCopilotDatabase`) because it is local to one
- * tool and tightly coupled to the call shape. `refresh_cache --scope
- * balance_history` clears the map.
+ * bespoke `Map` keyed on the tuple string. This class owns the keying and
+ * the TTL check; the map itself lives on `LiveCopilotDatabase`
+ * (`getBalanceHistoryCache()`) so that a transaction write, which can move
+ * a manual account's balance, drops it with the other transaction-derived
+ * snapshots (#870). `refresh_cache --scope balance_history` clears it too.
  *
  * Memory bound: ~10s of (itemId, accountId) pairs × 7 timeFrame values
  * (incl. omitted) ≈ ≤80 entries per process, each holding at most ~365
@@ -43,11 +44,8 @@
  * order (cost is negligible — at most ~365 rows per response).
  */
 
-import type { LiveCopilotDatabase } from '../../core/live-database.js';
-import {
-  fetchAccountBalanceHistory,
-  type BalanceHistoryPointNode,
-} from '../../core/graphql/queries/balance-history.js';
+import type { BalanceHistoryCacheEntry, LiveCopilotDatabase } from '../../core/live-database.js';
+import { fetchAccountBalanceHistory } from '../../core/graphql/queries/balance-history.js';
 import { ALL_TIME_FRAMES, type TimeFrame } from '../../core/graphql/queries/_shared.js';
 import { paginate, DEFAULT_MAX_ROWS } from '../../utils/pagination.js';
 import { ONE_HOUR_MS } from '../../utils/durations.js';
@@ -92,18 +90,13 @@ export interface GetBalanceHistoryLiveResult {
   _cache_hit: boolean;
 }
 
-interface CacheEntry {
-  rows: BalanceHistoryPointNode[];
-  fetched_at: number;
-}
-
 export class LiveBalanceHistoryTools {
   /**
-   * Per-(itemId, accountId, timeFrame) cache. Bounded by the small product
-   * of accounts × timeFrames (see class JSDoc). Cleared by
-   * `clearCache()` on refresh_cache.
+   * Per-(itemId, accountId, timeFrame) cache, held by LiveCopilotDatabase.
+   * Bounded by the small product of accounts × timeFrames (see class JSDoc).
+   * Cleared by `clearCache()` on refresh_cache and by every transaction write.
    */
-  private readonly cache = new Map<string, CacheEntry>();
+  private readonly cache: Map<string, BalanceHistoryCacheEntry>;
   private readonly ttlMs: number;
 
   constructor(
@@ -111,6 +104,7 @@ export class LiveBalanceHistoryTools {
     opts: { ttlMs?: number } = {}
   ) {
     this.ttlMs = opts.ttlMs ?? ONE_HOUR_MS;
+    this.cache = live.getBalanceHistoryCache();
   }
 
   /** Public for refresh_cache. Drops every cached tuple. */
