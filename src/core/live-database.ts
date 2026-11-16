@@ -799,8 +799,11 @@ export class LiveCopilotDatabase {
     // has seen is indexed", even for a row too malformed to cache below: its
     // routing ids are independent of the fields the read mappers need. Same
     // empty-routing-id guard as every other feed (#518) — feedMeta re-checks,
-    // this skips the flush too.
-    if (hasRouting) {
+    // this skips the flush too. A truthy id that is not a string (drift) is
+    // never indexed: the meta store persists it across sessions as a routing
+    // mapping. The row is still refused below, so its months are dropped and
+    // the refusal is warned (#917 review).
+    if (hasRouting && typeof node.id === 'string') {
       this.feedMeta(node.id, { accountId: node.accountId, itemId: node.itemId });
       this.metaStore.flush();
     }

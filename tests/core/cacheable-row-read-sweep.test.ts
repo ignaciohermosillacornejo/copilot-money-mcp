@@ -97,8 +97,11 @@ const FULL_ROW: CreatedTransaction = {
 
 /**
  * Kept intact: without both routing ids a returned row is never inserted
- * (upsertLiveTransaction's own guard, tested elsewhere), and without an id it
- * cannot be placed at all — weakening them would only exercise those guards.
+ * (upsertLiveTransaction's own guard, tested elsewhere). Without a usable id
+ * the row cannot be placed at all: a falsy id is ignored, and a truthy
+ * non-string one is refused by the schema without being indexed (tested in
+ * live-database.test.ts) — and with no readable id the cached copy cannot be
+ * found to drop, so the cached-copy pass's refusal check would not apply.
  */
 const NOT_WEAKENED = new Set(['id', 'accountId', 'itemId']);
 
