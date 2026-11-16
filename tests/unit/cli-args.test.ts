@@ -19,6 +19,10 @@ import {
   type ValueFlagName,
 } from '../../src/cli-args.js';
 
+// These callbacks must stay unannotated: TypeScript infers a type predicate
+// from them, which narrows VALUE_FLAGS / BOOLEAN_FLAGS to the value-taking and
+// on/off members. That is what lets `valueOf(parsed, flag.name)` and
+// `booleans[flag.name]` typecheck below (this file is in tsconfig.tests.json).
 const VALUE_FLAGS = CLI_FLAGS.filter((f) => f.takesValue);
 const BOOLEAN_FLAGS = CLI_FLAGS.filter((f) => !f.takesValue);
 
@@ -164,6 +168,15 @@ describe('parseCliArgs', () => {
 
   test('a negative number after --timeout is read as its (invalid) value, not as a flag', () => {
     expect(parseCliArgs(['--timeout', '-5']).values['--timeout']).toBe('-5');
+  });
+
+  test('a known flag written without its dashes is named, with the real spelling', () => {
+    expect(parseCliArgs(['write']).warnings).toEqual([
+      'Ignoring unrecognised argument "write" (did you mean --write?)',
+    ]);
+    expect(parseCliArgs(['v']).warnings).toEqual([
+      'Ignoring unrecognised argument "v" (did you mean --verbose?)',
+    ]);
   });
 
   test('a stray non-dashed token is reported by position, never echoed', () => {

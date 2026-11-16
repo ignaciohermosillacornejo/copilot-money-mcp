@@ -51,6 +51,10 @@ Options:
   --verbose, -v       Enable verbose logging
   --help, -h          Show this help message
 
+  Every option that takes a value also accepts --option=value (--db-path=/x), and
+  an on/off option also accepts =true / =false (--write=false). An option that
+  takes a value but is given none stops startup.
+
 Environment:
   DECODE_TIMEOUT_MS   Override decode timeout (same as --timeout flag)
   COPILOT_BROWSER     Same as --browser (the flag wins)
@@ -204,7 +208,8 @@ async function main(): Promise<void> {
 
   configureLogging(verbose);
 
-  // Always shown (stderr), whatever the verbosity: the selection was ignored.
+  // Always shown (stderr), whatever the verbosity: an argument or the browser
+  // selection was ignored.
   for (const warning of argWarnings) console.error(warning);
   if (selectionWarning) console.error(selectionWarning);
 
