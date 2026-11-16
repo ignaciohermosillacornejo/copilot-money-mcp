@@ -4124,7 +4124,7 @@ export class CopilotMoneyTools {
       // Live cache: patch from the server's returned row, not the local patch
       // (#821 — the snake_case patch never matched the camelCase node).
       this.liveDb?.upsertLiveTransaction(result.transaction, {
-        refusalMonths: CopilotMoneyTools.monthOf(args.date),
+        requestedMonths: CopilotMoneyTools.monthOf(args.date),
       });
       this.afterTransactionWrite();
 
@@ -4299,7 +4299,7 @@ export class CopilotMoneyTools {
           this.db.patchCachedTransaction(route.id, patch);
         }
         this.liveDb?.upsertLiveTransaction(result.transaction, {
-          refusalMonths: CopilotMoneyTools.monthOf(edit.date),
+          requestedMonths: CopilotMoneyTools.monthOf(edit.date),
         });
         this.afterTransactionWrite();
       }
@@ -4488,7 +4488,7 @@ export class CopilotMoneyTools {
       // mutation-guard: create_transaction writes through to the live cache
       this.liveDb?.upsertLiveTransaction(tx, {
         insert: true,
-        refusalMonths: CopilotMoneyTools.monthOf(args.date),
+        requestedMonths: CopilotMoneyTools.monthOf(args.date),
       });
       this.afterTransactionWrite();
 
@@ -5276,7 +5276,7 @@ export class CopilotMoneyTools {
       this.liveDb?.upsertLiveTransaction(child, {
         insert: true,
         parentId: parentTx.id,
-        refusalMonths: touchedMonths,
+        requestedMonths: touchedMonths,
       });
     }
 
@@ -5491,7 +5491,8 @@ export class CopilotMoneyTools {
       const detail = result.failed
         .map(
           (f) =>
-            `${f.transaction?.id ?? '<unknown>'}: ${f.errorCode}${f.error ? ` ${f.error}` : ''}`
+            `${f.transaction?.id ?? '<unknown>'}: ${f.errorCode ?? '<unknown>'}` +
+            `${f.error ? ` ${f.error}` : ''}`
         )
         .join('; ');
       throw new Error(

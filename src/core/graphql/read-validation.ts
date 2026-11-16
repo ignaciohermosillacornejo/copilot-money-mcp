@@ -15,6 +15,7 @@
 
 import { z } from 'zod';
 import type { TransactionsPage } from './queries/transactions.js';
+import { isCalendarDate } from '../../utils/date.js';
 
 /** Registered in RUNTIME_CHECK_NAMES; the Query.transactions:response
  *  ledger entry's oracle is `runtime:${this}`. */
@@ -40,7 +41,12 @@ const transactionNodeSchema = z.looseObject({
   id: z.string().min(1),
   accountId: z.string().min(1),
   itemId: z.string().min(1),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  // A real calendar day, not only the YYYY-MM-DD pattern: the window cache
+  // files a row under its date's first seven characters, so 2025-02-30 would
+  // sit in a month whose reads never return it. One definition of a usable
+  // date for reads and for the rows writes return (#874).
+  // mutation-guard: a usable row's date is a calendar day
+  date: z.string().refine(isCalendarDate),
   amount: z.number().finite(),
   name: z.string(),
   categoryId: z.string().nullable(),
@@ -103,6 +109,9 @@ export function isUsableMutationTransactionRow(node: unknown): boolean {
 export const MUTATION_ROW_READ_SCHEMA_SURFACE =
   'Mutation.TransactionFields:read-schema-parity' as const;
 
+/** Ledger surface for the assumption that a returned row's date is the persisted one. */
+export const MUTATION_ROW_DATE_ECHO_SURFACE = 'Mutation.TransactionFields:date-echo' as const;
+
 /**
  * Return the page with invalid nodes removed. Valid nodes are returned as
  * the ORIGINAL objects (validation only — no transformation). Each removal
@@ -155,7 +164,10 @@ export function __resetReadShapeWarnDedupe(): void {
  * dropped.
  */
 export function warnMutationRowRefused(info: InvalidNodeInfo, droppedMonths: number): void {
-  const key = `mutation-row:${[...info.fields].sort().join(',')}`;
+  // Sorted once, for both the key and the message: the line that IS logged
+  // for a field set reads the same whatever order the fields failed in.
+  const fields = [...info.fields].sort();
+  const key = `mutation-row:${fields.join(',')}`;
   if (warned.has(key)) return;
   warned.add(key);
   const outcome =
@@ -167,9 +179,32 @@ export function warnMutationRowRefused(info: InvalidNodeInfo, droppedMonths: num
         'fetches from the server';
   console.warn(
     `[copilot-money-mcp] mutation-row drift: transaction ${info.id ?? '<unreadable id>'} not ` +
-      `stored in the live cache (invalid ${info.fields.join(', ')}); ${outcome} — see ` +
+      `stored in the live cache (invalid ${fields.join(', ')}); ${outcome} — see ` +
       `${MUTATION_ROW_READ_SCHEMA_SURFACE} in the conformance ledger ` +
       `(src/conformance/ledger.ts). Further identical refusals this session are not logged.`
+  );
+}
+
+/**
+ * A row a mutation returned was well-formed but dated outside the one month
+ * the request named (#874): the server echoed a date the write did not ask
+ * for, so the live cache did not store it. Warned once per session; the id is
+ * a string the schema accepted, and no date value is printed.
+ */
+export function warnMutationRowMisdated(
+  info: { id: string; requestedMonth: string },
+  droppedMonths: number
+): void {
+  const key = 'mutation-row-misdated';
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(
+    `[copilot-money-mcp] mutation-row drift: transaction ${info.id} came back dated outside ` +
+      `the month the write requested (${info.requestedMonth}), so it was not stored in the live ` +
+      `cache; ${droppedMonths === 1 ? '1 cached month was' : `${droppedMonths} cached months were`} ` +
+      `dropped so the next read refetches — see ${MUTATION_ROW_DATE_ECHO_SURFACE} in the ` +
+      `conformance ledger (src/conformance/ledger.ts). Further such refusals this session are ` +
+      `not logged.`
   );
 }
 

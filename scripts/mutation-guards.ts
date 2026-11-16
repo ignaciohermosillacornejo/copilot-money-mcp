@@ -442,7 +442,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
         '      // mutation-guard: create_transaction writes through to the live cache',
         '      this.liveDb?.upsertLiveTransaction(tx, {',
         '        insert: true,',
-        '        refusalMonths: CopilotMoneyTools.monthOf(args.date),',
+        '        requestedMonths: CopilotMoneyTools.monthOf(args.date),',
         '      });'
       ),
     },
@@ -513,14 +513,84 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'replace',
       find:
         '    // mutation-guard: a malformed returned row is never cached\n' +
-        '    if (!LiveCopilotDatabase.isCacheableRow(node)) {',
+        '    if (fields.length > 0) {',
       with:
         '    // mutation-guard: a malformed returned row is never cached\n' +
-        '    if (!LiveCopilotDatabase.isCacheableRow(node) && false) {',
+        '    if (fields.length > 0 && false) {',
     },
-    expectFailingTests: [
-      'a response without tags succeeds, leaves the month uncached, and the next read refetches',
-    ],
+    expectFailingTests: ['succeeds, leaves the month uncached, and the next read refetches'],
+    expectFails: 'tests/tools/live-write-coherence.test.ts',
+  },
+  {
+    name: "a cached row passes the read path's row schema",
+    file: 'src/core/live-database.ts',
+    invariant:
+      'isCacheableRow must require every field the live read path dereferences on a stored ' +
+      'row. It does so by reusing the read schema (invalidMutationRowFields), so a field the ' +
+      'reads come to require is required on writes without a second list. Without the clause ' +
+      'a row with no name or no tags array is stored, and every later read of its month ' +
+      'throws in the merchant normalizer or the tag mapper (#874).',
+    mutation: {
+      kind: 'replace',
+      find:
+        "    // mutation-guard: a cached row passes the read path's row schema\n" +
+        '    return invalidMutationRowFields(node);',
+      with:
+        "    // mutation-guard: a cached row passes the read path's row schema\n" +
+        '    return invalidMutationRowFields(node).filter(() => false);',
+    },
+    expectFailingTests: ['if accepted, it lands in the month its date names'],
+    expectFails: 'tests/core/cacheable-row-read-sweep.test.ts',
+  },
+  {
+    name: "a usable row's date is a calendar day",
+    file: 'src/core/graphql/read-validation.ts',
+    invariant:
+      'The window cache files a row under the first seven characters of its date, so ' +
+      '2025-02-30 sits in a month whose reads never return it, and is gone from its real ' +
+      'month. The shared row schema must require a real calendar day, not only the pattern, ' +
+      'so neither a read nor a write stores such a row (#864, #874).',
+    mutation: {
+      kind: 'replace',
+      find:
+        "  // mutation-guard: a usable row's date is a calendar day\n" +
+        '  date: z.string().refine(isCalendarDate),',
+      with:
+        "  // mutation-guard: a usable row's date is a calendar day\n" +
+        // Back to the pattern-only check the schema had before (#874), keeping
+        // isCalendarDate referenced so the mutated file stays type-valid.
+        '  date: z.string().refine((d) => /^\\d{4}-\\d{2}-\\d{2}$/.test(d) || isCalendarDate(d)),',
+    },
+    expectFailingTests: ['if accepted, it lands in the month its date names'],
+    expectFails: 'tests/core/cacheable-row-read-sweep.test.ts',
+  },
+  {
+    name: 'a row filed outside the one month the request named is never cached',
+    file: 'src/core/live-database.ts',
+    invariant:
+      'A well-formed returned row whose date is in a different month from the single month ' +
+      'the write requested (the server echoing a pre-edit date) must not be filed under its ' +
+      'returned date: the requested month, cached and fresh, would never learn it holds the ' +
+      'row, a silent short read. The row is not stored and those months are dropped (#874).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: a row filed outside the one month the request named is never cached\n' +
+        '    if (\n' +
+        '      onlyRequested !== undefined &&\n' +
+        '      isCalendarMonth(onlyRequested) &&\n' +
+        '      onlyRequested !== filedMonth\n' +
+        '    ) {',
+      with:
+        '    // mutation-guard: a row filed outside the one month the request named is never cached\n' +
+        '    if (\n' +
+        '      onlyRequested !== undefined &&\n' +
+        '      isCalendarMonth(onlyRequested) &&\n' +
+        '      onlyRequested !== filedMonth &&\n' +
+        '      false\n' +
+        '    ) {',
+    },
+    expectFailingTests: ['a response echoing a date outside the requested month'],
     expectFails: 'tests/tools/live-write-coherence.test.ts',
   },
   {

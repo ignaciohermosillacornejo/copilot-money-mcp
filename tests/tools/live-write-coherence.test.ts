@@ -1415,44 +1415,101 @@ describe('a throw drops the destination month too (#832)', () => {
 // stored row with no tags array would make each later read of that month
 // throw. The month is dropped instead, and the next read refetches.
 
-/** A deep copy of a mutation response with every `tags` key removed. */
-function withoutTagKeys(v: unknown): unknown {
-  if (Array.isArray(v)) return v.map(withoutTagKeys);
+type RowDrift = (row: Record<string, unknown>) => Record<string, unknown>;
+
+/**
+ * The fields every read of a month dereferences on each of its rows, each
+ * with the drift that breaks it: no tags array (the tag mapper and filter),
+ * no name (the merchant mapper and name filter), a date that names no month
+ * (month placement). Every tool runs every drift, so deleting any one of
+ * isCacheableRow's clauses fails a row here.
+ */
+const ROW_DRIFTS: Record<string, RowDrift> = {
+  'no tags array': ({ tags: _tags, ...rest }) => rest,
+  'no name': ({ name: _name, ...rest }) => rest,
+  'a blank date': (row) => ({ ...row, date: '' }),
+};
+
+const DRIFTED_ROW_TOOLS = [
+  'create_transaction',
+  'update_transaction',
+  'update_transactions',
+  'add_transaction_to_recurring',
+  'split_transaction',
+] as const;
+
+/**
+ * The tools above whose returned row is ALREADY CACHED: they edit a seeded
+ * row, so a refused row has a good copy in the month that must be dropped,
+ * and a field the response omits would be filled back from that copy if the
+ * check ran after the merge. Every drift runs against these too.
+ */
+const CACHED_ROW_TOOLS: ReadonlySet<string> = new Set([
+  'update_transaction',
+  'update_transactions',
+  'add_transaction_to_recurring',
+]);
+
+/**
+ * A deep copy of a mutation response with `drift` applied to every
+ * transaction row in it: an object carrying both `id` and `amount` (a tag or
+ * a response envelope carries no `amount`).
+ */
+function withDriftedRows(v: unknown, drift: RowDrift): unknown {
+  if (Array.isArray(v)) return v.map((x) => withDriftedRows(x, drift));
   if (v !== null && typeof v === 'object' && !(v instanceof Error)) {
-    return Object.fromEntries(
-      Object.entries(v)
-        .filter(([k]) => k !== 'tags')
-        .map(([k, x]) => [k, withoutTagKeys(x)])
+    const copy = Object.fromEntries(
+      Object.entries(v).map(([k, x]) => [k, withDriftedRows(x, drift)])
     );
+    return 'id' in copy && 'amount' in copy ? drift(copy) : copy;
   }
   return v;
 }
 
-const stripTags = (mocks: MockResponsesByOp): MockResponsesByOp =>
+const driftRows = (mocks: MockResponsesByOp, drift: RowDrift): MockResponsesByOp =>
   Object.fromEntries(
     Object.entries(mocks).map(([op, m]) => [
       op,
       typeof m === 'function'
-        ? (vars: unknown) => withoutTagKeys((m as (v: unknown) => unknown)(vars))
-        : withoutTagKeys(m),
+        ? (vars: unknown) => withDriftedRows((m as (v: unknown) => unknown)(vars), drift)
+        : withDriftedRows(m, drift),
     ])
   ) as MockResponsesByOp;
 
+const stripTags = (mocks: MockResponsesByOp): MockResponsesByOp =>
+  driftRows(mocks, ROW_DRIFTS['no tags array']!);
+
 describe('a malformed returned row is never cached (#864 review)', () => {
-  test.each([
-    'create_transaction',
-    'update_transaction',
-    'update_transactions',
-    'add_transaction_to_recurring',
-    'split_transaction',
-  ])(
-    '%s: a response without tags succeeds, leaves the month uncached, and the next read refetches',
-    async (toolName) => {
+  test('the cached-row tools really edit rows the seeded month holds', () => {
+    const seeded = new Set(SEED.map((r) => r.id));
+    const cached = DRIFTED_ROW_TOOLS.filter((t) => CACHED_ROW_TOOLS.has(t));
+    expect(cached.length).toBeGreaterThan(0);
+    for (const tool of cached) {
+      const args = CASES[tool]!.args as {
+        transaction_id?: string;
+        edits?: Array<{ transaction_id: string }>;
+      };
+      const ids = args.edits?.map((e) => e.transaction_id) ?? [args.transaction_id];
+      for (const id of ids) expect(seeded.has(id ?? '')).toBe(true);
+    }
+  });
+
+  test.each(
+    Object.keys(ROW_DRIFTS).flatMap((drift) =>
+      DRIFTED_ROW_TOOLS.map(
+        (tool) => [tool, drift, CACHED_ROW_TOOLS.has(tool) ? 'a cached' : 'a new'] as const
+      )
+    )
+  )(
+    '%s: a response with %s on %s row succeeds, leaves the month uncached, and the next read refetches',
+    async (toolName, drift) => {
       const c = CASES[toolName]!;
-      const { call, read, fetches } = setup(stripTags(c.mocks));
+      const { call, read, fetches } = setup(driftRows(c.mocks, ROW_DRIFTS[drift]!));
       await read();
 
-      await call(toolName, c.args);
+      // The write is reported as applied: only the live cache refuses the row.
+      const result = (await call(toolName, c.args)) as { success?: unknown };
+      expect(result.success).toBe(true);
 
       const after = await read();
       expect(after._cache_hit).toBe(false);
@@ -1513,6 +1570,42 @@ describe('a malformed returned row is never cached (#864 review)', () => {
     expect((await read())._cache_hit).toBe(false);
   });
 
+  test('update_transaction: a response echoing a date outside the requested month drops both months (#874)', async () => {
+    // The request moves the row from March to February; the response is
+    // well-formed but still dated in March (a pre-edit echo). Filing it under
+    // March would leave the cached February a silent short read.
+    const { call, read, fetches } = setup({
+      EditTransaction: (vars) => {
+        const v = vars as { id: string; input: EditTransactionInput };
+        return {
+          editTransaction: { transaction: { ...applyEdit(v.id, v.input), date: SEED_DATE } },
+        };
+      },
+    });
+    await read();
+    await call('get_transactions_live', {
+      start_date: OTHER_COLD_MONTH.start,
+      end_date: OTHER_COLD_MONTH.end,
+      limit: 10,
+    });
+    expect(fetches()).toBe(2);
+
+    const result = (await call('update_transaction', {
+      ...routing,
+      transaction_id: TX_UPDATE,
+      date: '2025-02-10',
+    })) as { success: boolean };
+    expect(result.success).toBe(true);
+
+    const other = (await call('get_transactions_live', {
+      start_date: OTHER_COLD_MONTH.start,
+      end_date: OTHER_COLD_MONTH.end,
+      limit: 10,
+    })) as { _cache_hit: boolean };
+    expect(other._cache_hit).toBe(false);
+    expect((await read())._cache_hit).toBe(false);
+  });
+
   test('create_transaction: a row too malformed to cache still has its routing ids indexed', async () => {
     // The routing ids are independent of the fields the read mappers need, so
     // a follow-up write naming the new id resolves without a network fetch.
@@ -1527,32 +1620,39 @@ describe('a malformed returned row is never cached (#864 review)', () => {
     });
   });
 
-  test.each(['review_transactions', 'bulk_edit_transactions'])(
-    '%s: null elements in updated/failed are reported as not applied, and the month is refetched',
-    async (tool) => {
+  test('update_transaction: a response without tags still reports tag_ids as updated; the local cache keeps the requested list', async () => {
+    // editTransaction reports the KEY tagIds whenever the request set tags,
+    // even when the response carries no usable tags array, so the caller still
+    // learns the write changed them. The two caches then differ by design: the
+    // local one keeps the requested list (the best guess it has), while the
+    // live month is dropped and refetches the server's truth.
+    const c = CASES.update_transaction!;
+    const { call, read, local } = setup(stripTags(c.mocks));
+    await read();
+
+    const result = (await call('update_transaction', c.args)) as {
+      success: boolean;
+      updated: string[];
+    };
+
+    expect(result.success).toBe(true);
+    expect(result.updated).toContain('tag_ids');
+    expect(local(TX_UPDATE)!.tag_ids).toEqual([TAG_ID]);
+    expect((await read())._cache_hit).toBe(false);
+  });
+
+  test.each(
+    (['review_transactions', 'bulk_edit_transactions'] as const).flatMap((tool) =>
+      [
+        ['null elements in updated/failed', { updated: [null], failed: [null] }] as const,
+        ['updated/failed that are not arrays', { updated: null, failed: null }] as const,
+      ].map(([label, payload]) => [tool, label, payload] as const)
+    )
+  )(
+    '%s: a response with %s is reported as not applied, not thrown on, and the month is refetched',
+    async (tool, _label, payload) => {
       const { call, read, fetches } = setup({
-        BulkEditTransactions: {
-          bulkEditTransactions: { updated: [null], failed: [null] } as never,
-        },
-      });
-      await read();
-
-      const rows = [TX_BULK_1, TX_BULK_2].map((id) => ({ ...routing, transaction_id: id }));
-      await expect(
-        call(tool, tool === 'review_transactions' ? { rows } : { rows, category_id: CAT_NEW })
-      ).rejects.toThrow(/did not apply/);
-
-      const after = await read();
-      expect(after._cache_hit).toBe(false);
-      expect(fetches()).toBe(2);
-    }
-  );
-
-  test.each(['review_transactions', 'bulk_edit_transactions'])(
-    '%s: a response whose updated/failed are not arrays is reported, not thrown on, and the month is refetched',
-    async (tool) => {
-      const { call, read, fetches } = setup({
-        BulkEditTransactions: { bulkEditTransactions: { updated: null, failed: null } as never },
+        BulkEditTransactions: { bulkEditTransactions: payload as never },
       });
       await read();
 

@@ -362,15 +362,23 @@ describe('splitTransaction output feeds the live cache and meta index', () => {
       ['parent-1', { accountId: 'acct-P', itemId: 'item-P' }],
     ]);
     const upserts = upsertLiveTransaction.mock.calls as any[];
-    // refusalMonths (the months to drop if a child is refused as malformed)
-    // is covered in live-write-coherence; here only the insert and parent.
-    expect(upserts.map((c) => [c[0].id, { insert: c[1].insert, parentId: c[1].parentId }])).toEqual(
-      [
-        ['child-a', { insert: true, parentId: 'parent-1' }],
-        ['child-b', { insert: true, parentId: 'parent-1' }],
-        ['child-c', { insert: true, parentId: 'parent-1' }],
-      ]
-    );
+    // Every child also carries requestedMonths: the months to drop if it is
+    // refused as malformed (its own date then names none). Behaviour is
+    // covered in live-write-coherence; this pins that the option is passed.
+    expect(
+      upserts.map((c) => [
+        c[0].id,
+        {
+          insert: c[1].insert,
+          parentId: c[1].parentId,
+          requestedMonths: [...new Set(c[1].requestedMonths)],
+        },
+      ])
+    ).toEqual([
+      ['child-a', { insert: true, parentId: 'parent-1', requestedMonths: ['2025-10'] }],
+      ['child-b', { insert: true, parentId: 'parent-1', requestedMonths: ['2025-10'] }],
+      ['child-c', { insert: true, parentId: 'parent-1', requestedMonths: ['2025-10'] }],
+    ]);
   });
 
   test('a parent with empty routing ids is not indexed', async () => {
