@@ -166,11 +166,15 @@ function variants(): Variant[] {
 const META_DIR = mkdtempSync(join(tmpdir(), 'cacheable-row-sweep-meta-'));
 afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
 
-function setup() {
+/** FULL_ROW as the Transactions query returns it, for the cached-copy pass. */
+const CACHED_COPY: TransactionNode = { ...FULL_ROW, parentId: null, isoCurrencyCode: 'USD' };
+
+function setup(opts: { cachedCopy?: boolean } = {}) {
+  const seeds = opts.cachedCopy ? [SEED, CACHED_COPY] : [SEED];
   const client = createMockGraphQLClient({
     Transactions: {
       transactions: {
-        edges: [{ cursor: `c-${SEED_ID}`, node: SEED }],
+        edges: seeds.map((node) => ({ cursor: `c-${node.id}`, node })),
         pageInfo: { endCursor: null, hasNextPage: false },
       },
     },
@@ -207,6 +211,47 @@ function namedMonth(date: unknown): string | null {
   return isCalendarMonth(month) ? month : null;
 }
 
+/**
+ * Every row-level dereference on the read path over one month: each
+ * enrichment mapper (via `fields`), the name, tag, category and amount
+ * filters, the transaction-type rules, and the single-row lookup.
+ */
+async function readEverything(
+  tools: LiveTransactionsTools,
+  base: Record<string, unknown>
+): Promise<void> {
+  const reads: Array<Record<string, unknown>> = [
+    { query: 'bakery' },
+    { merchant: 'corner' },
+    { tag: 'Trip' },
+    { category: CATEGORY_ID },
+    { min_amount: 0, max_amount: 1000 },
+    { pending: false },
+    { exclude_transfers: true, exclude_excluded: true },
+    ...LIVE_TRANSACTION_TYPES.map((t) => ({ transaction_type: t })),
+    { transaction_id: NEW_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID },
+  ];
+  for (const extra of reads) {
+    await tools.getTransactions({
+      ...base,
+      fields: [...LIVE_TRANSACTION_KNOWN_FIELDS],
+      ...extra,
+    } as Parameters<LiveTransactionsTools['getTransactions']>[0]);
+  }
+}
+
+/** The read arguments for the whole month `month` (YYYY-MM). */
+function monthRead(month: string) {
+  const [start, end] = getMonthRange(Number(month.slice(0, 4)), Number(month.slice(5, 7)));
+  return {
+    start_date: start,
+    end_date: end,
+    exclude_transfers: false,
+    exclude_excluded: false,
+    limit: 500,
+  };
+}
+
 describe('every row isCacheableRow accepts survives the live read path (#874)', () => {
   const all = variants();
   const accepted = all.filter((v) => LiveCopilotDatabase.isCacheableRow(v.row));
@@ -240,14 +285,7 @@ describe('every row isCacheableRow accepts survives the live read path (#874)', 
       // still a cache hit that serves the row (not dropped, not misfiled).
       const month = namedMonth(row.date);
       expect(month).not.toBeNull();
-      const [start, end] = getMonthRange(Number(month!.slice(0, 4)), Number(month!.slice(5, 7)));
-      const base = {
-        start_date: start,
-        end_date: end,
-        exclude_transfers: false,
-        exclude_excluded: false,
-        limit: 500,
-      };
+      const base = monthRead(month!);
       const plain = await tools.getTransactions({
         ...base,
         fields: [...LIVE_TRANSACTION_KNOWN_FIELDS],
@@ -257,27 +295,38 @@ describe('every row isCacheableRow accepts survives the live read path (#874)', 
         plain.transactions.map((t) => (t as { transaction_id: string }).transaction_id)
       ).toContain(NEW_ID);
 
-      // Half 1: every row-level dereference on the read path — each
-      // enrichment mapper (via `fields`), the name, tag, category and amount
-      // filters, the transaction-type rules, and the single-row lookup.
-      const reads: Array<Record<string, unknown>> = [
-        { query: 'bakery' },
-        { merchant: 'corner' },
-        { tag: 'Trip' },
-        { category: CATEGORY_ID },
-        { min_amount: 0, max_amount: 1000 },
-        { pending: false },
-        { exclude_transfers: true, exclude_excluded: true },
-        ...LIVE_TRANSACTION_TYPES.map((t) => ({ transaction_type: t })),
-        { transaction_id: NEW_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID },
-      ];
-      for (const extra of reads) {
-        await tools.getTransactions({
-          ...base,
-          fields: [...LIVE_TRANSACTION_KNOWN_FIELDS],
-          ...extra,
-        });
+      // Half 1: every row-level dereference on the read path.
+      await readEverything(tools, base);
+    }
+  );
+});
+
+describe('an EDIT of a cached row: whatever upsert stores survives the live read path (#874)', () => {
+  // The pass above inserts a new id, so the cached-copy branch never runs.
+  // Here the row is already cached, so an edit response is checked with the
+  // fields no write sets filled from the cached copy. Every variant is
+  // upserted; the month is either dropped (refused) or, still cached, must
+  // serve the row where its date says and survive every read.
+  test.each(variants().map((v) => [v.label, v] as const))(
+    '%s: a stored edit lands in the month its date names and no read over it throws',
+    async (_label, { row }) => {
+      const { live, tools } = setup({ cachedCopy: true });
+      await tools.getTransactions({ start_date: WARM.start, end_date: WARM.end, limit: 10 });
+
+      live.upsertLiveTransaction(row as unknown as CreatedTransaction);
+
+      const month = namedMonth(row.date) ?? BASE_DATE.slice(0, 7);
+      const base = monthRead(month);
+      const plain = await tools.getTransactions({
+        ...base,
+        fields: [...LIVE_TRANSACTION_KNOWN_FIELDS],
+      });
+      if (plain._cache_hit) {
+        expect(
+          plain.transactions.map((t) => (t as { transaction_id: string }).transaction_id)
+        ).toContain(NEW_ID);
       }
+      await readEverything(tools, base);
     }
   );
 });

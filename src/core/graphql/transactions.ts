@@ -189,7 +189,12 @@ export interface BulkEditTransactionsResponse {
     failed: Array<{
       transaction: { id: string } | null;
       error: string | null;
-      errorCode: string;
+      /**
+       * `ErrorCode!` server-side, but mutation responses are validated
+       * warn-only, so a drifted entry can reach the caller without one;
+       * typed nullable so the failure detail has to handle that.
+       */
+      errorCode: string | null;
     }>;
   };
 }

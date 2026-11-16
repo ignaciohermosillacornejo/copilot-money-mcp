@@ -198,11 +198,17 @@ export function warnMutationRowMisdated(
   const key = 'mutation-row-misdated';
   if (warned.has(key)) return;
   warned.add(key);
+  // Reports the outcome, as warnMutationRowRefused does (#875): with nothing
+  // cached there is nothing to refetch.
+  const outcome =
+    droppedMonths > 0
+      ? `${droppedMonths === 1 ? '1 cached month was' : `${droppedMonths} cached months were`} ` +
+        'dropped, so the next read refetches from the server'
+      : 'no cached month held it, so nothing was dropped';
   console.warn(
     `[copilot-money-mcp] mutation-row drift: transaction ${info.id} came back dated outside ` +
       `the month the write requested (${info.requestedMonth}), so it was not stored in the live ` +
-      `cache; ${droppedMonths === 1 ? '1 cached month was' : `${droppedMonths} cached months were`} ` +
-      `dropped so the next read refetches — see ${MUTATION_ROW_DATE_ECHO_SURFACE} in the ` +
+      `cache; ${outcome} — see ${MUTATION_ROW_DATE_ECHO_SURFACE} in the ` +
       `conformance ledger (src/conformance/ledger.ts). Further such refusals this session are ` +
       `not logged.`
   );

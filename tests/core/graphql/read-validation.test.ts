@@ -196,6 +196,14 @@ describe('warnMutationRowRefused', () => {
     expect(lines[0]).toContain(MUTATION_ROW_DATE_ECHO_SURFACE);
   });
 
+  test('the misdated refusal says nothing was dropped when no cached month held the row', () => {
+    const [line] = capture(() =>
+      warnMutationRowMisdated({ id: 'a', requestedMonth: '2025-02' }, 0)
+    );
+    expect(line).toContain('no cached month held it, so nothing was dropped');
+    expect(line).not.toContain('refetches');
+  });
+
   test('a null id is printed as <unreadable id>', () => {
     const [line] = capture(() => warnMutationRowRefused({ id: null, fields: ['<root>'] }, 0));
     expect(line).toContain('transaction <unreadable id> not stored');
