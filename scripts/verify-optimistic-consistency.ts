@@ -129,12 +129,12 @@ function heading(name: string): void {
 }
 
 /**
- * A caught value as text, for the manual-cleanup lines: `Name: message` for an
- * Error (as `${e}` printed it), JSON for anything else. Never throws, so a
+ * A caught value as text, for the manual-cleanup lines: an Error exactly as
+ * `${e}` printed it (`Name: message`), JSON for anything else. Never throws, so a
  * cyclic thrown value cannot swallow the cleanup instruction it is part of.
  */
 function describe(e: unknown): string {
-  if (e instanceof Error) return `${e.name}: ${e.message}`;
+  if (e instanceof Error) return String(e);
   try {
     return JSON.stringify(e) ?? String(e);
   } catch {

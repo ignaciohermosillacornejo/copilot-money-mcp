@@ -1125,6 +1125,8 @@ jobs:
         expect(code).toBe(1);
         expect(stderr).toContain('must be a quoted JSON string');
         expect(stderr).toContain('YAML list');
+        // The key IS present, so the "no declaration" message must not also fire.
+        expect(stderr).not.toContain('declaring who is trusted');
       }
     );
   });
