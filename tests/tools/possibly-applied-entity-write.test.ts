@@ -53,6 +53,32 @@ function cacheFor(
   return live.getRecurringCache() as never;
 }
 
+/**
+ * The snapshots a recurring write derives (#868), keyed like
+ * LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS; a key added there without
+ * one here is a type error. A possibly-applied recurring write drops them
+ * with the recurring snapshot (#911 review).
+ */
+const RECURRING_DERIVED: Record<
+  (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number],
+  (live: LiveCopilotDatabase) => SnapshotCache<unknown>
+> = {
+  upcoming_recurrings: (live) => live.getUpcomingRecurringsCache() as never,
+  monthly_spend: (live) => live.getMonthlySpendCache() as never,
+};
+
+/** Which recurring-derived snapshots are still cached, by key. */
+function recurringDerivedWarm(live: LiveCopilotDatabase): Record<string, boolean> {
+  return Object.fromEntries(
+    Object.entries(RECURRING_DERIVED).map(([key, get]) => [key, get(live).peek() !== undefined])
+  );
+}
+
+/** Every recurring-derived snapshot is warm, or every one was dropped. */
+function allRecurringDerived(warm: boolean): Record<string, boolean> {
+  return Object.fromEntries(Object.keys(RECURRING_DERIVED).map((key) => [key, warm]));
+}
+
 const CASES: Array<[string, string, Scope, (t: CopilotMoneyTools) => Promise<unknown>]> = [
   ['create_tag', 'CreateTag', 'tags', (t) => t.createTag({ name: 'Trip' })],
   ['update_tag', 'EditTag', 'tags', (t) => t.updateTag({ tag_id: TAG_ID, name: 'Trip 2' })],
@@ -134,6 +160,8 @@ async function setup(op: string, error: Error) {
     const id = scope === 'categories' ? CAT_ID : scope === 'tags' ? TAG_ID : REC_ID;
     await cacheFor(live, scope).read(async () => [{ id, name: 'Seed' }]);
   }
+  for (const get of Object.values(RECURRING_DERIVED)) await get(live).read(async () => []);
+  expect(recurringDerivedWarm(live)).toEqual(allRecurringDerived(true));
   return { tools: new CopilotMoneyTools(db, client, live), live };
 }
 
@@ -146,6 +174,8 @@ describe('a probably-landed entity write drops its live snapshot (#887)', () => 
     for (const other of (['categories', 'tags', 'recurring'] as const).filter((s) => s !== scope)) {
       expect(cacheFor(live, other).peek()).toBeDefined();
     }
+    // A recurring write also drops what it derives (#868); the others leave it.
+    expect(recurringDerivedWarm(live)).toEqual(allRecurringDerived(scope !== 'recurring'));
   });
 
   test.each(CASES)(
@@ -161,6 +191,7 @@ describe('a probably-landed entity write drops its live snapshot (#887)', () => 
       const { tools, live } = await setup(op, ambiguous);
       await expect(call(tools)).rejects.toThrow(/may or may not have applied/);
       expect(cacheFor(live, scope).peek()).toBeUndefined();
+      expect(recurringDerivedWarm(live)).toEqual(allRecurringDerived(scope !== 'recurring'));
     }
   );
 
@@ -173,6 +204,7 @@ describe('a probably-landed entity write drops its live snapshot (#887)', () => 
       const { tools, live } = await setup(op, rejected);
       await expect(call(tools)).rejects.toThrow(/rejected the request/);
       expect(cacheFor(live, scope).peek()).toBeDefined();
+      expect(recurringDerivedWarm(live)).toEqual(allRecurringDerived(true));
     }
   );
 });
