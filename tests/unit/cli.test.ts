@@ -92,6 +92,13 @@ describe('CLI entry point', () => {
       expect(stderr).toContain('Invalid --timeout value: 5000ms');
     });
 
+    test('a timeout above the setTimeout limit is refused, not clamped to 1ms', async () => {
+      const { exitCode, stderr } = await runCli(['--timeout', '99999999999']);
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Invalid --timeout value: 99999999999');
+    });
+
     test('invalid timeout "0" prints error and exits with code 1', async () => {
       const { exitCode, stderr } = await runCli(['--timeout', '0']);
 

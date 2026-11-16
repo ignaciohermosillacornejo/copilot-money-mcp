@@ -12,6 +12,7 @@ import {
   type BrowserSelection,
 } from './core/auth/browser-selection.js';
 import { CliArgError, parseCliArgs, type ParsedCliArgs } from './cli-args.js';
+import { MAX_TIMEOUT_MS, parseTimeoutMs } from './utils/timeout.js';
 
 /** Print a fatal argument error to stderr and exit 1. */
 function failArgs(message: string): never {
@@ -97,12 +98,10 @@ function parseArgs(): {
   let timeoutMs: number | undefined;
   const rawTimeout = values['--timeout'];
   if (rawTimeout !== undefined) {
-    // Digits only: parseInt would read "5000ms" or "5e3" as a number and
-    // silently drop the rest.
-    const ms = /^\d+$/.test(rawTimeout) ? Number(rawTimeout) : NaN;
-    if (isNaN(ms) || ms <= 0) {
+    const ms = parseTimeoutMs(rawTimeout);
+    if (ms === undefined) {
       failArgs(
-        `Invalid --timeout value: ${rawTimeout} (must be a positive integer in milliseconds)`
+        `Invalid --timeout value: ${rawTimeout} (must be a positive integer in milliseconds, at most ${MAX_TIMEOUT_MS})`
       );
     }
     timeoutMs = ms;

@@ -93,6 +93,21 @@ function asksForHelp(arg: string, i: number, argv: readonly string[]): boolean {
 }
 
 /**
+ * The flag a dashed token names under dash and case folding (`-write`,
+ * `--Write`, `-V` all name a real flag), or undefined. The result is always a
+ * CLI_FLAGS member, so printing its name echoes nothing from argv.
+ */
+function foldedFlag(token: string): CliFlag | undefined {
+  const bare = (token.split('=')[0] ?? '').replace(/^-+/, '').toLowerCase();
+  return BY_SPELLING.get(`--${bare}`) ?? BY_SPELLING.get(`-${bare}`);
+}
+
+/** A single-dash token that is a flag, not a value such as `-5`. */
+function namesAFlag(token: string): boolean {
+  return token.startsWith('-') && foldedFlag(token) !== undefined;
+}
+
+/**
  * Parse argv (without the node/script prefix).
  *
  * @throws CliArgError for a value-taking flag with no value, a boolean flag with
@@ -127,8 +142,7 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
       // folded, so a missing, extra or doubled dash (`write`, `-write`, `--v`)
       // or a capital (`--Write`) is caught too. The suggestion is always a
       // CLI_FLAGS member, a closed set, so printing it echoes nothing new.
-      const bare = spelling.replace(/^-+/, '').toLowerCase();
-      const meant = BY_SPELLING.get(`--${bare}`) ?? BY_SPELLING.get(`-${bare}`);
+      const meant = foldedFlag(spelling);
       if (inline !== undefined) {
         // The value is not echoed: it may be a secret or a path with a username.
         const hint = meant ? ` Did you mean ${meant.name}?` : '';
@@ -153,13 +167,12 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
       if (value === undefined) {
         const next = argv[i + 1];
         // A following flag is not a value: `--db-path --write` or `--db-path -v`
-        // must not read the flag as the path. Short tokens are matched exactly,
-        // so `--timeout -5` is still read and refused as an invalid value.
-        if (
-          next !== undefined &&
-          !next.startsWith('--') &&
-          !BY_SPELLING.has(next.split('=')[0] ?? '')
-        ) {
+        // must not read the flag as the path. A single-dash token counts as a
+        // flag when it names one under the same dash and case folding the hint
+        // uses (`-V`, `-Write`), so `--timeout -5` is still read and refused
+        // as an invalid value, and a non-dashed value (`--db-path WRITE`) is
+        // always consumed.
+        if (next !== undefined && !next.startsWith('--') && !namesAFlag(next)) {
           value = next;
           i++;
         }
