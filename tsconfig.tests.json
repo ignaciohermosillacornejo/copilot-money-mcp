@@ -191,6 +191,12 @@
     // failure message, in a file nothing else in `bun run check` reads.
     "tests/scripts/main-import-guard.test.ts",
     "tests/unit/tsconfig-tests-sync.test.ts",
+    // The CLI flag parser's table-driven tests (#891). Here for the #725
+    // reason: its loops walk CLI_FLAGS and read `values` / `booleans` keyed by
+    // flag name, so a renamed key or a mistyped helper would otherwise read
+    // `undefined` with nothing compiling it. Membership IS the coverage, so it
+    // is pinned in tests/unit/tsconfig-tests-sync.test.ts.
+    "tests/unit/cli-args.test.ts",
     // The sole verification of a gate that edits tracked source files in
     // place (scripts/mutation-guards.ts, #596). Nothing imports a .test.ts and
     // `lint` reads src/ only, so without this line the one file standing

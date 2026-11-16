@@ -206,6 +206,13 @@ describe('check:server-json', () => {
       expect(stderr).toContain('(--browser-profile).format is "boolean", expected "string"');
     });
 
+    test('a named argument listed twice fails', async () => {
+      const write = REAL_ARGS.find((arg) => arg.name === '--write');
+      const { code, stderr } = await withArgs([...REAL_ARGS, write]);
+      expect(code).toBe(1);
+      expect(stderr).toContain(`[${NEXT}].name --write is listed twice`);
+    });
+
     test('a named argument the CLI does not parse fails', async () => {
       const { code, stderr } = await withArgs([
         ...REAL_ARGS,

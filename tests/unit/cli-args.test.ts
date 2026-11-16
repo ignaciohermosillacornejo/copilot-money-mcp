@@ -16,6 +16,7 @@ import {
   flagSpellings,
   parseCliArgs,
   type ParsedCliArgs,
+  type ValueFlagName,
 } from '../../src/cli-args.js';
 
 const VALUE_FLAGS = CLI_FLAGS.filter((f) => f.takesValue);
@@ -26,8 +27,8 @@ function sampleValue(name: string): string {
   return name === '--timeout' ? '5000' : '/tmp/some=path';
 }
 
-/** The parsed field a flag sets, read back generically. */
-function valueOf(parsed: ParsedCliArgs, name: string): unknown {
+/** The value a flag was parsed to. */
+function valueOf(parsed: ParsedCliArgs, name: ValueFlagName): string | undefined {
   return parsed.values[name];
 }
 
@@ -126,7 +127,7 @@ describe('parseCliArgs', () => {
       // Anything else after a boolean flag is not its value.
       const other = parseCliArgs(['--write', 'no']);
       expect(other.booleans['--write']).toBe(true);
-      expect(other.warnings).toEqual(['Ignoring unrecognised argument "no" (see --help)']);
+      expect(other.warnings).toEqual(['Ignoring unrecognised argument #2 (see --help)']);
     });
 
     test('the last occurrence wins', () => {
@@ -165,12 +166,18 @@ describe('parseCliArgs', () => {
     expect(parseCliArgs(['--timeout', '-5']).values['--timeout']).toBe('-5');
   });
 
+  test('a stray non-dashed token is reported by position, never echoed', () => {
+    const parsed = parseCliArgs(['--write', '/Users/someone/secret-profile']);
+    expect(parsed.warnings).toEqual(['Ignoring unrecognised argument #2 (see --help)']);
+    expect(parsed.warnings.join('')).not.toContain('secret');
+  });
+
   test('an unknown bare flag or stray token is reported, not silently dropped', () => {
     const parsed = parseCliArgs(['--frobnicate', 'stray', '--write']);
     expect(parsed.booleans['--write']).toBe(true);
     expect(parsed.warnings).toEqual([
       'Ignoring unrecognised argument "--frobnicate" (see --help)',
-      'Ignoring unrecognised argument "stray" (see --help)',
+      'Ignoring unrecognised argument #2 (see --help)',
     ]);
   });
 
@@ -188,6 +195,9 @@ describe('parseCliArgs', () => {
     ]) {
       expect(parseCliArgs(argv).booleans['--help']).toBe(true);
     }
+    // Switched off like any boolean, in both spellings.
     expect(parseCliArgs(['--help=false']).booleans['--help']).toBe(false);
+    expect(parseCliArgs(['--help', 'false']).booleans['--help']).toBe(false);
+    expect(parseCliArgs(['-h', 'FALSE', '--write']).booleans['--write']).toBe(true);
   });
 });

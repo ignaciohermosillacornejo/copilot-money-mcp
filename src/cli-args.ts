@@ -78,12 +78,17 @@ for (const flag of CLI_FLAGS) {
   for (const spelling of flagSpellings(flag)) BY_SPELLING.set(spelling, flag);
 }
 
-/** True for `--help`, `-h`, or either with `=true` (any case). */
-function asksForHelp(arg: string): boolean {
+/**
+ * True when argv[i] asks for help: `--help` or `-h`, bare or `=true`, unless
+ * switched off the way any boolean is (`=false`, or a following literal
+ * `false`), in any case.
+ */
+function asksForHelp(arg: string, i: number, argv: readonly string[]): boolean {
   const eq = arg.indexOf('=');
   const spelling = eq === -1 ? arg : arg.slice(0, eq);
   if (BY_SPELLING.get(spelling)?.name !== '--help') return false;
-  return eq === -1 || arg.slice(eq + 1).toLowerCase() === 'true';
+  if (eq !== -1) return arg.slice(eq + 1).toLowerCase() === 'true';
+  return argv[i + 1]?.toLowerCase() !== 'false';
 }
 
 /**
@@ -121,7 +126,14 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
         // The value is not echoed: it may be a secret or a path with a username.
         throw new CliArgError(`Unknown option ${spelling}. Run with --help.`);
       }
-      warnings.push(`Ignoring unrecognised argument "${arg}" (see --help)`);
+      // A dashed token is echoed (it cannot carry "=value" here: that threw
+      // above). Anything else may be a path or a secret, so it is named by
+      // position only.
+      warnings.push(
+        arg.startsWith('-')
+          ? `Ignoring unrecognised argument "${arg}" (see --help)`
+          : `Ignoring unrecognised argument #${i + 1} (see --help)`
+      );
       continue;
     }
 
@@ -132,11 +144,10 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
         // A following flag is not a value: `--db-path --write` or `--db-path -v`
         // must not read the flag as the path. Short tokens are matched exactly,
         // so `--timeout -5` is still read and refused as an invalid value.
-        const nextSpelling = next?.split('=')[0];
         if (
           next !== undefined &&
           !next.startsWith('--') &&
-          !BY_SPELLING.has(nextSpelling as string)
+          !BY_SPELLING.has(next.split('=')[0] ?? '')
         ) {
           value = next;
           i++;
