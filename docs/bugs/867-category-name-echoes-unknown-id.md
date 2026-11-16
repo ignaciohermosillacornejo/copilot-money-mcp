@@ -57,7 +57,17 @@ transaction, recurring and budget rows (matching `get_transactions_live`, which 
 and `null` on `get_categories` list rows, whose other absent values are already `null`.
 `getCategoryName()` keeps its fallback, but its reach is closed: the last other `src/` caller,
 `CopilotDatabase.getCategories()` (no production caller, but public), now uses
-`lookupKnownCategoryName()` as well and leaves `name` absent for an unknown id. The
+`lookupKnownCategoryName()` as well and leaves `name` absent for an unknown id.
+
+Review found a second resolver of the same kind: `getCategoryDisplayName()`
+(`src/models/category.ts`, `name ?? category_id`). `get_categories`' list view fed it a
+synthesized `{ category_id }` for a parent missing from the user's categories, so the same
+row whose `category_name` was now `null` reported the deleted parent's raw id as
+`parent_name`. The tree and subcategories views used it on user categories, where a missing
+name came back as the id and an empty one as `""`. `parent_name` now goes through
+`resolveCategoryName()` (null for an unknown parent), and those views read the category's own
+name, treating a missing or empty one as `null`, as live mode's name map does (#860).
+`getCategoryDisplayName()` has no `src/` caller left. The
 finance-pulse skill, which used "no `category_name`" to mean uncategorized, now tests
 `category_id` instead, so a row in a deleted category still counts as spending.
 
@@ -74,10 +84,14 @@ passed.
 
 The table is hand-listed, so a new tool that returns `category_name` joins it only if its
 author adds a row. The class-level half is `tests/no-guessing-category-name.test.ts`: an AST
-sweep that fails if any `src/` file other than `src/utils/categories.ts` references
-`getCategoryName` (import, renamed import, namespace access, re-export or call). A new tool
-cannot reach the guessing fallback without failing it, whether or not it joins the table.
-Mutation-checked: re-importing it in `src/core/database.ts` fails the sweep.
+sweep that fails if any `src/` file other than the defining module references either guessing
+resolver, `getCategoryName` or `getCategoryDisplayName` (import, renamed import, namespace
+access, re-export or call). A new tool cannot reach either fallback without failing it,
+whether or not it joins the table. Mutation-checked: re-importing `getCategoryName` in
+`src/core/database.ts`, or `getCategoryDisplayName` in `src/tools/tools.ts`, fails the sweep.
+A new resolver under a different name is not covered until it is added to the sweep's table.
+The parity test also pins `parent_name` for a deleted parent and the tree / subcategories
+names for an unnamed user category.
 
 ## Lesson
 

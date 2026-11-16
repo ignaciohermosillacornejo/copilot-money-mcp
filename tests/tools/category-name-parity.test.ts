@@ -363,6 +363,80 @@ describe('category_name for an id in neither name map (#867)', () => {
     });
   });
 
+  describe('get_categories: a parent or user category with no known name', () => {
+    // A user category whose parent is in neither name map (the parent was
+    // deleted), and one whose own name is empty.
+    const CAT_ORPHAN = 'Or7pH4nK2mW9vR3xT6sB';
+    const CAT_UNNAMED = 'Un4mD8qL3xK7vR2pW5sC';
+
+    function tools(): CopilotMoneyTools {
+      const db = new CopilotDatabase('/fake/path');
+      db._injectDataForTesting({
+        transactions: [CAT_KNOWN, CAT_ORPHAN, CAT_UNNAMED].map((categoryId, i) => ({
+          transaction_id: `Tx${i}mK5aD3gJ8cX4hY6eC`,
+          amount: 20,
+          date: '2026-03-10',
+          name: `MERCHANT ${i}`,
+          category_id: categoryId,
+        })),
+        accounts: [],
+        recurring: [],
+        budgets: [],
+        goals: [],
+        goalHistory: [],
+        investmentPrices: [],
+        items: [],
+        tags: [],
+        userCategories: [
+          { category_id: CAT_KNOWN, name: KNOWN_NAME, order: 0 },
+          { category_id: CAT_ORPHAN, name: 'Orphan', parent_category_id: CAT_OPAQUE, order: 1 },
+          { category_id: CAT_UNNAMED, name: '', parent_category_id: CAT_KNOWN, order: 2 },
+        ],
+        categoryNameMap: new Map([
+          [CAT_KNOWN, KNOWN_NAME],
+          [CAT_ORPHAN, 'Orphan'],
+        ]),
+        accountNameMap: new Map(),
+      });
+      return new CopilotMoneyTools(db);
+    }
+
+    const listRow = async (id: string): Promise<Row> => {
+      const r = wire(await tools().getCategories({ view: 'list', ...RANGE }));
+      const row = (r.data as { categories: Row[] }).categories.find((c) => c.category_id === id);
+      if (!row) throw new Error(`no list row for ${id}`);
+      return row;
+    };
+
+    test('list view: a parent in neither name map gives parent_name null, not its id', async () => {
+      const row = await listRow(CAT_ORPHAN);
+      expect(row.parent_category_id).toBe(CAT_OPAQUE);
+      expect(row.parent_name).toBeNull();
+    });
+
+    test('list view: a known parent is still named', async () => {
+      expect((await listRow(CAT_UNNAMED)).parent_name).toBe(KNOWN_NAME);
+    });
+
+    test('tree and subcategories: an empty name is null, not "" or the id', async () => {
+      const t = tools();
+      const tree = wire(await t.getCategories({ view: 'tree' }));
+      const root = (tree.data as { categories: Row[] }).categories.find(
+        (c) => c.category_id === CAT_KNOWN
+      ) as { children: Row[] } | undefined;
+      const treeChild = root?.children.find((c) => c.category_id === CAT_UNNAMED);
+      expect(treeChild).toBeDefined();
+      expect(treeChild?.category_name).toBeNull();
+
+      const subs = wire(await t.getCategories({ parent_id: CAT_KNOWN }));
+      const sub = (subs.data as { subcategories: Row[] }).subcategories.find(
+        (c) => c.category_id === CAT_UNNAMED
+      );
+      expect(sub).toBeDefined();
+      expect(sub?.category_name).toBeNull();
+    });
+  });
+
   test('get_budgets drops a budget on an unknown id rather than naming it', async () => {
     const r = wire(await cacheTools().getBudgets({}));
     const named = r.budgets.map((b) => [b.category_id, b.category_name ?? null]);
