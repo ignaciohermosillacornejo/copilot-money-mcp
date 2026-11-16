@@ -170,13 +170,14 @@ const NO_PROCESSOR = ['financial_goal_sentinels', 'user_accounts'] as const;
 /** Every route that has a processor. */
 type SweptRoute = Exclude<CollectionRoute, (typeof NO_PROCESSOR)[number]>;
 
-describe('no route builds a row from a fieldless document (#627, #778, #797)', () => {
+describe('no route builds a row from a fieldless document, every route from a populated one (#627, #778, #797, #808)', () => {
   // The behavioural form of the source scan above, over EVERY route the smoke
   // compares rather than the clauses a regex can find. One fieldless document
   // is written at a real path for each route, and the decoder must produce
-  // nothing from it. `smoke:cache` check 1b fails on the real-cache shape of
-  // this (rows with no non-empty document behind them); this catches it with
-  // no cache at all. A route with no path here is a type error under
+  // nothing from it; one minimally populated document at the same path must
+  // produce exactly one row. `smoke:cache` check 1b fails on the real-cache
+  // shape of the first half (rows with no non-empty document behind them);
+  // this catches it with no cache at all. A route with no path here is a type error under
   // `bun run check` (this file is in tsconfig.tests.json), and also fails the
   // coverage test below, which is what catches it under a bare `bun test`.
   const I = 'itm_5pQw8ZnRvL3MxK7cHt2J';
@@ -189,43 +190,121 @@ describe('no route builds a row from a fieldless document (#627, #778, #797)', (
   // plaid_accounts was before #797), restore an explicit accessor for it here
   // rather than dropping it from the sweep.
   const ROWS: Record<SweptRoute, (all: AllCollectionsResult) => number> = ROUTE_ROWS;
-  const PATHS: Record<SweptRoute, { collection: string; id: string }> = {
+  // `populated` is the other side of each case (#808): the smallest field set
+  // the route's processor turns into a row. Fieldless-yields-nothing alone
+  // cannot see an over-broad guard (`fields.size < 2`, a guard that rejects a
+  // real field shape, a guard moved in front of the real path), all of which
+  // pass the fieldless side while dropping real documents. The property is
+  // required, so a route without one is a type error under `bun run check`,
+  // and the populated case below also fails at runtime if it is empty. Where a
+  // processor passes every field through (holdings_history_meta and the
+  // app-metadata routes) the field name is arbitrary; elsewhere it is a field
+  // the processor reads.
+  const PATHS: Record<
+    SweptRoute,
+    { collection: string; id: string; populated: Record<string, unknown> }
+  > = {
     holdings_history: {
       collection: `items/${I}/accounts/${A}/holdings_history/hh_4kWz8nVq/history`,
       id: '2026-01',
+      populated: { history: { '1767225600000': { price: 100, quantity: 2 } } },
     },
     holdings_history_meta: {
       collection: `items/${I}/accounts/${A}/holdings_history`,
       id: 'hh_4kWz8nVq',
+      populated: { security_id: 'sec_8nVc2KpX' },
     },
-    balance_history: { collection: `items/${I}/accounts/${A}/balance_history`, id: '2026-01-15' },
-    plaid_accounts: { collection: `items/${I}/accounts/${A}`, id: 'pa_7Kd2mQxZ' },
-    transactions: { collection: `items/${I}/accounts/${A}/transactions`, id: 'txn_2vLq9XmT' },
-    accounts: { collection: `items/${I}/accounts`, id: A },
-    recurring: { collection: `users/${U}/recurring`, id: 'rec_8kLm3PqX' },
-    budgets: { collection: `users/${U}/budgets`, id: 'bud_4kWzR8nV' },
-    financial_goals: { collection: `users/${U}/financial_goals`, id: 'gol_6rLpX3mQ' },
+    balance_history: {
+      collection: `items/${I}/accounts/${A}/balance_history`,
+      id: '2026-01-15',
+      populated: { current_balance: 100 },
+    },
+    plaid_accounts: {
+      collection: `items/${I}/accounts/${A}`,
+      id: 'pa_7Kd2mQxZ',
+      populated: { name: 'Synthetic Checking' },
+    },
+    transactions: {
+      collection: `items/${I}/accounts/${A}/transactions`,
+      id: 'txn_2vLq9XmT',
+      // Both required: no non-zero amount or no date is not a transaction.
+      populated: { amount: 100, date: '2026-01-15' },
+    },
+    accounts: {
+      collection: `items/${I}/accounts`,
+      id: A,
+      // Both required: a balance, and a name (or official_name).
+      populated: { current_balance: 100, name: 'Synthetic Checking' },
+    },
+    recurring: {
+      collection: `users/${U}/recurring`,
+      id: 'rec_8kLm3PqX',
+      populated: { name: 'Synthetic Subscription' },
+    },
+    budgets: { collection: `users/${U}/budgets`, id: 'bud_4kWzR8nV', populated: { amount: 100 } },
+    financial_goals: {
+      collection: `users/${U}/financial_goals`,
+      id: 'gol_6rLpX3mQ',
+      populated: { name: 'Synthetic Goal' },
+    },
     financial_goal_history: {
       collection: `users/${U}/financial_goals/gol_6rLpX3mQ/financial_goal_history`,
       id: '2026-01',
+      populated: { current_amount: 100 },
     },
-    investment_prices: { collection: 'investment_prices/sec_8nVc2KpX/daily', id: '2026-01' },
-    investment_splits: { collection: 'investment_splits', id: 'spl_3hTq7WmZ' },
-    items: { collection: 'items', id: I },
-    tags: { collection: `users/${U}/tags`, id: 'tag_3hTq7WmZ' },
-    categories: { collection: `users/${U}/categories`, id: 'cat_7Kd2mQxZ' },
-    transaction_changes: { collection: 'changes/chg_4kWz/t', id: 'tc_2mXq' },
-    account_changes: { collection: 'changes/chg_4kWz/a', id: 'ac_2mXq' },
-    changes: { collection: 'changes', id: 'chg_4kWz' },
-    securities: { collection: 'securities', id: 'sec_8nVc2KpX' },
-    users: { collection: 'users', id: U },
-    amazon_orders: { collection: 'amazon/amz_5pQw/orders', id: 'ord_9wKe' },
-    amazon: { collection: 'amazon', id: 'amz_5pQw' },
-    subscriptions: { collection: 'subscriptions', id: 'sub_6rLp' },
-    invites: { collection: 'invites', id: 'inv_6rLp' },
-    user_items: { collection: 'user_items', id: U },
-    feature_tracking: { collection: 'feature_tracking', id: U },
-    support: { collection: 'support', id: U },
+    investment_prices: {
+      collection: 'investment_prices/sec_8nVc2KpX/daily',
+      id: '2026-01',
+      populated: { price: 100 },
+    },
+    investment_splits: {
+      collection: 'investment_splits',
+      id: 'spl_3hTq7WmZ',
+      populated: { '2026-01-15': 2 },
+    },
+    items: { collection: 'items', id: I, populated: { institution_name: 'Synthetic Bank' } },
+    tags: { collection: `users/${U}/tags`, id: 'tag_3hTq7WmZ', populated: { name: 'Synthetic' } },
+    categories: {
+      collection: `users/${U}/categories`,
+      id: 'cat_7Kd2mQxZ',
+      populated: { name: 'Synthetic' },
+    },
+    transaction_changes: {
+      collection: 'changes/chg_4kWz/t',
+      id: 'tc_2mXq',
+      populated: { action: 'create' },
+    },
+    account_changes: {
+      collection: 'changes/chg_4kWz/a',
+      id: 'ac_2mXq',
+      populated: { action: 'update' },
+    },
+    changes: {
+      collection: 'changes',
+      id: 'chg_4kWz',
+      populated: { timestamp: '2026-01-15T10:00:00Z' },
+    },
+    securities: {
+      collection: 'securities',
+      id: 'sec_8nVc2KpX',
+      populated: { name: 'Synthetic Fund' },
+    },
+    users: { collection: 'users', id: U, populated: { public_id: 'pub_7Kd2mQxZ' } },
+    amazon_orders: {
+      collection: 'amazon/amz_5pQw/orders',
+      id: 'ord_9wKe',
+      populated: { date: '2026-01-15' },
+    },
+    amazon: { collection: 'amazon', id: 'amz_5pQw', populated: { status: 'connected' } },
+    subscriptions: {
+      collection: 'subscriptions',
+      id: 'sub_6rLp',
+      populated: { provider: 'apple' },
+    },
+    invites: { collection: 'invites', id: 'inv_6rLp', populated: { code: 'SYNTH123' } },
+    user_items: { collection: 'user_items', id: U, populated: { items: { [I]: true } } },
+    feature_tracking: { collection: 'feature_tracking', id: U, populated: { enabled: true } },
+    support: { collection: 'support', id: U, populated: { topic: 'billing' } },
   };
 
   test('the sweep covers every route that has a processor', () => {
@@ -236,7 +315,7 @@ describe('no route builds a row from a fieldless document (#627, #778, #797)', (
     expect(Object.keys(ROWS).sort()).toEqual(swept);
   });
 
-  test.each(Object.entries(PATHS))('%s', async (route, { collection, id }) => {
+  test.each(Object.entries(PATHS))('%s: fieldless', async (route, { collection, id }) => {
     // The table must say what it means: a path that routes elsewhere would
     // make this pass for the wrong processor.
     expect(routeCollection(collection)).toBe(route as CollectionRoute);
@@ -256,4 +335,41 @@ describe('no route builds a row from a fieldless document (#627, #778, #797)', (
       .map(([other]) => other);
     expect(everywhere).toEqual([]);
   });
+
+  test.each(Object.entries(PATHS))(
+    '%s: populated',
+    async (route, { collection, id, populated }) => {
+      // No silent skip: an empty fixture would make this a second copy of the
+      // fieldless case and pin nothing.
+      expect(Object.keys(populated).length).toBeGreaterThan(0);
+      expect(routeCollection(collection)).toBe(route as CollectionRoute);
+
+      const dbPath = path.join(FIXTURES_DIR, `populated-${route}`);
+      await createDeepTestDb(dbPath, [{ collection, id, fields: populated }]);
+      const all = await decodeAllCollections(dbPath);
+
+      expect(ROWS[route as SweptRoute](all)).toBe(1);
+      // Exactly one row overall: a dispatch change that also pushes the
+      // document into another array would pass the line above.
+      const everywhere = Object.entries(ROWS)
+        .filter(([, count]) => count(all) !== 0)
+        .map(([other, count]) => `${other}=${count(all)}`);
+      expect(everywhere).toEqual([`${route}=1`]);
+
+      // And the fixture is minimal: dropping any one field loses the row.
+      // Slack in a fixture is what lets an over-broad guard through — a
+      // three-field document still decodes under `fields.size < 2`. For a
+      // one-field fixture this is the fieldless case again; it earns its keep
+      // on the routes that need two.
+      for (const dropped of Object.keys(populated)) {
+        const fields = Object.fromEntries(
+          Object.entries(populated).filter(([key]) => key !== dropped)
+        );
+        const lessPath = path.join(FIXTURES_DIR, `populated-${route}-without-${dropped}`);
+        await createDeepTestDb(lessPath, [{ collection, id, fields }]);
+        const less = await decodeAllCollections(lessPath);
+        expect({ dropped, rows: ROWS[route as SweptRoute](less) }).toEqual({ dropped, rows: 0 });
+      }
+    }
+  );
 });
