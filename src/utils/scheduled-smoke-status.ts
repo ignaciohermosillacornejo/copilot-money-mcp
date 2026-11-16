@@ -33,11 +33,34 @@ export type ScheduledSmokeResult = (typeof SCHEDULED_SMOKE_RESULTS)[number];
  */
 export const SCHEDULED_SMOKE_REPORT_MAX_CHARS = 256;
 
-/** Bound `report` on read; the ellipsis marks that truncation occurred. */
-function truncateReport(value: string | null): string | null {
-  if (value === null || value.length <= SCHEDULED_SMOKE_REPORT_MAX_CHARS) return value;
-  return `${value.slice(0, SCHEDULED_SMOKE_REPORT_MAX_CHARS - 1)}…`;
+/** Bound a string on read; the ellipsis marks that truncation occurred. */
+function truncateTo(value: string, max: number): string {
+  return value.length <= max ? value : `${value.slice(0, max - 1)}…`;
 }
+
+function truncateReport(value: string | null): string | null {
+  return value === null ? null : truncateTo(value, SCHEDULED_SMOKE_REPORT_MAX_CHARS);
+}
+
+/**
+ * Bounds for `not_checked` as surfaced by the reader. The writer records at
+ * most one entry per registered skip marker (a handful); these ceilings only
+ * matter for a hand-edited or foreign file, same reasoning as `report`.
+ */
+export const SCHEDULED_SMOKE_NOT_CHECKED_MAX = 4;
+export const SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS = 32;
+
+/**
+ * A member of the smoke composite that exited 0 without a real comparison:
+ * `SKIP` compared nothing (e.g. no local cache), `WARN` compared but could not
+ * discriminate. Neither is drift, and neither is a check that passed (#819).
+ */
+const NotCheckedSchema = z.object({
+  check: z.string().transform((v) => truncateTo(v, SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS)),
+  verdict: z.enum(['SKIP', 'WARN']),
+});
+
+export type ScheduledSmokeNotChecked = z.infer<typeof NotCheckedSchema>;
 
 const ScheduledSmokeStatusSchema = z.object({
   last_run: z.string(),
@@ -60,6 +83,17 @@ const ScheduledSmokeStatusSchema = z.object({
     .nullable()
     .optional()
     .transform((v) => truncateReport(v ?? null)),
+  /**
+   * Composite members that did not really check anything this run. Omitted
+   * when empty (and from files written before #819), so a fully checked run
+   * costs `get_connection_status` nothing.
+   */
+  not_checked: z
+    .array(NotCheckedSchema)
+    .optional()
+    .transform((v) =>
+      v === undefined || v.length === 0 ? undefined : v.slice(0, SCHEDULED_SMOKE_NOT_CHECKED_MAX)
+    ),
 });
 
 export type ScheduledSmokeStatus = z.infer<typeof ScheduledSmokeStatusSchema>;

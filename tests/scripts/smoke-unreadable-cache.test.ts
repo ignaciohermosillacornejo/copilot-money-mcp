@@ -24,6 +24,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { DRIFT_VERDICT_MARKERS, findNotChecked } from '../../scripts/scheduled-smoke.js';
 
 const REPO_ROOT = path.resolve(__dirname, '../..');
 const FIRESTORE =
@@ -83,15 +84,18 @@ describe('smoke scripts tell "could not read" from "no cache"', () => {
   test('smoke:account-names fails on an unreadable cache instead of SKIP', () => {
     makeUnreadable();
     const { status, stderr } = run('scripts/smoke/account-names.ts');
-    expect(stderr).toContain('FAIL account-name parity');
+    expect(stderr).toContain('FAIL — account-name parity could not read the local cache');
     expect(stderr).toContain('EACCES');
     expect(stderr).not.toContain('SKIP');
+    // Not a drift verdict either: the run never compared anything.
+    expect(DRIFT_VERDICT_MARKERS.some((m) => stderr.includes(m))).toBe(false);
     expect(status).toBe(1);
   }, 90_000);
 
   test('smoke:account-names still SKIPs for a home with no cache', () => {
     const { status, stderr } = run('scripts/smoke/account-names.ts');
-    expect(stderr).toContain('SKIP account-name parity');
+    // The scheduled runner must see this as "not checked", not a clean pass (#819).
+    expect(findNotChecked(stderr)).toEqual([{ check: 'account-name parity', verdict: 'SKIP' }]);
     expect(status).toBe(0);
   }, 90_000);
 });

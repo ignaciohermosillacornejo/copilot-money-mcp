@@ -14,7 +14,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
   DRIFT_VERDICT_MARKERS,
+  SKIP_MARKERS,
   classifySmokeOutcome,
+  findNotChecked,
   runScheduledSmoke,
   summarizeSmokeOutput,
   type SmokeRunResult,
@@ -352,5 +354,84 @@ describe('runScheduledSmoke', () => {
     });
     expect(notified).toHaveLength(1);
     expect(notified[0]!.title).toContain('DID NOT COMPLETE');
+  });
+});
+
+/**
+ * #819: a member that exits 0 without having compared anything (SKIP), or
+ * whose comparison could not discriminate (WARN), used to be indistinguishable
+ * from a clean pass. Not an alarm, but the status must say what went unchecked.
+ */
+describe('members that were not checked (#819)', () => {
+  const SKIPPED_RUN = completed(
+    0,
+    [
+      '[smoke] PASS — 19/19 read operations verified against the server.',
+      '[smoke] SKIP — account-name parity not checked: no local Copilot cache to compare against.',
+      '[smoke] PASS — tags refresh smoke: 4 checks passed.',
+    ].join('\n')
+  );
+  const WARNED_RUN = completed(
+    0,
+    '[smoke] WARN — account-name parity inconclusive: no discriminating accounts.\n' +
+      '[smoke] PASS — tags refresh smoke: 4 checks passed.'
+  );
+
+  test('every registered skip marker is found', () => {
+    for (const s of SKIP_MARKERS) {
+      expect(findNotChecked(`${s.marker}: detail`)).toEqual([
+        { check: s.check, verdict: s.verdict },
+      ]);
+    }
+  });
+
+  test('a run with no skip marker has nothing unchecked', () => {
+    expect(findNotChecked('[smoke] PASS — all good')).toEqual([]);
+  });
+
+  test('a skipped member is still a pass (no new alarm state)', () => {
+    expect(classifySmokeOutcome(SKIPPED_RUN)).toBe('pass');
+  });
+
+  test('the pass summary names the member that was not checked', () => {
+    expect(summarizeSmokeOutput('pass', SKIPPED_RUN)).toContain(
+      'NOT checked: account-name parity (SKIP)'
+    );
+    expect(summarizeSmokeOutput('pass', WARNED_RUN)).toContain(
+      'NOT checked: account-name parity (WARN)'
+    );
+  });
+
+  test('the status record lists skipped and warned members', () => {
+    for (const [run, verdict] of [
+      [SKIPPED_RUN, 'SKIP'],
+      [WARNED_RUN, 'WARN'],
+    ] as const) {
+      const written: Record<string, unknown>[] = [];
+      const code = runScheduledSmoke({
+        spawn: () => run,
+        write: (s) => written.push(s),
+        notify: () => {},
+      });
+      expect(code).toBe(0);
+      expect(written.at(-1)?.result).toBe('pass');
+      expect(written.at(-1)?.not_checked).toEqual([{ check: 'account-name parity', verdict }]);
+    }
+  });
+
+  test('a fully checked run records an empty list', () => {
+    const written: Record<string, unknown>[] = [];
+    runScheduledSmoke({
+      spawn: () => completed(0, '[smoke] PASS — all good'),
+      write: (s) => written.push(s),
+      notify: () => {},
+    });
+    expect(written.at(-1)?.not_checked).toEqual([]);
+  });
+
+  test('skip markers never double as drift verdicts', () => {
+    for (const s of SKIP_MARKERS) {
+      expect(classifySmokeOutcome(completed(1, s.marker))).not.toBe('fail');
+    }
   });
 });

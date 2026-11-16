@@ -186,6 +186,19 @@ export type ConformanceClass = (typeof CONFORMANCE_CLASSES)[number];
 export type ConformanceOracle = `smoke:${string}` | `runtime:${string}`;
 
 /**
+ * `smoke:` oracles that a `gated` entry may name although the weekly drift
+ * check (the `bun run smoke` composite) never runs them, each with the reason
+ * it must stay attended. Every other `gated` smoke oracle must be in that
+ * composite, or "gated" would mean "a script exists" rather than "something
+ * re-checks this" (enforced by the ledger test, #819).
+ */
+export const ATTENDED_ONLY_SMOKE_ORACLES: Readonly<Record<`smoke:${string}`, string>> = {
+  'smoke:roundtrip':
+    'mutates the real account (creates and deletes throwaway rows), so it runs only when a ' +
+    'maintainer is watching',
+};
+
+/**
  * Registered always-on runtime checks that `runtime:<name>` oracles may
  * reference. Defined in src/core/graphql/response-validation.ts and
  * re-exported here for backward compatibility.

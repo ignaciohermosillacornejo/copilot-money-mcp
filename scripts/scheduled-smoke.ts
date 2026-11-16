@@ -32,6 +32,7 @@ import { dirname, join } from 'path';
 import { spawnSync } from 'child_process';
 import {
   defaultScheduledSmokeStatusPath,
+  type ScheduledSmokeNotChecked,
   type ScheduledSmokeResult,
 } from '../src/utils/scheduled-smoke-status.js';
 
@@ -56,7 +57,51 @@ export const DRIFT_VERDICT_MARKERS = [
   '[smoke] FAIL — synthesized-field absence drift detected',
   '[smoke] FAIL — read-surface drift detected',
   '[smoke] FAIL — account-name parity drift detected',
+  // The refresh smokes' server-controlled assertions (a non-empty list, the
+  // budget month window, rollover polarity). Their local assertions — cache
+  // hits, the warm-call timing bound — still throw without a marker, and stay
+  // `incomplete`: a slow laptop is not an API change (#819).
+  '[smoke] FAIL — budgets server drift detected',
+  '[smoke] FAIL — categories server drift detected',
+  '[smoke] FAIL — recurring server drift detected',
+  '[smoke] FAIL — tags server drift detected',
 ] as const;
+
+/**
+ * Lines that mean "this member exited 0 without a real comparison". Not an
+ * alarm: no local cache, or no account that tells the two sources apart, is
+ * not drift. But it is not a passing check either, so a run that prints one is
+ * recorded as a pass that names what it did not check, rather than as a clean
+ * pass (#819). The composite test fails on any SKIP/WARN line a member prints
+ * that is not registered here.
+ */
+export const SKIP_MARKERS = [
+  {
+    marker: '[smoke] SKIP — account-name parity not checked',
+    check: 'account-name parity',
+    verdict: 'SKIP',
+  },
+  {
+    marker: '[smoke] WARN — account-name parity inconclusive',
+    check: 'account-name parity',
+    verdict: 'WARN',
+  },
+] as const satisfies ReadonlyArray<{ marker: string } & ScheduledSmokeNotChecked>;
+
+/**
+ * A member's verdict line: `[smoke] PASS — …` or `[smoke] FAIL — …`. The run
+ * summary quotes the last one; the composite test requires every member to
+ * print a PASS line in this shape.
+ */
+export const SMOKE_VERDICT_LINE = /^\[smoke\] (PASS|FAIL) —/;
+
+/** The members a run's output says were skipped or inconclusive, in registry order. */
+export function findNotChecked(output: string): ScheduledSmokeNotChecked[] {
+  return SKIP_MARKERS.filter((s) => output.includes(s.marker)).map(({ check, verdict }) => ({
+    check,
+    verdict,
+  }));
+}
 
 /** Signatures that mean "could not authenticate", not "the API drifted". */
 const AUTH_MISSING_PATTERNS = [
@@ -128,9 +173,16 @@ export function summarizeSmokeOutput(result: ScheduledSmokeResult, run: SmokeRun
   // which is how a clean run once summarized itself as `[smoke] done {`.
   const lines = run.output.trim().split('\n');
   const reversed = [...lines].reverse();
-  const verdict = reversed.find((l) => /^\[smoke\] (PASS|FAIL) —/.test(l));
-  const marker = verdict ?? reversed.find((l) => l.startsWith('[smoke]'));
-  return (marker ?? lines[0] ?? '').slice(0, 300);
+  const verdict = reversed.find((l) => SMOKE_VERDICT_LINE.test(l));
+  const marker = verdict ?? reversed.find((l) => l.startsWith('[smoke]')) ?? lines[0] ?? '';
+  // A pass that skipped a member says so first, so truncation can only cut the
+  // quoted verdict, never the caveat.
+  const notChecked = result === 'pass' ? findNotChecked(run.output) : [];
+  if (notChecked.length > 0) {
+    const names = notChecked.map((n) => `${n.check} (${n.verdict})`).join(', ');
+    return `drift check passed; NOT checked: ${names} — ${marker}`.slice(0, 300);
+  }
+  return marker.slice(0, 300);
 }
 
 /** Notification copy per outcome. `fail` is the only one allowed to say drift. */
@@ -223,7 +275,13 @@ export function runScheduledSmoke(deps: ScheduledSmokeDeps = DEFAULT_DEPS): numb
   }
 
   deps.write(
-    { last_run: lastRun, result, summary: summarizeSmokeOutput(result, run), report },
+    {
+      last_run: lastRun,
+      result,
+      summary: summarizeSmokeOutput(result, run),
+      report,
+      not_checked: findNotChecked(run.output),
+    },
     alarm ? run.output : null
   );
 

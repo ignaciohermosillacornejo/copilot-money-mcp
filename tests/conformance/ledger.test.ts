@@ -9,7 +9,8 @@
  *     `createWriteToolSchemas()` has a ledger entry — a new write-tool param
  *     without an entry fails the build;
  * (b) every named `smoke:` oracle maps to an existing `scripts/smoke/` script;
- * (c) `class: 'gated'` requires a non-null oracle;
+ * (c) `class: 'gated'` requires a non-null oracle, and a `smoke:` one must be
+ *     in the `bun run smoke` composite or explicitly attended-only;
  * plus hygiene: unique surfaces, no stale toolParams, non-empty evidence,
  * and enum value sets that match the tool schemas exactly.
  */
@@ -18,7 +19,9 @@ import { describe, test, expect } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createWriteToolSchemas } from '../../src/tools/tools.js';
+import { compositeMembers } from '../helpers/smoke-composite.js';
 import {
+  ATTENDED_ONLY_SMOKE_ORACLES,
   CONFORMANCE_LEDGER,
   CONFORMANCE_CLASSES,
   RUNTIME_CHECK_NAMES,
@@ -202,6 +205,42 @@ describe('conformance ledger', () => {
       `'gated' means a recurring oracle re-verifies the assumption — these entries claim ` +
         `gated with no oracle: ${offenders.join(', ')}`
     ).toEqual([]);
+  });
+
+  /**
+   * `gated` means drift turns a recurring run red. A `smoke:` oracle is only
+   * recurring if the scheduled drift check runs it, i.e. it is in the `bun run
+   * smoke` composite; otherwise nothing ever re-runs it unattended. The
+   * exception is a smoke that must not run unattended (it mutates the account),
+   * which `ATTENDED_ONLY_SMOKE_ORACLES` names with its reason (#819).
+   */
+  test("(c) a 'gated' smoke oracle is in the smoke composite or explicitly attended-only", () => {
+    const composite = new Set(compositeMembers());
+    const offenders = CONFORMANCE_LEDGER.filter(
+      (entry) =>
+        entry.class === 'gated' &&
+        entry.oracle?.startsWith('smoke:') === true &&
+        !composite.has(`scripts/smoke/${entry.oracle.slice('smoke:'.length)}.ts`) &&
+        !(entry.oracle in ATTENDED_ONLY_SMOKE_ORACLES)
+    ).map((entry) => `${entry.surface} (${entry.oracle ?? ''})`);
+    expect(
+      offenders,
+      `these 'gated' entries name a smoke that no scheduled run executes — add it to the ` +
+        `smoke composite in package.json, or to ATTENDED_ONLY_SMOKE_ORACLES with the reason`
+    ).toEqual([]);
+  });
+
+  test('attended-only smoke oracles are really outside the composite, and in use', () => {
+    const composite = new Set(compositeMembers());
+    for (const oracle of Object.keys(ATTENDED_ONLY_SMOKE_ORACLES)) {
+      expect(composite.has(`scripts/smoke/${oracle.slice('smoke:'.length)}.ts`), oracle).toBe(
+        false
+      );
+      expect(
+        CONFORMANCE_LEDGER.some((e) => e.class === 'gated' && e.oracle === oracle),
+        `${oracle} is listed attended-only but no gated entry uses it`
+      ).toBe(true);
+    }
   });
 
   test('surfaces are unique', () => {

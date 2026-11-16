@@ -1,14 +1,19 @@
 /**
- * Every member of the `bun run smoke` composite that checks for drift must
- * print a marker `scripts/scheduled-smoke.ts` recognises (#818).
+ * Every member of the `bun run smoke` composite must speak the scheduled
+ * runner's language (`scripts/scheduled-smoke.ts`), in three ways:
  *
- * The scheduled runner classifies a nonzero run as `fail` (drift) only when
- * the output contains one of `DRIFT_VERDICT_MARKERS`; anything else becomes
- * `incomplete` and is reported as "drift NOT checked". So a drift check whose
- * failure line is not on that list turns real drift into a dismissed
- * non-completion. That happened twice: `synthesized-fields-conformance.ts`
- * joined the composite with its own wording, and #791 added
- * `account-names.ts` the same way.
+ * 1. Drift (#818). The runner classifies a nonzero run as `fail` only when the
+ *    output contains one of `DRIFT_VERDICT_MARKERS`; anything else becomes
+ *    `incomplete`, reported as "drift NOT checked". A drift check whose failure
+ *    line is not on that list turns real drift into a dismissed non-completion.
+ *    That happened twice (`synthesized-fields-conformance.ts`, then #791's
+ *    `account-names.ts`), and the four refresh smokes did it for their
+ *    server-controlled assertions until #819.
+ * 2. Not checked (#819). A member that exits 0 without having compared
+ *    anything (SKIP) or without being able to discriminate (WARN) must print a
+ *    line from `SKIP_MARKERS`, or the run reads as a clean pass.
+ * 3. Pass (#819). Each member prints a `[smoke] PASS — …` line, the shape the
+ *    run summary recognises as a verdict.
  *
  * This walks the composite from `package.json` (following `bun run smoke:x`
  * aliases), so a new member must be classified here before it can join.
@@ -17,9 +22,12 @@
 import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DRIFT_VERDICT_MARKERS } from '../../scripts/scheduled-smoke.js';
-
-const ROOT = path.join(import.meta.dir, '..', '..');
+import {
+  DRIFT_VERDICT_MARKERS,
+  SKIP_MARKERS,
+  SMOKE_VERDICT_LINE,
+} from '../../scripts/scheduled-smoke.js';
+import { ROOT, compositeMembers, printedLines } from '../helpers/smoke-composite.js';
 
 /** Drift checks, and the marker each prints before exiting nonzero. */
 const MARKER_OF: Record<string, (typeof DRIFT_VERDICT_MARKERS)[number]> = {
@@ -28,85 +36,75 @@ const MARKER_OF: Record<string, (typeof DRIFT_VERDICT_MARKERS)[number]> = {
     '[smoke] FAIL — synthesized-field absence drift detected',
   'scripts/smoke/reads.ts': '[smoke] FAIL — read-surface drift detected',
   'scripts/smoke/account-names.ts': '[smoke] FAIL — account-name parity drift detected',
+  'scripts/smoke/budgets.ts': '[smoke] FAIL — budgets server drift detected',
+  'scripts/smoke/categories.ts': '[smoke] FAIL — categories server drift detected',
+  'scripts/smoke/recurring.ts': '[smoke] FAIL — recurring server drift detected',
+  'scripts/smoke/tags.ts': '[smoke] FAIL — tags server drift detected',
 };
 
-/**
- * Members that print no drift marker. The four refresh smokes throw on a
- * failed assertion and the scheduled run reports that as `incomplete`. That is
- * right for their local assertions (e.g. a warm-cache timing bound), but some
- * of what they assert is server-controlled (budgets.ts: a non-empty budget
- * list, and `months_window` anchoring to the current month), so a server-side
- * change there is reported as "drift NOT checked" today. Exempt, so the gap is
- * visible here rather than silent; splitting the server-controlled assertions
- * behind their own marker is tracked in #819.
- */
-const EXEMPT: Record<string, string> = {
-  'scripts/smoke/budgets.ts': 'refresh smoke without a drift marker (#819)',
-  'scripts/smoke/categories.ts': 'refresh smoke without a drift marker (#819)',
-  'scripts/smoke/recurring.ts': 'refresh smoke without a drift marker (#819)',
-  'scripts/smoke/tags.ts': 'refresh smoke without a drift marker (#819)',
-};
+const members = compositeMembers();
+const linesOf = (m: string): string[] => printedLines(fs.readFileSync(path.join(ROOT, m), 'utf8'));
 
-function compositeMembers(): string[] {
-  const scripts = (
-    JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as {
-      scripts: Record<string, string>;
-    }
-  ).scripts;
-  // `stack` is the current path, not every alias seen so far: an alias used by
-  // two steps is fine, and only one that reaches itself is a cycle.
-  const walk = (name: string, stack: readonly string[] = []): string[] => {
-    if (stack.includes(name)) {
-      throw new Error(`package.json script cycle: ${[...stack, name].join(' -> ')}`);
-    }
-    const body = scripts[name];
-    if (body === undefined) throw new Error(`package.json has no script "${name}"`);
-    return body.split('&&').flatMap((part) => {
-      const m = /^bun run (\S+)$/.exec(part.trim());
-      if (!m) throw new Error(`unrecognised composite step in "${name}": ${part.trim()}`);
-      const target = m[1] as string;
-      return target.startsWith('scripts/') ? [target] : walk(target, [...stack, name]);
-    });
-  };
-  return walk('smoke');
-}
-
-describe('bun run smoke composite drift verdicts (#818)', () => {
-  const members = compositeMembers();
-
+describe('bun run smoke composite verdicts (#818, #819)', () => {
   test('the composite resolves to script files', () => {
     expect(members.length).toBeGreaterThan(0);
     for (const m of members) expect(fs.existsSync(path.join(ROOT, m)), m).toBe(true);
   });
 
-  test('every member is classified as a drift check or exempt, not both', () => {
-    const unclassified = members.filter((m) => !(m in MARKER_OF) && !(m in EXEMPT));
-    const both = members.filter((m) => m in MARKER_OF && m in EXEMPT);
-    expect(unclassified, 'add the member to MARKER_OF or EXEMPT').toEqual([]);
-    expect(both).toEqual([]);
+  test('every member is classified as a drift check', () => {
+    expect(
+      members.filter((m) => !(m in MARKER_OF)),
+      'add the member to MARKER_OF'
+    ).toEqual([]);
   });
 
   test('every drift check prints a marker the scheduled runner recognises', () => {
     const missing: string[] = [];
-    for (const m of members.filter((x) => x in MARKER_OF)) {
+    for (const m of members) {
       const marker = MARKER_OF[m] as string;
       if (!(DRIFT_VERDICT_MARKERS as readonly string[]).includes(marker)) {
         missing.push(`${m}: marker not in DRIFT_VERDICT_MARKERS`);
       }
-      // The marker must be the start of a console.error/console.log argument
-      // (optionally after leading newlines), not merely somewhere in the file:
-      // a copy in a comment or docblock would otherwise satisfy the check.
-      const escaped = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const printed = new RegExp(`console\\.(?:error|log)\\(\\s*['"\`](?:\\\\n)*${escaped}`);
-      if (!printed.test(fs.readFileSync(path.join(ROOT, m), 'utf8'))) {
+      if (!linesOf(m).some((l) => l.startsWith(marker))) {
         missing.push(`${m}: never prints "${marker}"`);
       }
     }
     expect(missing).toEqual([]);
   });
 
+  test('every member prints a PASS line the run summary recognises', () => {
+    const missing = members.filter(
+      (m) => !linesOf(m).some((l) => l.startsWith('[smoke] PASS') && SMOKE_VERDICT_LINE.test(l))
+    );
+    expect(missing, 'print `[smoke] PASS — <what was verified>` on success').toEqual([]);
+  });
+
+  test('every SKIP or WARN line a member prints is a registered skip marker', () => {
+    const offenders: string[] = [];
+    for (const m of members) {
+      for (const line of linesOf(m)) {
+        // A line whose first word is interpolated could print SKIP or WARN
+        // without anything here seeing it (#791's `${status} account-name…`).
+        if (/^\[smoke\] \$\{/.test(line)) {
+          offenders.push(`${m}: first word is interpolated, so it cannot be checked: ${line}`);
+        } else if (
+          /^\[smoke\] (SKIP|WARN)\b/.test(line) &&
+          !SKIP_MARKERS.some((s) => line.startsWith(s.marker))
+        ) {
+          offenders.push(`${m}: unregistered "${line}" — add it to SKIP_MARKERS`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  test('every registered skip marker is printed by some member', () => {
+    const printed = members.flatMap(linesOf);
+    const dead = SKIP_MARKERS.filter((s) => !printed.some((l) => l.startsWith(s.marker)));
+    expect(dead.map((s) => s.marker)).toEqual([]);
+  });
+
   test('no stale entries: every classified script is still in the composite', () => {
-    const listed = [...Object.keys(MARKER_OF), ...Object.keys(EXEMPT)];
-    expect(listed.filter((m) => !members.includes(m))).toEqual([]);
+    expect(Object.keys(MARKER_OF).filter((m) => !members.includes(m))).toEqual([]);
   });
 });

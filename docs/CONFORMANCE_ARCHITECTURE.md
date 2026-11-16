@@ -98,7 +98,10 @@ quarter); the 2026-06 program drove it to near 99% gated/verified.
 The ledger is enforced by plain unit tests that run in cloud CI (no auth, no
 network): `tests/conformance/ledger.test.ts` fails the build if a write-tool
 param has no ledger entry, if a named oracle points at a script that doesn't
-exist, or if a `gated` entry has no oracle. **Adding a tool without registering
+exist, if a `gated` entry has no oracle, or if a `gated` entry's `smoke:` oracle
+is neither in the weekly `bun run smoke` composite nor listed in
+`ATTENDED_ONLY_SMOKE_ORACLES` with its reason (`smoke:roundtrip`, which
+mutates). **Adding a tool without registering
 its assumptions is a compile-level error, not a code-review catch.**
 
 ## The five invariants (the architecture)
