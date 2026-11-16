@@ -177,9 +177,10 @@ describe('no route builds a row from a fieldless document, every route from a po
   // nothing from it; one minimally populated document at the same path must
   // produce exactly one row. `smoke:cache` check 1b fails on the real-cache
   // shape of the first half (rows with no non-empty document behind them);
-  // this catches it with no cache at all. A route with no path here is a type error under
-  // `bun run check` (this file is in tsconfig.tests.json), and also fails the
-  // coverage test below, which is what catches it under a bare `bun test`.
+  // this catches it with no cache at all. A route with no path here is a type
+  // error under `bun run check` (this file is in tsconfig.tests.json), and also
+  // fails the coverage test below, which is what catches it under a bare
+  // `bun test`.
   const I = 'itm_5pQw8ZnRvL3MxK7cHt2J';
   const A = 'acc_9wKe4RnTpB2XvL7mQd3F';
   const U = 'usr_3hTq7WmZ2xKv9LpR4cNb';
@@ -358,10 +359,14 @@ describe('no route builds a row from a fieldless document, every route from a po
 
       // And the fixture is minimal: dropping any one field loses the row.
       // Slack in a fixture is what lets an over-broad guard through — a
-      // three-field document still decodes under `fields.size < 2`. For a
-      // one-field fixture this is the fieldless case again; it earns its keep
-      // on the routes that need two.
-      for (const dropped of Object.keys(populated)) {
+      // three-field document still decodes under `fields.size < 2`. Only
+      // multi-field fixtures run this: dropping the sole field of a one-field
+      // fixture writes the same empty document at the same path that the
+      // `: fieldless` case already decodes, so it would add a database and
+      // pin nothing. The count is read per run, so a fixture that later gains
+      // a second field is covered with no other edit.
+      const keys = Object.keys(populated);
+      for (const dropped of keys.length >= 2 ? keys : []) {
         const fields = Object.fromEntries(
           Object.entries(populated).filter(([key]) => key !== dropped)
         );
