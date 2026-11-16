@@ -490,6 +490,14 @@ export function reportDocumentKeyShape(
   if (problems.length > 0) {
     return { status: 'FAIL', detail: `${problems.join('; ')} (see #807)` };
   }
+  if (shape.yielded === 0) {
+    return {
+      status: 'WARN',
+      detail:
+        'the reader yielded no documents, so key shape was not measured — an empty cache ' +
+        'and a reader that rejects every key look the same here',
+    };
+  }
   return {
     status: 'PASS',
     detail:

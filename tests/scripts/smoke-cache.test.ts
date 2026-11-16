@@ -664,6 +664,14 @@ describe('reportDocumentKeyShape', () => {
     expect(detail).toContain('the audit range is wrong');
   });
 
+  test('WARNs rather than PASSes when nothing was yielded', () => {
+    const { status } = reportDocumentKeyShape(
+      { yielded: 0, foreignTable: 0, oddSegment: 0 },
+      { tableKeys: 0, rejectedNonEmpty: 0 }
+    );
+    expect(status).toBe('WARN');
+  });
+
   test('FAILs when the parser rejects a document-table key that holds data', () => {
     const { status, detail } = reportDocumentKeyShape(clean, { ...audit, rejectedNonEmpty: 2 });
     expect(status).toBe('FAIL');
