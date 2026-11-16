@@ -324,6 +324,16 @@ describe('LiveCopilotDatabase — cache accessors', () => {
     expect(live.getUpcomingRecurringsCache()).toBe(live.getUpcomingRecurringsCache());
   });
 
+  test('getBalanceHistoryCache returns the same Map across calls (#870)', () => {
+    // Map identity is the mechanism: LiveBalanceHistoryTools aliases it, and a
+    // transaction write clears it in place.
+    const live = mkLive();
+    expect(live.getBalanceHistoryCache()).toBe(live.getBalanceHistoryCache());
+    live.getBalanceHistoryCache().set('k', { rows: [], fetched_at: 0, expires_at: 1 });
+    live.invalidateTransactionDerivedSnapshots();
+    expect(live.getBalanceHistoryCache().size).toBe(0);
+  });
+
   test('upcomingRecurringsCache stores UpcomingRecurringNode shape and serves cached reads', async () => {
     const live = mkLive();
     const cache = live.getUpcomingRecurringsCache();

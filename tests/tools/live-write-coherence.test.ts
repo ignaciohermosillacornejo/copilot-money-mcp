@@ -1327,18 +1327,32 @@ const SNAPSHOT_PROBES: Record<
   },
   balance_history: {
     warm: async (db) => {
-      db.getBalanceHistoryCache().set('probe', { rows: [], fetched_at: Date.now() });
+      const now = Date.now();
+      db.getBalanceHistoryCache().set('probe', {
+        rows: [],
+        fetched_at: now,
+        expires_at: now + 60_000,
+      });
     },
     // Undefined once empty, like a dropped SnapshotCache.
     peek: (db) => (db.getBalanceHistoryCache().size > 0 ? db.getBalanceHistoryCache() : undefined),
   },
 };
 
-/** Warm every transaction-derived snapshot so a drop is observable. */
-async function warmSnapshots(liveDb: LiveCopilotDatabase): Promise<void> {
-  for (const key of LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS) {
+/**
+ * Warm the named snapshots (by default every transaction-derived one) so a
+ * drop is observable. The one warm path for every test in this file.
+ */
+async function warmSnapshots(
+  liveDb: LiveCopilotDatabase,
+  keys: readonly SnapshotKey[] = LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS
+): Promise<void> {
+  for (const key of keys) {
     await SNAPSHOT_PROBES[key].warm(liveDb);
-    expect(SNAPSHOT_PROBES[key].peek(liveDb)).toBeDefined();
+    expect({ key, warm: SNAPSHOT_PROBES[key].peek(liveDb) !== undefined }).toEqual({
+      key,
+      warm: true,
+    });
   }
 }
 
@@ -1853,22 +1867,23 @@ const NON_TRANSACTION_WRITES: Record<
 };
 
 /** Every write tool, its family, and how to run it successfully. */
-function writeTable(): Record<
-  string,
-  { family: WriteFamily; mocks: MockResponsesByOp; args: Record<string, unknown> }
-> {
-  const table: ReturnType<typeof writeTable> = { ...NON_TRANSACTION_WRITES };
-  for (const [name, c] of Object.entries(CASES)) {
-    table[name] = { family: 'transaction', mocks: c.mocks, args: c.args };
-  }
-  return table;
-}
+const WRITE_TABLE: Readonly<
+  Record<string, { family: WriteFamily; mocks: MockResponsesByOp; args: Record<string, unknown> }>
+> = {
+  ...NON_TRANSACTION_WRITES,
+  ...Object.fromEntries(
+    Object.entries(CASES).map(([name, c]) => [
+      name,
+      { family: 'transaction' as const, mocks: c.mocks, args: c.args },
+    ])
+  ),
+};
 
 describe('every write drops the snapshots its family derives (#868, #870)', () => {
   test('every write tool in the registry is classified, and only those', () => {
     const writeTools = WRITE_TOOL_DEFS.map((def) => def.name).sort();
     expect(writeTools.length).toBeGreaterThan(0);
-    expect(Object.keys(writeTable()).sort()).toEqual(writeTools);
+    expect(Object.keys(WRITE_TABLE).sort()).toEqual(writeTools);
   });
 
   test("every derived snapshot has a probe, and every probe is some family's", () => {
@@ -1892,20 +1907,14 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
     }
   });
 
-  test.each(Object.keys(writeTable()))(
+  test.each(Object.keys(WRITE_TABLE))(
     "%s: success drops exactly its family's snapshots",
     async (toolName) => {
-      const c = writeTable()[toolName]!;
+      const c = WRITE_TABLE[toolName]!;
       const { call, read, liveDb } = setup(c.mocks);
       await read();
       const keys = Object.keys(SNAPSHOT_PROBES) as SnapshotKey[];
-      for (const key of keys) {
-        await SNAPSHOT_PROBES[key].warm(liveDb);
-        expect({ key, warm: SNAPSHOT_PROBES[key].peek(liveDb) !== undefined }).toEqual({
-          key,
-          warm: true,
-        });
-      }
+      await warmSnapshots(liveDb, keys);
 
       await call(toolName, c.args);
 
@@ -1913,6 +1922,22 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
       expect(dropped.sort()).toEqual([...FAMILY_DROPS[c.family]].sort());
     }
   );
+
+  test("create_recurring drops its seed transaction's cached month (#911 review)", async () => {
+    // The seed row joins the series server-side (unverified:
+    // Mutation.createRecurring:links-seed-transaction), so the next read of
+    // its month goes to the server rather than serving it unlinked.
+    const c = WRITE_TABLE.create_recurring!;
+    const { call, read, fetches } = setup(c.mocks);
+    await read();
+    expect((await read())._cache_hit).toBe(true);
+    const before = fetches();
+
+    await call('create_recurring', c.args);
+
+    expect((await read())._cache_hit).toBe(false);
+    expect(fetches()).toBeGreaterThan(before);
+  });
 
   test('get_balance_history_live refetches after a transaction write (#870)', async () => {
     let historyFetches = 0;

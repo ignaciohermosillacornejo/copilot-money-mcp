@@ -232,11 +232,12 @@ export class RefreshCacheTool {
         flushed.investment_balance = true;
         break;
       case 'balance_history':
-        // A Map<tuple, snapshot> keyed by LiveBalanceHistoryTools (held on
-        // LiveCopilotDatabase so transaction writes can drop it too).
-        // clearCache() drops every cached tuple at once.
-        // Only set flushed.balance_history when the tool was actually wired
-        // (no-op semantics: "was flushed" not "operation acknowledged").
+        // A Map<tuple, snapshot> keyed by LiveBalanceHistoryTools and held on
+        // LiveCopilotDatabase (so transaction writes can drop it too, #870).
+        // The map is reachable through this.live, but the tool handle stays:
+        // it survives only to decide the flushed flag, which is set when the
+        // tool was actually wired (no-op semantics: "was flushed" not
+        // "operation acknowledged").
         if (this.balanceHistory) {
           this.balanceHistory.clearCache();
           flushed.balance_history = true;

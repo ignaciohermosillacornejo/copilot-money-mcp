@@ -6195,6 +6195,10 @@ export class CopilotMoneyTools {
         rule: null,
         payments: [],
       });
+      // The seed row now belongs to the series (unverified:
+      // Mutation.createRecurring:links-seed-transaction), so its cached month
+      // would keep serving it unlinked; the next read refetches it.
+      this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);
       this.afterRecurringWrite();
       return {
         success: true,

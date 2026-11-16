@@ -71,7 +71,14 @@ const DEFAULT_MAX_TX_ROWS = 20_000;
 export interface BalanceHistoryCacheEntry {
   rows: BalanceHistoryPointNode[];
   fetched_at: number;
+  /** Epoch ms after which the entry is stale; set by whoever fetched it. */
+  expires_at: number;
 }
+
+/** A snapshot some write family drops (see the two *_DERIVED_SNAPSHOTS lists). */
+type DerivedSnapshotKey =
+  | (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number]
+  | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number];
 
 export class LiveCopilotDatabase {
   private readonly verbose: boolean;
@@ -1053,23 +1060,36 @@ export class LiveCopilotDatabase {
 
   /**
    * The snapshots a recurring write (create, update, set state, delete) can
-   * make stale (#868): `upcoming_recurrings` (1 h) is computed from each
-   * recurring's amount, next date and state. The `recurring` snapshot itself
-   * is not here: each write patches it in place, and drops it only on a
-   * failure that may have applied. Linking a transaction is a transaction
-   * write and drops TRANSACTION_DERIVED_SNAPSHOTS, which include this list.
-   * Every other refresh_cache scope is in
-   * SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES, checked the same way.
+   * make stale (#868):
+   *  - `upcoming_recurrings` (1 h): computed from each recurring's amount,
+   *    next date and state;
+   *  - `monthly_spend` (1 h): its total leaves out every transaction linked
+   *    to a recurring (measured, #823/#844), and a create links its seed
+   *    transaction while a delete may unlink the series' transactions
+   *    (unverified: Mutation.createRecurring:links-seed-transaction,
+   *    Mutation.deleteRecurring:unlinks-transactions).
+   * The `recurring` snapshot itself is not here: each write patches it in
+   * place, and drops it only on a failure that may have applied. Linking a
+   * transaction is a transaction write and drops
+   * TRANSACTION_DERIVED_SNAPSHOTS, which include this list. Every other
+   * refresh_cache scope is in SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES,
+   * checked the same way.
    */
-  static readonly RECURRING_DERIVED_SNAPSHOTS = ['upcoming_recurrings'] as const;
+  static readonly RECURRING_DERIVED_SNAPSHOTS = ['upcoming_recurrings', 'monthly_spend'] as const;
 
   /** refresh_cache scopes a recurring write leaves alone, and why. */
   static readonly SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES: Readonly<Record<string, string>> = {
     recurring: "the write's own snapshot, patched in place on success",
-    transactions: 'a recurring write sends no transaction edit',
+    // Not a claim that no row changes server-side: a create links its seed
+    // transaction (create_recurring drops that row's cached month itself), and
+    // a delete may unlink the series' rows, which the write cannot find by id;
+    // those stay cached until their TTL. Both unverified (see the ledger
+    // entries Mutation.createRecurring:links-seed-transaction and
+    // Mutation.deleteRecurring:unlinks-transactions).
+    transactions:
+      'a month-keyed window, not a snapshot; create_recurring drops the seed row month itself',
     accounts: 'balances come from transactions, which a recurring write does not change',
     networth: 'a sum of account balances (same reason)',
-    monthly_spend: 'the spend series comes from transactions (same reason)',
     balance_history: 'account balances over time (same reason)',
     categories: 'reference data',
     budgets: 'served from the categories list',
@@ -1083,16 +1103,16 @@ export class LiveCopilotDatabase {
     investment_prices: 'market data',
   };
 
+  private derivedSnapshotsByKey?: Record<DerivedSnapshotKey, { invalidate(): void }>;
+
   /**
-   * Every derived snapshot by key. A Record over both lists, so a key added to
-   * either without a cache here is a type error rather than a silent miss.
+   * Every derived snapshot by key, built once (the caches are fixed for the
+   * instance's life; balance_history is cleared in place, never replaced). A
+   * Record over both lists, so a key added to either without a cache here is
+   * a type error rather than a silent miss.
    */
-  private derivedSnapshots(): Record<
-    | (typeof LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS)[number]
-    | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number],
-    { invalidate(): void }
-  > {
-    return {
+  private derivedSnapshots(): Record<DerivedSnapshotKey, { invalidate(): void }> {
+    this.derivedSnapshotsByKey ??= {
       accounts: this.accountsCache,
       networth: this.networthCache,
       monthly_spend: this.monthlySpendCache,
@@ -1100,6 +1120,7 @@ export class LiveCopilotDatabase {
       recurring: this.recurringCache,
       balance_history: { invalidate: () => this.balanceHistoryCache.clear() },
     };
+    return this.derivedSnapshotsByKey;
   }
 
   /**

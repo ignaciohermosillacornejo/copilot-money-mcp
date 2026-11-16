@@ -742,6 +742,29 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'which costs one request each if the assumption is wrong.',
   },
   {
+    surface: 'Mutation.createRecurring:links-seed-transaction',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'ASSUMED (#911 review): creating a recurring from a transaction links that transaction ' +
+      'to the new series, as add_transaction_to_recurring does. Not probed. Acted on ' +
+      "conservatively: create_recurring drops the seed row's cached live month and the " +
+      'monthly-spend snapshot (whose total leaves out recurring-linked transactions, #823/#844; ' +
+      'LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS), one request each if wrong.',
+  },
+  {
+    surface: 'Mutation.deleteRecurring:unlinks-transactions',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      "ASSUMED (#911 review): deleting a recurring unlinks the series' transactions, so they " +
+      're-enter non-recurring spend. Not probed. delete_recurring drops the monthly-spend ' +
+      'snapshot (LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS); the unlinked rows themselves ' +
+      'are not known by id, so their cached live months are left to their TTL.',
+  },
+  {
     surface: 'Mutation.addTransactionToRecurring:sets-category',
     kind: 'operation',
     oracle: null,

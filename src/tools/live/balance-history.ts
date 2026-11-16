@@ -95,6 +95,9 @@ export class LiveBalanceHistoryTools {
    * Per-(itemId, accountId, timeFrame) cache, held by LiveCopilotDatabase.
    * Bounded by the small product of accounts × timeFrames (see class JSDoc).
    * Cleared by `clearCache()` on refresh_cache and by every transaction write.
+   * Each entry carries its own `expires_at`, set by the instance that fetched
+   * it, so two instances over one LiveCopilotDatabase never disagree about
+   * whether a shared entry is fresh.
    */
   private readonly cache: Map<string, BalanceHistoryCacheEntry>;
   private readonly ttlMs: number;
@@ -125,7 +128,7 @@ export class LiveBalanceHistoryTools {
 
     let entry = this.cache.get(key);
     let hit = false;
-    if (entry !== undefined && startedAt - entry.fetched_at < this.ttlMs) {
+    if (entry !== undefined && startedAt < entry.expires_at) {
       hit = true;
     } else {
       const rows = await fetchAccountBalanceHistory(this.live.getClient(), {
@@ -133,7 +136,8 @@ export class LiveBalanceHistoryTools {
         accountId: args.account_id,
         timeFrame: args.time_frame,
       });
-      entry = { rows, fetched_at: Date.now() };
+      const fetchedAt = Date.now();
+      entry = { rows, fetched_at: fetchedAt, expires_at: fetchedAt + this.ttlMs };
       this.cache.set(key, entry);
     }
 
