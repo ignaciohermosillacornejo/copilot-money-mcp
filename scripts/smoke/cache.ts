@@ -484,7 +484,7 @@ export function reportDocumentKeyShape(
   if (audit.rejectedNonEmpty > 0) {
     problems.push(
       `${audit.rejectedNonEmpty} remote_document key(s) with data are rejected by the key ` +
-        `parser and never reach the decoder`
+        `parser (unreadable key shape, odd path, or skip list) and never reach the decoder`
     );
   }
   if (problems.length > 0) {
@@ -859,23 +859,24 @@ async function main(): Promise<void> {
   }
 
   const elapsed = ((Date.now() - started) / 1000).toFixed(1);
-  record(
-    'raw scan',
-    'PASS',
-    `${scanned} documents across ${raw.size} collection patterns in ${elapsed}s`
-  );
-
   // ---------------------------------------------------------------------
   // Check 0 — document key shape (#807).
   //
   // Every check below compares against what `iterateDocuments` yields, so it
-  // must first be established that what it yields are documents.
+  // must first be established that what it yields are documents. Reported before
+  // the raw-scan line, whose count is only meaningful if this holds.
   // ---------------------------------------------------------------------
   const keyVerdict = reportDocumentKeyShape(
     { ...keyShape, yielded: scanned },
     await auditDocumentTable(dbPath)
   );
   record('document key shape', keyVerdict.status, keyVerdict.detail);
+
+  record(
+    'raw scan',
+    'PASS',
+    `${scanned} documents across ${raw.size} collection patterns in ${elapsed}s`
+  );
 
   const all = await decodeAllCollections(dbPath);
 

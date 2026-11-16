@@ -347,6 +347,28 @@ describe('leveldb-reader', () => {
         expect(parseDocumentKey(control)).toBeNull();
       });
 
+      test('an escaped NUL inside a segment rejects the key rather than truncating it', () => {
+        // Second segment is "u\01": 0x00 0xFF is the escape, not the terminator.
+        // Reading up to the 0x00 would keep two segments and return users/u.
+        const key = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          stringComponent(0xbe, 'users'),
+          Buffer.from([0xbe]),
+          Buffer.from('u', 'utf8'),
+          Buffer.from([0x00, 0xff]),
+          Buffer.from('1', 'utf8'),
+          Buffer.from([0x00, 0x01]),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(key)).toBeNull();
+      });
+
+      test('auditDocumentTable refuses a missing path like iterateDocuments does', async () => {
+        await expect(auditDocumentTable(path.join(FIXTURES_DIR, 'no-such-db'))).rejects.toThrow(
+          'Database path not found'
+        );
+      });
+
       test('a table name followed by 0x00 and a byte other than 0x01 is not the table', () => {
         // 0x00 0xFF is ordered-code's escape for a literal NUL inside a string,
         // so the name continues past `remote_document`.
