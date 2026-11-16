@@ -82,6 +82,12 @@ replaced by a SKIP (test-matrix.md, How to extend).
    again; right after a write, wait 30 seconds and reload once. If an input
    misbehaves (masked or content-editable fields), stop and ask the user to do
    that one step; never commit a value you have not read back.
+8. **Raw GraphQL only for a named unverified surface.** A probe that calls the
+   wrappers in `src/core/graphql/` directly skips every refusal the MCP tools
+   make, so it is allowed only to settle a named `unverified` ledger entry, only
+   with the user's yes in chat for that run, and only on rows logged in the
+   cleanup ledger (W-24 is the pattern). The run itself never edits the repo:
+   a ledger reclass it earns lands in a follow-up PR carrying its evidence.
 8. **A write that errors may still have landed.** On any write error do not
    retry. That includes `writeMayHaveApplied`, a bulk edit's "N/M succeeded",
    `deleted: false`, and a shape error after the call. First run
@@ -157,8 +163,10 @@ description, or Copilot's own behaviour.
    count only rows dated after the reset. If the user does not know the reset
    date, record it as unknown and do not judge W-12, CL-04 and CL-07 this run:
    note them as SKIP (reset date unknown) in the local report only, and in
-   `test-matrix.md` give their Last run cells just the usual
-   `; not re-run <date>` stamp. A recorded FAIL is never overwritten by a SKIP.
+   `test-matrix.md` append the usual `; not re-run <date>` stamp to their Last
+   run cells, keeping any `; expectation changed by PR #N, needs re-run` marker
+   (only a run that repeats the row clears that). A recorded FAIL is never
+   overwritten by a SKIP.
 2. After each write, check it in live **and** in the web.
 3. Coherence is the part most likely to regress, and it is invisible unless you
    test a **cold month** (P-09): it is cached for a week. Read it once, write
