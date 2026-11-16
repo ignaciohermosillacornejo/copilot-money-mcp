@@ -59,10 +59,10 @@ filters that exist in both modes (`category`, `exclude_excluded`) are not swept 
 
 ## Residual gaps
 
-- The returned `category_name` field still differs for a category id that neither mode knows:
-  cache mode echoes or title-cases the id (`getCategoryName`), live mode omits the key. The
-  rules no longer read that fallback (they use `lookupKnownCategoryName`), but the field does.
-  Tracked as #867.
+- ~~The returned `category_name` field still differs for a category id that neither mode knows:
+  cache mode echoes or title-cases the id (`getCategoryName`), live mode omits the key.~~
+  Fixed in #909 (#867): the field now uses `lookupKnownCategoryName` too, pinned by
+  `tests/tools/category-name-parity.test.ts`.
 - The Plaid-taxonomy name tier is cache-only: an old cache document can carry a Plaid id that
   resolves to a name, while live rows carry opaque ids only. The same goes for the id
   keyword checks in `inSpendingCategory`. Both widen cache mode; neither makes one row answer

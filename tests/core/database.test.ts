@@ -220,6 +220,24 @@ describe('CopilotDatabase', () => {
       const foodCategory = result.find((c) => c.category_id === 'food_dining');
       expect(foodCategory?.name).toBe('Food & Drink');
     });
+
+    test('an id in neither name map gets no name, not the id (#867)', async () => {
+      (db as any)._transactions = [
+        ...mockTransactions,
+        {
+          transaction_id: 'Ux9qK5aD3gJ8cX4hY6eC',
+          amount: 10,
+          date: '2024-02-12',
+          name: 'Synthetic',
+          category_id: 'retired_custom_bucket',
+          account_id: 'acc1',
+        },
+      ];
+      const result = await db.getCategories();
+      const unknown = result.find((c) => c.category_id === 'retired_custom_bucket');
+      expect(unknown).toBeDefined();
+      expect(unknown?.name).toBeUndefined();
+    });
   });
 
   describe('availability', () => {
