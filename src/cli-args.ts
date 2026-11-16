@@ -13,12 +13,12 @@
  * by a literal `true` / `false`.
  */
 
-import { validBrowserNames } from './core/auth/browser-selection.js';
+import { BROWSER_IDS } from './core/auth/browser-selection.js';
 
 export interface CliFlag {
   /** Long name, including the leading dashes. */
   name: string;
-  /** Short spellings that mean the same flag (bare form only). */
+  /** Short spellings that mean the same flag. */
   aliases?: readonly string[];
   /** True when the flag carries a value; false for an on/off switch. */
   takesValue: boolean;
@@ -26,7 +26,10 @@ export interface CliFlag {
   published: boolean;
   /** server.json `format` for a value-taking flag, when it is not a plain string. */
   format?: 'filepath' | 'number';
-  /** The only values the flag accepts, for server.json `choices`. */
+  /**
+   * The canonical values the flag accepts, for server.json `choices`. Input
+   * may also use an alias (`--browser operagx`); aliases are not advertised.
+   */
   choices?: () => string[];
 }
 
@@ -35,7 +38,7 @@ export const CLI_FLAGS = [
   { name: '--timeout', takesValue: true, published: false, format: 'number' },
   { name: '--write', takesValue: false, published: true },
   { name: '--live-reads', takesValue: false, published: true },
-  { name: '--browser', takesValue: true, published: true, choices: validBrowserNames },
+  { name: '--browser', takesValue: true, published: true, choices: () => [...BROWSER_IDS] },
   { name: '--browser-profile', takesValue: true, published: true },
   { name: '--browser-data-dir', takesValue: true, published: true, format: 'filepath' },
   { name: '--verbose', aliases: ['-v'], takesValue: false, published: false },
@@ -65,10 +68,22 @@ export interface ParsedCliArgs {
   warnings: string[];
 }
 
+/** Every spelling a flag answers to: its name, then its aliases. */
+export function flagSpellings(flag: CliFlag): string[] {
+  return [flag.name, ...(flag.aliases ?? [])];
+}
+
 const BY_SPELLING = new Map<string, DeclaredFlag>();
 for (const flag of CLI_FLAGS) {
-  BY_SPELLING.set(flag.name, flag);
-  if ('aliases' in flag) for (const alias of flag.aliases) BY_SPELLING.set(alias, flag);
+  for (const spelling of flagSpellings(flag)) BY_SPELLING.set(spelling, flag);
+}
+
+/** True for `--help`, `-h`, or either with `=true` (any case). */
+function asksForHelp(arg: string): boolean {
+  const eq = arg.indexOf('=');
+  const spelling = eq === -1 ? arg : arg.slice(0, eq);
+  if (BY_SPELLING.get(spelling)?.name !== '--help') return false;
+  return eq === -1 || arg.slice(eq + 1).toLowerCase() === 'true';
 }
 
 /**
@@ -78,6 +93,8 @@ for (const flag of CLI_FLAGS) {
  *   a value other than true/false, or an unknown `--flag=value`. An unknown bare
  *   argument is skipped with a warning rather than refused, so a config carrying a
  *   flag this version does not know still starts (it was skipped silently before).
+ *   A help request anywhere wins over every other argument, so `--db-path --help`
+ *   prints help rather than failing on the missing path.
  */
 export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
   const values: Partial<Record<ValueFlagName, string>> = {};
@@ -86,16 +103,23 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
   ) as Record<BooleanFlagName, boolean>;
   const warnings: string[] = [];
 
+  if (argv.some(asksForHelp)) {
+    booleans['--help'] = true;
+    return { values, booleans, warnings };
+  }
+
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i] as string;
-    const eq = arg.startsWith('--') ? arg.indexOf('=') : -1;
+    // Any dashed token may carry "=value", short aliases included (`-v=true`).
+    const eq = arg.startsWith('-') ? arg.indexOf('=') : -1;
     const spelling = eq === -1 ? arg : arg.slice(0, eq);
     const inline = eq === -1 ? undefined : arg.slice(eq + 1);
     const flag = BY_SPELLING.get(spelling);
 
     if (!flag) {
       if (inline !== undefined) {
-        throw new CliArgError(`Unknown option ${spelling} (in "${arg}"). Run with --help.`);
+        // The value is not echoed: it may be a secret or a path with a username.
+        throw new CliArgError(`Unknown option ${spelling}. Run with --help.`);
       }
       warnings.push(`Ignoring unrecognised argument "${arg}" (see --help)`);
       continue;
@@ -105,9 +129,15 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
       let value = inline;
       if (value === undefined) {
         const next = argv[i + 1];
-        // A following flag is not a value: `--db-path --write` must not read
-        // "--write" as the path.
-        if (next !== undefined && !next.startsWith('--')) {
+        // A following flag is not a value: `--db-path --write` or `--db-path -v`
+        // must not read the flag as the path. Short tokens are matched exactly,
+        // so `--timeout -5` is still read and refused as an invalid value.
+        const nextSpelling = next?.split('=')[0];
+        if (
+          next !== undefined &&
+          !next.startsWith('--') &&
+          !BY_SPELLING.has(nextSpelling as string)
+        ) {
           value = next;
           i++;
         }
@@ -119,13 +149,14 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
       continue;
     }
 
-    let state = inline;
+    let state = inline?.toLowerCase();
     // A client may render a boolean the way it renders a value, as
     // `--write false`. Reading that as a bare `--write` followed by a stray
     // "false" would turn writes ON, so a following literal true/false is
     // taken as the flag's value.
-    if (state === undefined && (argv[i + 1] === 'true' || argv[i + 1] === 'false')) {
-      state = argv[i + 1];
+    const following = argv[i + 1]?.toLowerCase();
+    if (state === undefined && (following === 'true' || following === 'false')) {
+      state = following;
       i++;
     }
     if (state === undefined || state === 'true') {
@@ -133,10 +164,8 @@ export function parseCliArgs(argv: readonly string[]): ParsedCliArgs {
     } else if (state === 'false') {
       booleans[flag.name] = false;
     } else {
-      throw new CliArgError(`${flag.name} takes no value, or =true / =false (got "${state}")`);
+      throw new CliArgError(`${flag.name} takes no value, or =true / =false (got "${inline}")`);
     }
-    // Help is answered as soon as it is asked for, whatever follows.
-    if (flag.name === '--help' && booleans[flag.name]) break;
   }
 
   return { values, booleans, warnings };

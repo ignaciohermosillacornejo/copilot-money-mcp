@@ -16,7 +16,7 @@
  *     src/cli-args.ts), both ways: every published flag is listed and every
  *     listed one is published; an on/off flag says `format: "boolean"`, a
  *     value-taking one carries the flag's `format` (`filepath` for a path) and
- *     its exact `choices` (`--browser`: `validBrowserNames()`). A client that
+ *     its exact `choices` (`--browser`: the canonical `BROWSER_IDS`). A client that
  *     follows server.json renders the command line from these fields, so a flag
  *     described as the wrong kind is passed in a form the CLI does not read.
  *
