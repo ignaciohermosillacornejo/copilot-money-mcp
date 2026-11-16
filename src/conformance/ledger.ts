@@ -761,8 +761,8 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
     evidence:
       "ASSUMED (#911 review): deleting a recurring unlinks the series' transactions, so they " +
       're-enter non-recurring spend. Not probed. delete_recurring drops the monthly-spend ' +
-      'snapshot (LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS); the unlinked rows themselves ' +
-      'are not known by id, so their cached live months are left to their TTL.',
+      'snapshot (LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS); the cached live months of ' +
+      'the unlinked rows are dropped by a field scan (rows whose recurringId matches).',
   },
   {
     surface: 'Mutation.editRecurring:recategorizes-series',
@@ -773,8 +773,8 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       "ASSUMED (#911 review): changing a recurring's category may recategorize the series' " +
       'transactions, as linking one sets its category (Mutation.addTransactionToRecurring:' +
       'sets-category). Not probed. update_recurring drops the monthly-spend snapshot ' +
-      '(LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS); the rows are not known by id, so ' +
-      'their cached live months are left to their TTL.',
+      '(LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS) and, when the category changes, the ' +
+      'cached live months holding a row whose recurringId matches.',
   },
   {
     surface: 'Mutation.deleteCategory:uncategorizes-transactions',
@@ -785,8 +785,18 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'ASSUMED (#911 review): deleting a category leaves its transactions uncategorized, which ' +
       'takes them out of the monthly-spend total (it leaves out uncategorized rows, measured ' +
       '#844). Not probed. delete_category drops the monthly-spend snapshot ' +
-      '(LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS); the rows are not known by id, so ' +
-      'their cached live months are left to their TTL.',
+      '(LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS) and the cached live months holding a ' +
+      'row whose categoryId matches.',
+  },
+  {
+    surface: 'Mutation.deleteTag:untags-transactions',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'ASSUMED (#911 review): deleting a tag removes it from the transactions that carried ' +
+      'it. Not probed. delete_tag drops the cached live months holding a row that carries ' +
+      'the tag, so the next read refetches them; one request per month if wrong.',
   },
   {
     surface: 'Mutation.addTransactionToRecurring:sets-category',

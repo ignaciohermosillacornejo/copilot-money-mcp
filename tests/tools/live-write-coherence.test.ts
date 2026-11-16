@@ -1776,8 +1776,10 @@ const FAMILY_DROPS: Record<WriteFamily, readonly SnapshotKey[]> = {
   // update_category, delete_category, set_budget: monthly spend's budget
   // comparison and its category-based exclusions (#911 review).
   category: LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS,
-  // create_category and the tag writes: a new category holds no rows, and no
-  // probed snapshot is computed from tags. Each patches its own snapshot.
+  // Writes that drop no derived snapshot: create_category (a new category
+  // holds no rows) and the tag writes (no probed snapshot is computed from
+  // tags; delete_tag drops the cached months of rows carrying the tag, tested
+  // below). Each patches its own snapshot.
   reference: [],
 };
 
@@ -1825,6 +1827,7 @@ const NON_TRANSACTION_WRITES: Record<
     args: { recurring_id: RECURRING_ID },
   },
   create_category: {
+    // Not 'category': a new category holds no rows, so no monthly-spend input moves.
     family: 'reference',
     mocks: {
       CreateCategory: {
@@ -1993,6 +1996,94 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
 
     await expect(call('create_recurring', WRITE_TABLE.create_recurring!.args)).rejects.toThrow();
 
+    expect((await read())._cache_hit).toBe(true);
+  });
+
+  /**
+   * Writes whose response names no transactions but whose effect reaches
+   * every row linked to the entity (#911 review): each must drop the cached
+   * months holding such a row. `link` makes one cached row linked.
+   */
+  const LINKED_ROW_WRITES: Array<
+    [string, MockResponsesByOp, Record<string, unknown>, Partial<TransactionNode>]
+  > = [
+    [
+      'delete_recurring',
+      NON_TRANSACTION_WRITES.delete_recurring!.mocks,
+      NON_TRANSACTION_WRITES.delete_recurring!.args,
+      { recurringId: RECURRING_ID },
+    ],
+    [
+      'update_recurring',
+      NON_TRANSACTION_WRITES.update_recurring!.mocks,
+      { recurring_id: RECURRING_ID, category_id: CAT_NEW },
+      { recurringId: RECURRING_ID },
+    ],
+    [
+      'delete_category',
+      NON_TRANSACTION_WRITES.delete_category!.mocks,
+      NON_TRANSACTION_WRITES.delete_category!.args,
+      { categoryId: CAT_NEW },
+    ],
+    [
+      'delete_tag',
+      NON_TRANSACTION_WRITES.delete_tag!.mocks,
+      NON_TRANSACTION_WRITES.delete_tag!.args,
+      { tags: [TAG_NODE] },
+    ],
+  ];
+
+  /** Warm the cold month, link one cached row, and confirm it is still cached. */
+  async function warmLinked(mocks: MockResponsesByOp, link: Partial<TransactionNode>) {
+    const env = setup(mocks);
+    await env.read();
+    // A read-shaped row; the write-through takes the mutation row type.
+    env.liveDb.upsertLiveTransaction({ ...seedById(TX_UPDATE), ...link } as never);
+    expect((await env.read())._cache_hit).toBe(true);
+    return env;
+  }
+
+  test.each(LINKED_ROW_WRITES)(
+    '%s: success drops the cached months of the rows it links (#911 review)',
+    async (toolName, mocks, args, link) => {
+      const { call, read } = await warmLinked(mocks, link);
+      await call(toolName, args);
+      expect((await read())._cache_hit).toBe(false);
+    }
+  );
+
+  test.each(LINKED_ROW_WRITES)(
+    '%s: a failure that may have applied drops them too (#911 review)',
+    async (toolName, mocks, args, link) => {
+      const op = Object.keys(mocks)[0]!;
+      const field = Object.keys((mocks as Record<string, object>)[op]!)[0]!;
+      const { call, read } = await warmLinked(
+        { [op]: unusablePayloadError(op, field, null) },
+        link
+      );
+      await expect(call(toolName, args)).rejects.toThrow();
+      expect((await read())._cache_hit).toBe(false);
+    }
+  );
+
+  test.each(LINKED_ROW_WRITES)(
+    '%s: a rejection that cannot have written keeps them (#911 review)',
+    async (toolName, mocks, args, link) => {
+      const op = Object.keys(mocks)[0]!;
+      const rejected = new GraphQLError('USER_ACTION_REQUIRED', 'nope', op, 200, [], {
+        requestReachedServer: true,
+      });
+      const { call, read } = await warmLinked({ [op]: rejected }, link);
+      await expect(call(toolName, args)).rejects.toThrow();
+      expect((await read())._cache_hit).toBe(true);
+    }
+  );
+
+  test('update_recurring without a category keeps the linked rows cached (#911 review)', async () => {
+    const { call, read } = await warmLinked(NON_TRANSACTION_WRITES.update_recurring!.mocks, {
+      recurringId: RECURRING_ID,
+    });
+    await call('update_recurring', { recurring_id: RECURRING_ID, name: 'Gym' });
     expect((await read())._cache_hit).toBe(true);
   });
 

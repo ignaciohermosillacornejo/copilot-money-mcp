@@ -70,8 +70,13 @@ const DEFAULT_MAX_TX_ROWS = 20_000;
 /** One cached get_balance_history_live response; see getBalanceHistoryCache. */
 export interface BalanceHistoryCacheEntry {
   rows: BalanceHistoryPointNode[];
+  /** Epoch ms of the fetch; reported in the `_cache_*_fetched_at` fields. */
   fetched_at: number;
-  /** Epoch ms after which the entry is stale; set by whoever fetched it. */
+  /**
+   * Epoch ms after which the entry is stale, set by whoever fetched it. Not
+   * derivable from `fetched_at`: instances sharing the map may use different
+   * TTLs, and the entry's own expiry is what keeps them agreeing.
+   */
   expires_at: number;
 }
 
@@ -1007,11 +1012,21 @@ export class LiveCopilotDatabase {
   invalidateLiveTransactionMonths(ids: readonly string[]): void {
     if (ids.length === 0) return;
     const wanted = new Set(ids);
+    this.invalidateLiveMonthsMatching((row) => wanted.has(row.id));
+  }
+
+  /**
+   * Drop every cached month holding a row that matches `predicate`. For a
+   * write whose response names no transactions but whose server-side effect
+   * reaches rows by a field they carry (#911 review): deleting a recurring or
+   * a category or a tag, or recategorizing a recurring, can change every row
+   * linked to it, and only the cached rows can serve stale, so a field scan
+   * finds all of them. A month with no match is left alone.
+   */
+  invalidateLiveMonthsMatching(predicate: (row: TransactionNode) => boolean): void {
     const stale = this.transactionsWindowCache
       .cachedMonths()
-      .filter((m) =>
-        this.transactionsWindowCache.entriesForMonth(m).some((row) => wanted.has(row.id))
-      );
+      .filter((m) => this.transactionsWindowCache.entriesForMonth(m).some(predicate));
     if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
   }
 
@@ -1082,15 +1097,15 @@ export class LiveCopilotDatabase {
   static readonly SNAPSHOTS_NOT_DROPPED_BY_RECURRING_WRITES: Readonly<Record<string, string>> = {
     recurring: "the write's own snapshot, patched in place on success",
     // Not a claim that no row changes server-side: a create links its seed
-    // transaction (create_recurring drops that row's cached month itself), a
-    // delete may unlink the series' rows, and an update of the category may
-    // recategorize them; the write cannot find those rows by id, so they stay
-    // cached until their TTL. All unverified (see the ledger entries
+    // transaction, a delete may unlink the series' rows, and an update of the
+    // category may recategorize them (all unverified: see the ledger entries
     // Mutation.createRecurring:links-seed-transaction,
     // Mutation.deleteRecurring:unlinks-transactions and
-    // Mutation.editRecurring:recategorizes-series).
+    // Mutation.editRecurring:recategorizes-series). Those writes drop the
+    // affected cached months themselves: by id for the seed row, by
+    // recurringId for the series (invalidateLiveMonthsMatching).
     transactions:
-      'a month-keyed window, not a snapshot; create_recurring drops the seed row month itself',
+      'a month-keyed window, not a snapshot; each write drops the months of the rows it touches',
     accounts: 'balances come from transactions, which a recurring write does not change',
     networth: 'a sum of account balances (same reason)',
     balance_history: 'account balances over time (same reason)',
@@ -1126,8 +1141,10 @@ export class LiveCopilotDatabase {
     budgets: 'served from the categories list, patched in place by set_budget',
     // Not a claim that no row changes server-side: a deleted category's rows
     // may be uncategorized (unverified: Mutation.deleteCategory:uncategorizes-
-    // transactions); they are not known by id, so their months keep their TTL.
-    transactions: 'a month-keyed window, not a snapshot; affected rows are not known by id',
+    // transactions). delete_category drops the cached months holding a row
+    // with that categoryId itself (invalidateLiveMonthsMatching).
+    transactions:
+      "a month-keyed window, not a snapshot; delete_category drops its rows' months itself",
     accounts: 'balances come from amounts, which a category write does not change',
     networth: 'a sum of account balances (same reason)',
     balance_history: 'account balances over time (same reason)',

@@ -961,6 +961,33 @@ export class CopilotMoneyTools {
     this.liveDb?.invalidateCategoryDerivedSnapshots();
   }
 
+  /**
+   * Drop the cached live months holding a row that matches `predicate`
+   * (#911 review): after an accepted write when `e` is undefined, or after a
+   * thrown one that may have applied. For a delete or relink whose response
+   * names no transactions but whose effect reaches every row linked to the
+   * entity; a refetch for nothing if the assumed effect does not happen.
+   */
+  private dropLinkedRowMonths(predicate: (row: TransactionNode) => boolean, e?: unknown): void {
+    if (e !== undefined && !(e instanceof GraphQLError && e.writeMayHaveApplied)) return;
+    this.liveDb?.invalidateLiveMonthsMatching(predicate);
+  }
+
+  /** Live rows linked to recurring `id`. */
+  private static inSeries(id: string): (row: TransactionNode) => boolean {
+    return (row) => row.recurringId === id;
+  }
+
+  /** Live rows in category `id`. */
+  private static inCategory(id: string): (row: TransactionNode) => boolean {
+    return (row) => row.categoryId === id;
+  }
+
+  /** Live rows carrying tag `id`. */
+  private static hasTag(id: string): (row: TransactionNode) => boolean {
+    return (row) => row.tags.some((t) => t.id === id);
+  }
+
   /** YYYY-MM of `date` when it is a string long enough to have one. */
   private static monthOf(date: string | undefined): string[] {
     return date !== undefined && date.length >= 7 ? [date.slice(0, 7)] : [];
@@ -5792,8 +5819,11 @@ export class CopilotMoneyTools {
       const result = await gqlDeleteTag(client, { id: args.tag_id });
       this.db.patchCachedTagDelete(args.tag_id);
       this.liveDb?.patchLiveTagDelete(args.tag_id);
+      // Rows carrying the tag would keep its id until their month expires.
+      this.dropLinkedRowMonths(CopilotMoneyTools.hasTag(args.tag_id));
       return { success: true, tag_id: result.id, deleted: true };
     } catch (e) {
+      this.dropLinkedRowMonths(CopilotMoneyTools.hasTag(args.tag_id), e);
       this.afterPossiblyAppliedEntityWrite(e, 'tags');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
@@ -5881,9 +5911,13 @@ export class CopilotMoneyTools {
       const result = await gqlDeleteCategory(client, { id: args.category_id });
       this.db.patchCachedCategoryDelete(args.category_id);
       this.liveDb?.patchLiveCategoryDelete(args.category_id);
+      // Its rows may be uncategorized (unverified:
+      // Mutation.deleteCategory:uncategorizes-transactions).
+      this.dropLinkedRowMonths(CopilotMoneyTools.inCategory(args.category_id));
       this.afterCategoryWrite();
       return { success: true, category_id: result.id, deleted: true };
     } catch (e) {
+      this.dropLinkedRowMonths(CopilotMoneyTools.inCategory(args.category_id), e);
       this.afterPossiblyAppliedEntityWrite(e, 'categories');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
@@ -6026,9 +6060,13 @@ export class CopilotMoneyTools {
       const result = await gqlDeleteRecurring(client, { id: args.recurring_id });
       this.db.patchCachedRecurringDelete(args.recurring_id);
       this.liveDb?.patchLiveRecurringDelete(args.recurring_id);
+      // The series' rows may be unlinked (unverified:
+      // Mutation.deleteRecurring:unlinks-transactions).
+      this.dropLinkedRowMonths(CopilotMoneyTools.inSeries(args.recurring_id));
       this.afterRecurringWrite();
       return { success: true, recurring_id: result.id, deleted: true };
     } catch (e) {
+      this.dropLinkedRowMonths(CopilotMoneyTools.inSeries(args.recurring_id), e);
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
@@ -6362,9 +6400,17 @@ export class CopilotMoneyTools {
           this.liveDb.patchLiveRecurringUpsert(merged);
         }
       }
+      // A new category may recategorize the series' rows (unverified:
+      // Mutation.editRecurring:recategorizes-series).
+      if (args.category_id !== undefined) {
+        this.dropLinkedRowMonths(CopilotMoneyTools.inSeries(args.recurring_id));
+      }
       this.afterRecurringWrite();
       return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
+      if (args.category_id !== undefined) {
+        this.dropLinkedRowMonths(CopilotMoneyTools.inSeries(args.recurring_id), e);
+      }
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
