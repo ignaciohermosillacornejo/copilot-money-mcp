@@ -913,6 +913,9 @@ describe('write responses use live row field names (#825)', () => {
   /**
    * On a write row, but only when there are tags to report: mapped by the
    * write path itself (toWriteTransactionRow), outside WRITE_ROW_FIELDS.
+   * This label is documentation, not enforcement: the bijection below sees
+   * only the union of the three lists. The conditional half is pinned in
+   * tests/tools/write-tools.test.ts (present with tags, absent without).
    */
   const CONDITIONAL_ON_WRITE_ROWS = ['tag_ids'];
   /** On a split child's row only (SPLIT_CHILD_FIELD). */
@@ -933,6 +936,8 @@ describe('write responses use live row field names (#825)', () => {
     const dupes = classified.filter((f, i) => classified.indexOf(f) !== i);
     expect(dupes).toEqual([]);
     expect(classified.sort()).toEqual([...LIVE_TRANSACTION_KNOWN_FIELDS].sort());
+    // Non-vacuity: the lower bound below must have fields to require.
+    expect(REQUIRED_ON_EVERY_ROW.length).toBeGreaterThan(0);
   });
 
   // Both bounds on the rows themselves, in one walk: every returned row's
@@ -949,7 +954,6 @@ describe('write responses use live row field names (#825)', () => {
       const response = await call(toolName, c.args);
       const rows = transactionRowsIn(response);
       expect(rows).toHaveLength(RESPONSE_ROWS[toolName]!);
-      expect(REQUIRED_ON_EVERY_ROW.length).toBeGreaterThan(0);
       for (const row of rows) {
         const keys = Object.keys(row);
         const foreign = keys.filter((k) => !LIVE_TRANSACTION_KNOWN_FIELDS.has(k));
