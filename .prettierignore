@@ -1,2 +1,27 @@
+# `prettier --check .` formats the whole tree; this file is what it leaves out.
+# Prettier also reads .gitignore, so untracked local files (node_modules, dist,
+# docs/superpowers/, scripts/local/, ...) are already skipped.
+
 # Auto-generated files
 src/**/*.generated.ts
+
+# Written by tools, not by hand. A Prettier pass would fight the writer:
+# sync-manifest emits JSON.stringify(_, null, 2), which Prettier reflows (short
+# arrays onto one line), so the next `bun run sync-manifest` would fail
+# format:check. package-lock.json is npm's.
+manifest.json
+package-lock.json
+
+# Prose. Formatting all Markdown is about 4,600 changed lines across 150 files,
+# mostly table realignment and list/emphasis markers, which would bury the code
+# changes in review and churn every open docs/skills branch. skills/*.md is also
+# parsed by check:skills (tables, frontmatter), and docs/ holds the bug corpus
+# that check:bug-corpus parses plus docs/index.html, whose markup
+# check:tool-counts reads. Left out deliberately (#813); format them in a
+# dedicated PR if that trade changes.
+*.md
+docs/
+
+# Sibling git worktrees live under .claude/worktrees/ in the primary checkout.
+# Without this, `prettier --check .` run there would walk every other branch.
+.claude/worktrees/
