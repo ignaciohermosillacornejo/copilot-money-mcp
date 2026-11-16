@@ -620,7 +620,11 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
           // character rejects the key. Invalid UTF-8 inside a segment decodes
           // lossily (U+FFFD): the id no longer round-trips, but the segment
           // still counts, so parity holds.
-          if (strEnd <= pos || strEnd >= keyBuffer.length) {
+          // The terminator is 0x00 0x01; a 0x00 followed by anything else
+          // (0x00 0xFF is ordered-code's escaped NUL) means the segment goes
+          // on past where this scan stopped, so reading up to it would
+          // truncate the segment in place and keep the count.
+          if (strEnd <= pos || strEnd + 1 >= keyBuffer.length || keyBuffer[strEnd + 1] !== 0x01) {
             return null;
           }
           const str = keyBuffer.slice(pos, strEnd).toString('utf8');
@@ -890,6 +894,12 @@ export interface DocumentTableAudit {
  * it makes a fresh one, which costs a full copy of the cache.
  */
 export async function auditDocumentTable(dbPath: string): Promise<DocumentTableAudit> {
+  if (!fs.existsSync(dbPath)) {
+    throw new Error('Database path not found');
+  }
+  if (!retryInterrupted(() => fs.statSync(dbPath)).isDirectory()) {
+    throw new Error('Path is not a directory');
+  }
   const tempDbPath = copyDatabaseToTemp(dbPath);
   const db = new ClassicLevel<Buffer, Buffer>(tempDbPath, {
     createIfMissing: false,
