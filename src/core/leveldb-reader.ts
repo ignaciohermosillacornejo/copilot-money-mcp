@@ -599,7 +599,9 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
     pos += 2; // past a component's 0x00 0x01 terminator
     const label = keyBuffer[pos];
     if (label === 0x80) {
-      break; // end of key
+      // End of key. Bytes after the end marker are ignored on purpose: they
+      // are not path components, and a LevelDB key may carry a suffix there.
+      break;
     }
     if (label !== 0xbe) {
       return null;
@@ -620,6 +622,12 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
     // holding a control character all reject the key. Invalid UTF-8 inside a
     // segment decodes lossily (U+FFFD): the id no longer round-trips, but the
     // segment still counts, so parity holds.
+    //
+    // `strEnd + 1 >= keyBuffer.length` (no terminator before the end of the
+    // key) is logically subsumed by the 0x01 check after it, since reading
+    // past the end yields undefined, and by the label check on the next pass.
+    // No input can tell it apart, so it has no test of its own; it is kept so
+    // the truncated case reads as handled here rather than by accident.
     if (strEnd <= pos || strEnd + 1 >= keyBuffer.length || keyBuffer[strEnd + 1] !== 0x01) {
       return null;
     }
@@ -933,9 +941,10 @@ export function isDocumentPathParity(collection: string): boolean {
  * start of the binary component terminator) or, in the string-path format test
  * databases use, by `/`. Deliberately weaker than the parser, which requires
  * the full `0x00 0x01`: everything the parser accepts passes this, so the
- * `smoke:cache` oracle cannot pass merely by agreeing with the parser. A key from a sibling table such as `remote_document_read_time`
- * fails it. `smoke:cache` uses this as an oracle that does not go through the
- * key parser's own table check.
+ * `smoke:cache` oracle cannot pass merely by agreeing with the parser. A key
+ * from a sibling table such as `remote_document_read_time` fails it.
+ * `smoke:cache` uses this as an oracle that does not go through the key
+ * parser's own table check.
  */
 export function isDocumentTableKey(key: string): boolean {
   const name = 'remote_document';
