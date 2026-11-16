@@ -123,13 +123,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * A parsed YAML value as the text the patterns below test. `if:` and env values
+ * A parsed YAML value as the text the `if:` patterns below test. Those values
  * are scalars in practice (strings, sometimes a bare `true`), which this renders
  * exactly as `String()` would; a mapping or list renders as JSON rather than
- * `[object Object]`, so its contents stay visible to the patterns.
+ * `[object Object]`, so its contents stay visible to the patterns. Not for the
+ * trust list, which must be a string as written (the trust-list check below).
  */
 function scalarText(value: unknown): string {
-  return typeof value === 'string' ? value : (JSON.stringify(value) ?? 'undefined');
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    // A cyclic structure (YAML aliases can build one) cannot be stringified.
+    return String(value);
+  }
 }
 
 /**
@@ -426,9 +433,21 @@ for (const file of files) {
   for (const env of envBlocks(doc, jobs)) {
     if (!isRecord(env)) continue;
     for (const key of TRUST_LIST_KEYS) {
-      if (env[key] === undefined) continue;
+      const value = env[key];
+      if (value === undefined) continue;
       declarationKey = key;
-      declarations.push(scalarText(env[key]));
+      // Demand the string itself rather than rendering whatever YAML parsed:
+      // an unquoted `["octocat"]` is a YAML list, which scalarText() would turn
+      // back into valid-looking JSON and so pass a check it should fail.
+      if (typeof value !== 'string') {
+        problems.push(
+          `${file}: \`env.${key}\` must be a quoted JSON string, e.g. \`'["octocat"]'\`. ` +
+            `An unquoted ${Array.isArray(value) ? 'YAML list' : 'YAML value'} is not what ` +
+            `\`fromJSON()\` and \`jq\` will read.`
+        );
+        continue;
+      }
+      declarations.push(value);
     }
   }
   let declared: Set<string> | null = null;

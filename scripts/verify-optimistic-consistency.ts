@@ -128,9 +128,18 @@ function heading(name: string): void {
   console.log(`=== ${name} ===`);
 }
 
-/** A caught value as text: the message for an Error, JSON for anything else. */
+/**
+ * A caught value as text, for the manual-cleanup lines: `Name: message` for an
+ * Error (as `${e}` printed it), JSON for anything else. Never throws, so a
+ * cyclic thrown value cannot swallow the cleanup instruction it is part of.
+ */
 function describe(e: unknown): string {
-  return e instanceof Error ? e.message : (JSON.stringify(e) ?? 'undefined');
+  if (e instanceof Error) return `${e.name}: ${e.message}`;
+  try {
+    return JSON.stringify(e) ?? String(e);
+  } catch {
+    return String(e);
+  }
 }
 
 function nowIso(): string {

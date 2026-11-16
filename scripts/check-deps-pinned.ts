@@ -26,16 +26,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_JSON =
   process.env.CHECK_DEPS_PINNED_PACKAGE_JSON ?? join(__dirname, '../package.json');
 
-const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf-8')) as Partial<
-  Record<(typeof DEPENDENCY_FIELDS)[number], Record<string, string>>
->;
-
 const DEPENDENCY_FIELDS = [
   'dependencies',
   'devDependencies',
   'optionalDependencies',
   'peerDependencies',
 ] as const;
+
+const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf-8')) as Partial<
+  Record<(typeof DEPENDENCY_FIELDS)[number], Record<string, string>>
+>;
 
 /**
  * Specifiers that let the registry pick the version at install time.
