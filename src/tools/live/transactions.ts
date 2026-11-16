@@ -291,6 +291,16 @@ const SPLIT_CHILD_FIELD = 'parent_transaction_id' satisfies keyof EnrichedTransa
 type MappableWriteField = WriteRowField | typeof SPLIT_CHILD_FIELD;
 
 /**
+ * The fields every write row carries, as a fresh copy: exported for the
+ * lower-bound test (every returned row carries each of these, and every live
+ * field outside them is left out for a named reason), a function so nothing
+ * outside this module can mutate the list.
+ */
+export function writeRowFields(): WriteRowField[] {
+  return [...WRITE_ROW_FIELDS];
+}
+
+/**
  * Every field a write row may be mapped with, and each one's live mapper
  * arity. Exported for the admission-rule test (a mapper of arity 2 or more
  * reads the category index); a function rather than a constant so nothing
@@ -331,8 +341,11 @@ const NO_CATEGORY_INDEX = new Proxy({} as CategoryIndex, {
  * mappers. `K` is limited to the admitted fields, so the type system holds the
  * admission rule; the admission-rule test casts to reach an excluded field on
  * purpose. The overloads also couple `parent_transaction_id` to its
- * precondition: it is reachable only with a non-optional `parentId`, since
- * without one the value would be a guess. Production code calls
+ * precondition, that the parent is KNOWN: it is reachable only with a
+ * non-optional `parentId`, since without one the value would be a guess. A
+ * known `null` counts — a response that selects `parentId`
+ * (bulkEditTransactions) and gets null back is reporting "no parent", not
+ * guessing. Production code calls
  * {@link liveRowFromMutation}.
  *
  * `parentId` and `isoCurrencyCode` are filled with null only to satisfy the
@@ -346,7 +359,7 @@ export function mapMutationFields<K extends WriteRowField>(
   fields: readonly K[]
 ): Pick<EnrichedTransaction, K>;
 export function mapMutationFields<K extends MappableWriteField>(
-  tx: CreatedTransaction & { parentId: string },
+  tx: CreatedTransaction & { parentId: string | null },
   fields: readonly K[]
 ): Pick<EnrichedTransaction, K>;
 export function mapMutationFields<K extends MappableWriteField>(
