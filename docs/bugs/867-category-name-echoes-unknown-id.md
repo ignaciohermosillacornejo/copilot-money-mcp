@@ -50,11 +50,15 @@ pins `getCategoryName()`'s fallback as intended behaviour. Nothing compared the 
 
 ## The fix
 
-`resolveCategoryName()` now returns `lookupKnownCategoryName() ?? undefined` — the same
-known-names-only rule the `transaction_type` rules use — and its callers emit "no name" the
-way each tool already emits it for an uncategorized row: the key is absent on
+Every category name cache mode returns now comes from one rule,
+`CopilotMoneyTools.knownCategoryNamer()`: `lookupKnownCategoryName()` over the user name map,
+else the Plaid taxonomy, else `null`, the same known-names-only rule the `transaction_type`
+rules use. Each response resolves it once and names its rows synchronously. Callers emit
+"no name" the way each tool already emits it for an uncategorized row: the key is absent on
 transaction, recurring and budget rows (matching `get_transactions_live`, which omits it),
-and `null` on `get_categories` list rows, whose other absent values are already `null`.
+and `null` on `get_categories` rows, whose other absent values are already `null`.
+`resolveCategoryName()`, the per-id wrapper that used to call `getCategoryName()`, is gone.
+
 `getCategoryName()` keeps its fallback, but its reach is closed: the last other `src/` caller,
 `CopilotDatabase.getCategories()` (no production caller, but public), now uses
 `lookupKnownCategoryName()` as well and leaves `name` absent for an unknown id.
@@ -64,17 +68,21 @@ Review found a second resolver of the same kind: `getCategoryDisplayName()`
 synthesized `{ category_id }` for a parent missing from the user's categories, so the same
 row whose `category_name` was now `null` reported the deleted parent's raw id as
 `parent_name`. The tree and subcategories views used it on user categories, where a missing
-name came back as the id and an empty one as `""`. Every `get_categories` view now names a
-category by `resolveCategoryName()`'s rule (user name map, then Plaid taxonomy, else `null`).
-The user name map already skips a category with a missing or empty name, as live mode's
-does (#860). `getCategoryDisplayName()` had no caller left and was deleted. Routing every
-view through one rule also exposed a stale copy of the name map held by `CopilotMoneyTools`,
-which only `refresh_database` dropped; it is gone, and the database's own map (dropped on a
-cache reload or a category write) is the only one. Its sibling, the excluded-category-id set,
-had the same shape and moved amounts rather than names; it now lives in the database next to
-the name map and is dropped with it. Both are pinned by rename / exclude tests in the parity
-file. The
-finance-pulse skill, which used "no `category_name`" to mean uncategorized, now tests
+name came back as the id and an empty one as `""`. Every `get_categories` view now goes
+through `knownCategoryNamer()`. The user name map already skips a category with a missing or
+empty name, as live mode's does (#860). `getCategoryDisplayName()` had no caller left and was
+deleted. `get_budgets`' orphan filter, which spelled "is this category known" a second way,
+now asks the namer too.
+
+Routing every view through one rule also exposed a stale copy of the name map held by
+`CopilotMoneyTools`, which only `refresh_database` dropped. It is gone, and the database's own
+map (dropped on a cache reload or a category write) is the only one. Its sibling, the
+excluded-category-id set, had the same shape and moved amounts rather than names. It now
+lives in the database next to the name map and is dropped with it. The reload path is pinned
+by rename and exclude tests in the parity file, and the write path by
+`getExcludedCategoryIds` tests in `tests/core/database.test.ts`.
+
+The finance-pulse skill, which used "no `category_name`" to mean uncategorized, now tests
 `category_id` instead, so a row in a deleted category still counts as spending.
 
 ## Detector
