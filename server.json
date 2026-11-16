@@ -24,25 +24,42 @@
           "type": "named",
           "name": "--db-path",
           "description": "Path to the Copilot Money LevelDB database. Defaults to Copilot Money's standard macOS location.",
-          "isRequired": false
+          "isRequired": false,
+          "format": "filepath"
         },
         {
           "type": "named",
           "name": "--write",
           "description": "Enable write tools (sends authenticated requests to Copilot Money's GraphQL API). Off by default.",
-          "isRequired": false
+          "isRequired": false,
+          "format": "boolean"
         },
         {
           "type": "named",
           "name": "--live-reads",
           "description": "Use GraphQL-backed live reads instead of the local LevelDB cache. Requires an authenticated browser session at app.copilot.money.",
-          "isRequired": false
+          "isRequired": false,
+          "format": "boolean"
         },
         {
           "type": "named",
           "name": "--browser",
-          "description": "With --live-reads or --write: read the Copilot session from this browser only (chrome, edge, brave, firefox, safari, …), with no fallback to others.",
-          "isRequired": false
+          "description": "With --live-reads or --write: read the Copilot session from this browser only, with no fallback to others.",
+          "isRequired": false,
+          "choices": [
+            "chrome",
+            "arc",
+            "edge",
+            "brave",
+            "vivaldi",
+            "chromium",
+            "opera",
+            "opera-gx",
+            "safari",
+            "firefox",
+            "microsoft-edge",
+            "operagx"
+          ]
         },
         {
           "type": "named",
@@ -54,7 +71,8 @@
           "type": "named",
           "name": "--browser-data-dir",
           "description": "With --browser: use this user-data root instead of the browser's default locations. Not supported for Safari.",
-          "isRequired": false
+          "isRequired": false,
+          "format": "filepath"
         }
       ]
     }
