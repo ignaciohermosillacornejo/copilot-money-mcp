@@ -429,31 +429,32 @@ for (const file of files) {
   }
 
   const declarations: string[] = [];
-  let declarationKey = TRUST_LIST_KEYS[0];
-  // Whether any trust-list key is present at all, even one rejected below for
-  // not being a string, so "no declaration" is not reported on top of that.
-  let declarationSeen = false;
+  // The trust-list key the workflow uses, or null when it has none at all. A key
+  // rejected below for not being a string still counts as present, so "no
+  // declaration" is not reported on top of the missing-quotes problem.
+  let foundKey: string | null = null;
   for (const env of envBlocks(doc, jobs)) {
     if (!isRecord(env)) continue;
     for (const key of TRUST_LIST_KEYS) {
       const value = env[key];
       if (value === undefined) continue;
-      declarationKey = key;
-      declarationSeen = true;
+      foundKey = key;
       // Demand the string itself rather than rendering whatever YAML parsed:
       // an unquoted `["octocat"]` is a YAML list, which scalarText() would turn
       // back into valid-looking JSON and so pass a check it should fail.
       if (typeof value !== 'string') {
-        problems.push(
+        const problem =
           `${file}: \`env.${key}\` must be a quoted JSON string, e.g. \`'["octocat"]'\`. ` +
-            `An unquoted ${Array.isArray(value) ? 'YAML list' : 'YAML value'} is not what ` +
-            `\`fromJSON()\` and \`jq\` will read.`
-        );
+          `An unquoted ${Array.isArray(value) ? 'YAML list' : 'YAML value'} is not what ` +
+          `\`fromJSON()\` and \`jq\` will read.`;
+        // Workflow- and job-level env blocks can repeat the same mistake; say it once.
+        if (!problems.includes(problem)) problems.push(problem);
         continue;
       }
       declarations.push(value);
     }
   }
+  const declarationKey = foundKey ?? TRUST_LIST_KEYS[0];
   let declared: Set<string> | null = null;
   if (declarations.length > 0) {
     const unique = [...new Set(declarations)];
@@ -518,7 +519,7 @@ for (const file of files) {
   if (compared.size > 0) {
     approverGatesChecked++;
     if (declared === null) {
-      if (!declarationSeen) {
+      if (foundKey === null) {
         problems.push(
           `${file}: an \`if:\` compares a login against the literal(s) ` +
             `${[...compared].map((l) => `'${l}'`).join(', ')} with no ` +
