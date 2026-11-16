@@ -642,7 +642,10 @@ export class LiveCopilotDatabase {
    *  The !id check completes the funnel invariant and matches the disk format's
    *  non-empty-id requirement. */
   private feedMeta(id: string, meta: { accountId: string; itemId: string }): void {
-    if (!id || !meta.accountId || !meta.itemId) return;
+    // A non-string id (drift: the parameter type is not enforced at runtime)
+    // is dropped here too, so no caller can append it to the meta file (#917).
+    const rawId: unknown = id;
+    if (typeof rawId !== 'string' || rawId === '' || !meta.accountId || !meta.itemId) return;
     this.txnMetaIndex.set(id, meta);
     this.metaStore.buffer(id, meta);
   }
@@ -758,7 +761,8 @@ export class LiveCopilotDatabase {
    *   fetches it. (The cache's upsert still removes a moved row from the
    *   month it used to live in.)
    *
-   * The meta index is fed on every path.
+   * The meta index is fed on every path that can be indexed (a row with a
+   * string id and both routing ids).
    */
   upsertLiveTransaction(
     node: CreatedTransaction & { parentId?: string | null },
