@@ -102,7 +102,6 @@ import {
 import { computeTotalReturnPercent, roundAmount } from '../utils/round.js';
 import { pLimit } from '../utils/concurrency.js';
 import {
-  getCategoryName,
   isTransferCategory,
   isKnownPlaidCategory,
   lookupKnownCategoryName,
@@ -1312,9 +1311,7 @@ export class CopilotMoneyTools {
       // mutation-guard: the internal income flag is never returned
       transactions.map(async ({ income: _internal, ...txn }) => ({
         ...txn,
-        category_name: txn.category_id
-          ? await this.resolveCategoryName(txn.category_id)
-          : undefined,
+        category_name: await this.resolveCategoryName(txn.category_id),
         normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
         // `excluded` answers "is this row excluded from spending?", which is
         // the question a caller doing spend math is asking — NOT "is the raw
@@ -1369,14 +1366,21 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Get category name with user-defined categories taking precedence.
+   * The name a category id is known by — the user's name for it, else the
+   * Plaid-taxonomy name — or `undefined` when it is in neither map.
+   *
+   * Deliberately NOT getCategoryName(): its fallback title-cases a snake_case
+   * id and echoes any other id, so a deleted or unsynced category came back
+   * with its raw id as the "name". Live mode returns no name for such a row,
+   * and the transaction_type rules already treat it as nameless; every
+   * category_name this class returns follows the same rule.
    *
    * @param categoryId - The category ID to look up
-   * @returns Human-readable category name
+   * @returns The known name, or undefined
    */
-  private async resolveCategoryName(categoryId: string | undefined): Promise<string> {
-    if (!categoryId) return 'Unknown';
-    return getCategoryName(categoryId, await this.getUserCategoryMap());
+  private async resolveCategoryName(categoryId: string | undefined): Promise<string | undefined> {
+    if (!categoryId) return undefined;
+    return lookupKnownCategoryName(categoryId, await this.getUserCategoryMap()) ?? undefined;
   }
 
   /**
@@ -2341,7 +2345,7 @@ export class CopilotMoneyTools {
               const userCat = userCatMap.get(category_id);
               return {
                 category_id,
-                category_name: await this.resolveCategoryName(category_id),
+                category_name: (await this.resolveCategoryName(category_id)) ?? null,
                 parent_category_id: userCat?.parent_category_id ?? null,
                 parent_name: userCat?.parent_category_id
                   ? getCategoryDisplayName(
@@ -2631,9 +2635,7 @@ export class CopilotMoneyTools {
           frequency,
           confidence,
           confidence_reason: confidenceReasons.join(', '),
-          category_name: data.categoryId
-            ? await this.resolveCategoryName(data.categoryId)
-            : undefined,
+          category_name: await this.resolveCategoryName(data.categoryId),
           last_date: lastTxn.date,
           next_expected_date: nextExpectedDate,
           transactions: sortedTxns.slice(-5).map((t) => ({
@@ -2745,9 +2747,7 @@ export class CopilotMoneyTools {
             emoji: rec.emoji,
             amount: rec.amount,
             frequency: rec.frequency,
-            category_name: rec.category_id
-              ? await this.resolveCategoryName(rec.category_id)
-              : undefined,
+            category_name: await this.resolveCategoryName(rec.category_id),
             state: rec.state ?? 'active',
             next_date: rec.next_date,
             last_date: rec.last_date,
@@ -2794,9 +2794,7 @@ export class CopilotMoneyTools {
           emoji: rec.emoji,
           amount: rec.amount,
           frequency: rec.frequency,
-          category_name: rec.category_id
-            ? await this.resolveCategoryName(rec.category_id)
-            : undefined,
+          category_name: await this.resolveCategoryName(rec.category_id),
         });
 
         // Classify active items into this_month, overdue, future
@@ -3034,7 +3032,7 @@ export class CopilotMoneyTools {
         ...(b.amounts ? { amounts: b.amounts } : {}),
         period: b.period,
         category_id: b.category_id,
-        category_name: b.category_id ? await this.resolveCategoryName(b.category_id) : undefined,
+        category_name: await this.resolveCategoryName(b.category_id),
         start_date: b.start_date,
         end_date: b.end_date,
         is_active: b.is_active,
