@@ -144,6 +144,7 @@ import {
   RUNTIME_CHECK_NAMES,
 } from '../core/graphql/response-validation.js';
 import {
+  MUTATION_ROW_DATE_ECHO_SURFACE,
   MUTATION_ROW_READ_SCHEMA_SURFACE,
   TRANSACTIONS_READ_SHAPE_RUNTIME_CHECK,
 } from '../core/graphql/read-validation.js';
@@ -1175,6 +1176,24 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'null on mutation rows only. Every transaction write would then refuse its row and ' +
       'refetch the month (correct data, one extra request per write, no live write-through), ' +
       'and stderr would carry one "mutation-row drift" warning per failed-field set.',
+  },
+  {
+    // The constant warnMutationRowMisdated names, so the two cannot drift apart.
+    surface: MUTATION_ROW_DATE_ECHO_SURFACE,
+    kind: 'response-shape',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'Inferred, not observed (#874): the `date` of a row a transaction mutation returns is the ' +
+      'date the server persisted, so when a create or edit named a date, the returned date is ' +
+      "in that date's month. upsertLiveTransaction files a stored row under its returned " +
+      'date, and refuses a well-formed row dated outside the one month the request named ' +
+      '(splits, which name several months, are trusted). Basis: every live round-trip of ' +
+      'update_transaction with a date so far echoed it; no probe has looked for a pre-edit ' +
+      'echo. WHAT DRIFT WOULD LOOK LIKE: date edits whose response carries the old date. ' +
+      'Each such write would refuse its row and refetch the requested and returned months ' +
+      '(correct data, extra requests), and stderr would carry one "dated outside the month ' +
+      'the write requested" warning per session.',
   },
   {
     // The constant committedPayload's doc names, so the two cannot drift apart.

@@ -176,6 +176,28 @@ describe('review_transactions surfaces server-side partial application', () => {
     );
   });
 
+  test('a failed[] entry with no errorCode names it <unknown>, never "undefined"', async () => {
+    // Response validation is warn-only, so a drifted entry can lack its code;
+    // the detail spells the gap the same way it spells a missing id.
+    const db = makeMockDb(['txn-1', 'txn-2']);
+    const client = createMockGraphQLClient({
+      BulkEditTransactions: {
+        bulkEditTransactions: {
+          updated: [txnPayload('txn-1')],
+          failed: [{ transaction: { id: 'txn-2' }, error: null } as never],
+        },
+      },
+    });
+    const tools = new CopilotMoneyTools(db, client);
+
+    const err = await tools.reviewTransactions({ transaction_ids: ['txn-1', 'txn-2'] }).then(
+      () => null,
+      (e: unknown) => e as Error
+    );
+    expect(err?.message).toContain('txn-2: <unknown>');
+    expect(err?.message).not.toContain('undefined');
+  });
+
   test('throws on GraphQL error', async () => {
     const db = makeMockDb(['txn-1']);
     const client = createMockGraphQLClient({

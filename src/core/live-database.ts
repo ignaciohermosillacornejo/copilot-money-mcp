@@ -33,11 +33,11 @@ import {
 } from './graphql/queries/transactions.js';
 import {
   invalidMutationRowFields,
-  isUsableMutationTransactionRow,
+  warnMutationRowMisdated,
   warnMutationRowRefused,
   warnReadShapeDrift,
 } from './graphql/read-validation.js';
-import { getMonthRange, isCalendarDate, isCalendarMonth, monthsCovered } from '../utils/date.js';
+import { getMonthRange, isCalendarMonth, monthsCovered } from '../utils/date.js';
 import { pLimit } from '../utils/concurrency.js';
 import { InFlightRegistry, SnapshotCache, TransactionWindowCache } from './cache/index.js';
 import type { AccountNode } from './graphql/queries/accounts.js';
@@ -766,22 +766,30 @@ export class LiveCopilotDatabase {
       insert?: boolean;
       parentId?: string | null;
       /**
-       * Months (YYYY-MM) the request moved the row into. Consulted ONLY when
-       * the returned row is refused as malformed: then these are dropped too,
-       * since a date the row failed on cannot name the destination. A
-       * well-formed row is filed under its own returned date, which is
-       * trusted as the server's persisted one — split children share one
-       * superset of touched months, so treating every requested month the
-       * row did not land in as stale would drop each sibling's month in turn
-       * and undo the split's write-through (#820). A well-formed row that
-       * echoes a pre-edit date is server drift this does not detect (#875).
+       * Months (YYYY-MM) the request named for the row: the date a create, an
+       * edit or a split asked for. Used two ways:
+       *  - Refused row: every requested month is dropped too, since a date
+       *    the row failed on cannot name its destination.
+       *  - Stored row, exactly ONE requested month: that month is the row's
+       *    destination, so a returned date in a different month is drift
+       *    (the server echoing a pre-edit date), and the row is not stored:
+       *    the requested month, the returned date's month and the cached
+       *    copy's month are dropped instead (#874). With several requested
+       *    months (a split whose children land in different months) the
+       *    returned date is trusted: split children share one superset of
+       *    touched months, so treating every month a child did not land in
+       *    as stale would drop each sibling's month in turn and undo the
+       *    split's write-through (#820).
        */
-      refusalMonths?: readonly string[];
+      requestedMonths?: readonly string[];
     } = {}
   ): void {
-    // Response validation is warn-only: a drifted row with no id cannot be
-    // placed, and must not be inserted as a phantom.
-    if (!node.id) return;
+    // Response validation is warn-only: a drifted response can carry no row
+    // at all, or a row with no id, which cannot be placed and must not be
+    // inserted as a phantom (#874).
+    if (typeof node !== 'object' || node === null || !node.id) return;
+    // Computed before the cacheability check on purpose: a row too malformed
+    // to cache is still indexed below.
     const hasRouting =
       typeof node.accountId === 'string' &&
       typeof node.itemId === 'string' &&
@@ -796,53 +804,58 @@ export class LiveCopilotDatabase {
       this.feedMeta(node.id, { accountId: node.accountId, itemId: node.itemId });
       this.metaStore.flush();
     }
+    const existing = this.lookupTransactionNodes([node.id]).get(node.id);
     // A row missing a field the read mappers dereference (date, name, a tags
     // array of ids) would make every later read of its month throw. It is
     // never stored: the month it would land in, and the month its cached copy
-    // sits in, are dropped so the next read refetches (#864 review).
+    // sits in, are dropped so the next read refetches (#864 review). A cached
+    // row is checked as the merge below would store it, but only the fields no
+    // write sets are filled from the cached copy: a response that merely omits
+    // `tipAmount` keeps its month cached, while one that omits `tags` or
+    // `name`, which the edit may have changed, is still refused (#874).
+    const fields = LiveCopilotDatabase.uncacheableFields(
+      existing ? LiveCopilotDatabase.fillUnwritableFields(node, existing) : node
+    );
     // mutation-guard: a malformed returned row is never cached
-    if (!LiveCopilotDatabase.isCacheableRow(node)) {
+    if (fields.length > 0) {
       const months = new Set<string>();
-      // The cached copy's month is dropped too: the row is not stored, so a
-      // write that moved or changed it must not leave that month serving the
-      // pre-write row. A drifted date names no month unless it starts with one.
+      // A drifted date names no month unless it starts with one.
       if (typeof node.date === 'string' && isCalendarMonth(node.date.slice(0, 7))) {
         months.add(node.date.slice(0, 7));
       }
-      const cached = this.lookupTransactionNodes([node.id]).get(node.id);
-      if (cached) months.add(cached.date.slice(0, 7));
-      for (const m of opts.refusalMonths ?? []) {
-        if (isCalendarMonth(m)) months.add(m);
-      }
-      const stale = [...months].filter((m) => this.transactionsWindowCache.hasMonth(m));
-      if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
+      const stale = this.dropRowMonths(months, existing, opts.requestedMonths ?? []);
       // Not silent (#864 review): name the failed fields, once per set. The
-      // schema passing means the calendar-date check failed, the only other
-      // clause. Warned after the drop, so the line reports what happened
-      // rather than predicting it (#875). The id is printed only when it is
-      // a readable string the schema did not flag, as the read path's
-      // stripInvalidTransactionNodes does: a drifted id is a value, not a name.
-      const fields = invalidMutationRowFields(node);
+      // id is printed only when it is a readable string the schema did not
+      // flag, as the read path's stripInvalidTransactionNodes does: a drifted
+      // id is a value, not a name.
       const rawId: unknown = node.id;
       warnMutationRowRefused(
-        {
-          id: typeof rawId === 'string' && !fields.includes('id') ? rawId : null,
-          fields: fields.length > 0 ? fields : ['date'],
-        },
-        stale.length
+        { id: typeof rawId === 'string' && !fields.includes('id') ? rawId : null, fields },
+        stale
       );
       return;
     }
-    const existing = this.lookupTransactionNodes([node.id]).get(node.id);
+    const filedMonth = node.date.slice(0, 7);
+    const requested = opts.requestedMonths ?? [];
+    const onlyRequested = requested.length === 1 ? requested[0] : undefined;
+    // mutation-guard: a row filed outside the one month the request named is never cached
+    if (
+      onlyRequested !== undefined &&
+      isCalendarMonth(onlyRequested) &&
+      onlyRequested !== filedMonth
+    ) {
+      const stale = this.dropRowMonths(new Set([filedMonth]), existing, requested);
+      warnMutationRowMisdated({ id: node.id, requestedMonth: onlyRequested }, stale);
+      return;
+    }
     // mutation-guard: a drifted routing id is never inserted
     // mutation-guard: an edit never inserts an uncached row
     if (!existing && (opts.insert !== true || !hasRouting)) {
       // Not inserting: an edit (see above), or a drifted create/split response
       // with empty routing ids — a row no later write could address. Either
       // way the month is refetched rather than left without the server's row.
-      const month = node.date.slice(0, 7);
-      if (this.transactionsWindowCache.hasMonth(month)) {
-        this.transactionsWindowCache.invalidate([month]);
+      if (this.transactionsWindowCache.hasMonth(filedMonth)) {
+        this.transactionsWindowCache.invalidate([filedMonth]);
       }
       return;
     }
@@ -867,20 +880,72 @@ export class LiveCopilotDatabase {
   }
 
   /**
-   * Whether a returned row is one the live cache may store: it passes the read
-   * path's own definition of a usable Transactions node
-   * (isUsableMutationTransactionRow, from read-validation's
-   * transactionNodeSchema), so every field the reads require is required
-   * here, and its date is a real calendar day. The window cache files a row
-   * under its date's first seven characters, and an empty or malformed date
-   * would remove the row from its real month without placing it anywhere.
+   * Drop every cached month among `months`, the cached copy's month and the
+   * requested months, so the next read refetches them. Returns how many
+   * cached months were dropped (the refusal warnings report it).
    */
-  static isCacheableRow(node: { date?: unknown }): boolean {
-    return (
-      isUsableMutationTransactionRow(node) &&
-      typeof node.date === 'string' &&
-      isCalendarDate(node.date)
-    );
+  private dropRowMonths(
+    months: Set<string>,
+    existing: TransactionNode | undefined,
+    requestedMonths: readonly string[]
+  ): number {
+    // The cached copy's month is dropped too: the row is not stored, so a
+    // write that moved or changed it must not leave that month serving the
+    // pre-write row.
+    if (existing) months.add(existing.date.slice(0, 7));
+    for (const m of requestedMonths) {
+      if (isCalendarMonth(m)) months.add(m);
+    }
+    const stale = [...months].filter((m) => this.transactionsWindowCache.hasMonth(m));
+    if (stale.length > 0) this.transactionsWindowCache.invalidate(stale);
+    return stale.length;
+  }
+
+  /**
+   * Fields of the TransactionFields selection that no write tool sets, so a
+   * cached copy's value is still the row's value after any edit. A response
+   * that omits one of them is filled from the cached copy before the
+   * cacheability check (the merge stores that value anyway), instead of
+   * refusing the row and refetching its month (#874).
+   */
+  private static readonly UNWRITABLE_FIELDS = [
+    'tipAmount',
+    'suggestedCategoryIds',
+    'createdAt',
+    'isPending',
+    'goal',
+  ] as const;
+
+  /** `node` with each absent {@link UNWRITABLE_FIELDS} key taken from `existing`. */
+  private static fillUnwritableFields(node: object, existing: TransactionNode): object {
+    const filled: Record<string, unknown> = { ...node };
+    for (const key of LiveCopilotDatabase.UNWRITABLE_FIELDS) {
+      if (filled[key] === undefined) filled[key] = existing[key];
+    }
+    return filled;
+  }
+
+  /**
+   * The top-level fields that stop a returned row from being stored in the
+   * live cache; empty when it may be stored. The definition is the read
+   * path's own (read-validation's mutationRowSchema, from
+   * transactionNodeSchema), so every field the reads require is required
+   * here, including a date that is a real calendar day: the window cache
+   * files a row under its date's first seven characters, and an empty or
+   * impossible date would remove the row from its real month without placing
+   * it anywhere. Field names only, never values.
+   *
+   * The detector is tests/core/cacheable-row-read-sweep.test.ts, which sends
+   * every weakened row this accepts through the live read path.
+   */
+  static uncacheableFields(node: unknown): string[] {
+    // mutation-guard: a cached row passes the read path's row schema
+    return invalidMutationRowFields(node);
+  }
+
+  /** Whether a returned row is one the live cache may store ({@link uncacheableFields}). */
+  static isCacheableRow(node: unknown): boolean {
+    return LiveCopilotDatabase.uncacheableFields(node).length === 0;
   }
 
   /** Remove a cached transaction by id. No-op if not found. */

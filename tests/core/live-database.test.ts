@@ -605,6 +605,95 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     }
   );
 
+  test.each([
+    ['tipAmount', { tipAmount: 3 }],
+    ['createdAt', { createdAt: 77 }],
+    ['suggestedCategoryIds', { suggestedCategoryIds: ['zX8cV5bN1mQ4wE7rT2yU'] }],
+    ['isPending', { isPending: true }],
+  ] as const)(
+    'an edit response omitting %s, which no write sets, on a CACHED row is stored with the cached value (#874)',
+    (key, cachedValue) => {
+      // The merge would fill the absent key from the cached copy, and no write
+      // changes it, so the merged row is complete and correct: refusing it would
+      // only refetch the month for nothing.
+      const live = mkLive();
+      const wc = live.getTransactionsWindowCache();
+      wc.ingestMonth('2024-01', [queryRow(cachedValue)], Date.now());
+      const { [key]: _omitted, ...rest } = mutationRow({ name: 'Edited' });
+
+      live.upsertLiveTransaction(rest as CreatedTransaction);
+
+      expect(wc.hasMonth('2024-01')).toBe(true);
+      const [row] = wc.entriesForMonth('2024-01');
+      expect(row).toMatchObject({ name: 'Edited', ...cachedValue });
+    }
+  );
+
+  test('the same omission on an UNCACHED created row is still refused: there is no copy to fill it from (#874)', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [], Date.now());
+    const { tipAmount: _omitted, ...rest } = mutationRow();
+
+    live.upsertLiveTransaction(rest as CreatedTransaction, { insert: true });
+
+    expect(wc.hasMonth('2024-01')).toBe(false);
+  });
+
+  test.each([null, undefined, 'a string', 42])(
+    'a response row that is not an object (%p) is ignored, never thrown on (#874)',
+    (node) => {
+      const live = mkLive();
+      const wc = live.getTransactionsWindowCache();
+      wc.ingestMonth('2024-01', [queryRow()], Date.now());
+
+      expect(() =>
+        live.upsertLiveTransaction(node as unknown as CreatedTransaction, { insert: true })
+      ).not.toThrow();
+      expect(wc.entriesForMonth('2024-01')).toHaveLength(1);
+    }
+  );
+
+  test('a well-formed row dated outside the one month the request named is not filed; both months drop (#874)', () => {
+    // The request moved the row to February; the response echoes a January
+    // date. Filing it under January would leave a cached February that never
+    // learns it holds the row.
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [queryRow()], Date.now());
+    wc.ingestMonth('2024-02', [], Date.now());
+    wc.ingestMonth('2024-03', [], Date.now());
+
+    live.upsertLiveTransaction(mutationRow({ date: '2024-01-20' }), {
+      requestedMonths: ['2024-02'],
+    });
+
+    expect(wc.hasMonth('2024-01')).toBe(false);
+    expect(wc.hasMonth('2024-02')).toBe(false);
+    expect(wc.hasMonth('2024-03')).toBe(true);
+  });
+
+  test('a row in the one requested month, or among several (a split), is filed under its returned date (#874)', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [queryRow()], Date.now());
+    wc.ingestMonth('2024-02', [], Date.now());
+
+    live.upsertLiveTransaction(mutationRow({ date: '2024-02-03' }), {
+      requestedMonths: ['2024-02'],
+    });
+    expect(wc.entriesForMonth('2024-02').map((r) => r.date)).toEqual(['2024-02-03']);
+
+    // Split children share a superset of touched months, so a child landing in
+    // one of several is trusted rather than treated as misdated.
+    live.upsertLiveTransaction(mutationRow({ date: '2024-01-04' }), {
+      requestedMonths: ['2024-01', '2024-02'],
+    });
+    expect(wc.hasMonth('2024-01')).toBe(true);
+    expect(wc.hasMonth('2024-02')).toBe(true);
+    expect(wc.entriesForMonth('2024-01').map((r) => r.date)).toEqual(['2024-01-04']);
+  });
+
   /** Run `fn` with console.warn captured and the warn dedupe reset around it. */
   function captureWarnings(fn: () => void): string[] {
     __resetReadShapeWarnDedupe();
@@ -636,9 +725,9 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
   });
 
   test('a real-looking but impossible calendar date is reported as an invalid date (#875)', () => {
-    // 2024-02-30 passes the read schema's date regex, so the schema names no
-    // field; the refusal comes from the calendar check alone, and the warning
-    // must still name `date` rather than print an empty field list.
+    // 2024-02-30 matches the YYYY-MM-DD pattern; the shared schema's
+    // calendar refinement names `date` itself, so the warning never falls back
+    // to a guessed field or prints an empty list (#874).
     const lines = captureWarnings(() => {
       const live = mkLive();
       live.getTransactionsWindowCache().ingestMonth('2024-01', [queryRow()], Date.now());
@@ -665,7 +754,9 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     const dropped = captureWarnings(() => {
       const live = mkLive();
       live.getTransactionsWindowCache().ingestMonth('2024-01', [queryRow()], Date.now());
-      live.upsertLiveTransaction(mutationRow({ name: undefined }), { refusalMonths: ['2024-03'] });
+      live.upsertLiveTransaction(mutationRow({ name: undefined }), {
+        requestedMonths: ['2024-03'],
+      });
     });
     expect(dropped).toHaveLength(1);
     expect(dropped[0]).toContain('the cached month it touched was dropped');

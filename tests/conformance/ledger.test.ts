@@ -33,7 +33,10 @@ import {
   QUERY_RESPONSE_SCHEMAS,
   READ_RESPONSE_SHAPE_RUNTIME_CHECK,
 } from '../../src/core/graphql/read-response-validation.js';
-import { MUTATION_ROW_READ_SCHEMA_SURFACE } from '../../src/core/graphql/read-validation.js';
+import {
+  MUTATION_ROW_DATE_ECHO_SURFACE,
+  MUTATION_ROW_READ_SCHEMA_SURFACE,
+} from '../../src/core/graphql/read-validation.js';
 import { MUTATION_NULL_PAYLOAD_SURFACE } from '../../src/core/graphql/graphql-error.js';
 
 const SMOKE_DIR = join(import.meta.dir, '..', '..', 'scripts', 'smoke');
@@ -249,6 +252,11 @@ describe('conformance ledger', () => {
     // or deleted entry would leave the warning pointing at nothing.
     const entry = CONFORMANCE_LEDGER.find((e) => e.surface === MUTATION_ROW_READ_SCHEMA_SURFACE);
     expect(entry?.kind).toBe('response-shape');
+  });
+
+  test('the surface the misdated-row warning names is recorded as unverified (#874)', () => {
+    const entry = CONFORMANCE_LEDGER.find((e) => e.surface === MUTATION_ROW_DATE_ECHO_SURFACE);
+    expect(entry?.class).toBe('unverified');
   });
 
   test('the null-payload assumption committedPayload rests on is recorded as unverified (#875)', () => {

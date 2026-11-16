@@ -356,6 +356,13 @@ export function mapMutationFields<K extends MappableWriteField>(
   const node: TransactionNode = { parentId: null, isoCurrencyCode: null, ...tx };
   const row: Record<string, unknown> = {};
   for (const field of fields) {
+    // This runs after the write committed, and mutation responses are
+    // validated warn-only: a drifted row whose name is not a string would
+    // throw in the merchant normalizer and report a landed write as failed.
+    // The key is left out instead; `name` itself maps as returned. The read
+    // path never meets such a row (its schema drops it), so the shared
+    // mapper stays strict.
+    if (field === 'normalized_merchant' && typeof node.name !== 'string') continue;
     row[field] = ENRICHED_FIELD_MAPPERS[field](node, NO_CATEGORY_INDEX);
   }
   // Each value came from the mapper typed EnrichedTransaction[field].

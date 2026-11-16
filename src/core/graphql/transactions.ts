@@ -120,7 +120,12 @@ export interface EditTransactionChanges {
   categoryId?: string;
   userNotes?: string | null;
   isReviewed?: boolean;
-  tagIds?: string[];
+  /**
+   * Present whenever the request set tags, even when its value is undefined
+   * (a response with no usable tags array): callers report the KEY as an
+   * updated field, so the write is not hidden by response drift.
+   */
+  tagIds?: string[] | undefined;
   type?: TransactionType;
   date?: string;
   amount?: number;
