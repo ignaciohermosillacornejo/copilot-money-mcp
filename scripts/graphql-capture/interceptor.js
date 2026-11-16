@@ -20,7 +20,9 @@
     if (!h) return {};
     if (h instanceof Headers) {
       const o = {};
-      h.forEach((v, k) => { o[k] = v; });
+      h.forEach((v, k) => {
+        o[k] = v;
+      });
       return o;
     }
     if (Array.isArray(h)) return Object.fromEntries(h);
@@ -46,7 +48,11 @@
       try {
         const clone = res.clone();
         const text = await clone.text();
-        try { entry.response = JSON.parse(text); } catch { entry.response = text; }
+        try {
+          entry.response = JSON.parse(text);
+        } catch {
+          entry.response = text;
+        }
         entry.status = res.status;
         window.__gqlLog.push(entry);
       } catch (e) {
@@ -78,7 +84,11 @@
       xhr.addEventListener('loadend', () => {
         if (isGraphQLUrl(meta.url) || bodyLooksLikeGraphQL(meta.requestBody)) {
           meta.status = xhr.status;
-          try { meta.response = JSON.parse(xhr.responseText); } catch { meta.response = xhr.responseText; }
+          try {
+            meta.response = JSON.parse(xhr.responseText);
+          } catch {
+            meta.response = xhr.responseText;
+          }
           window.__gqlLog.push(meta);
         }
       });
