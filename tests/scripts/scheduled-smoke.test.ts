@@ -22,6 +22,10 @@ import {
   summarizeSmokeOutput,
   type SmokeRunResult,
 } from '../../scripts/scheduled-smoke.js';
+import {
+  SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS,
+  SCHEDULED_SMOKE_NOT_CHECKED_MAX,
+} from '../../src/utils/scheduled-smoke-status.js';
 
 /** A completed run: spawnSync reports a numeric exit code and no signal. */
 function completed(status: number, output: string): SmokeRunResult {
@@ -428,6 +432,16 @@ describe('members that were not checked (#819)', () => {
       notify: () => {},
     });
     expect(written.at(-1)?.not_checked).toEqual([]);
+  });
+
+  test('every registered skip marker fits the reader bound', () => {
+    // The writer records every marker a run prints; the reader keeps at most
+    // SCHEDULED_SMOKE_NOT_CHECKED_MAX entries and truncates each name. A
+    // marker past either bound would be recorded and then lost on read.
+    expect(SKIP_MARKERS.length).toBeLessThanOrEqual(SCHEDULED_SMOKE_NOT_CHECKED_MAX);
+    for (const s of SKIP_MARKERS) {
+      expect(s.check.length).toBeLessThanOrEqual(SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS);
+    }
   });
 
   test('only a pass records what it did not check', () => {
