@@ -94,7 +94,7 @@ if (!dbPath) {
 // --- helpers ---
 
 /** Force a completely fresh decode on the given database instance. */
-async function freshDecode(db: CopilotDatabase): Promise<void> {
+function freshDecode(db: CopilotDatabase): void {
   db.clearCache();
   cleanupAllTempDatabases();
 }
@@ -110,7 +110,7 @@ async function pollUntilFreshMatches<T>(
   const start = Date.now();
   let lastValue!: T;
   while (true) {
-    await freshDecode(db);
+    freshDecode(db);
     lastValue = await read();
     if (predicate(lastValue)) {
       return { matched: true, elapsedSec: (Date.now() - start) / 1000, lastValue };
@@ -126,6 +126,11 @@ async function pollUntilFreshMatches<T>(
 function heading(name: string): void {
   console.log();
   console.log(`=== ${name} ===`);
+}
+
+/** A caught value as text: the message for an Error, JSON for anything else. */
+function describe(e: unknown): string {
+  return e instanceof Error ? e.message : (JSON.stringify(e) ?? 'undefined');
 }
 
 function nowIso(): string {
@@ -232,7 +237,9 @@ async function main(): Promise<void> {
             await tools.deleteTag({ tag_id: tagId });
             console.log(`  cleanup: deleted tag ${tagId} ✓`);
           } catch (e) {
-            console.log(`  cleanup: deleteTag FAILED — manual cleanup for id=${tagId}: ${e}`);
+            console.log(
+              `  cleanup: deleteTag FAILED — manual cleanup for id=${tagId}: ${describe(e)}`
+            );
           }
         }
       }
@@ -287,7 +294,9 @@ async function main(): Promise<void> {
             await tools.deleteCategory({ category_id: catId });
             console.log(`  cleanup: deleted category ${catId} ✓`);
           } catch (e) {
-            console.log(`  cleanup: deleteCategory FAILED — manual cleanup for id=${catId}: ${e}`);
+            console.log(
+              `  cleanup: deleteCategory FAILED — manual cleanup for id=${catId}: ${describe(e)}`
+            );
           }
         }
       }
@@ -348,7 +357,7 @@ async function main(): Promise<void> {
             console.log(`  cleanup: restored note ✓`);
           } catch (e) {
             console.log(
-              `  cleanup: restore FAILED — manual: set note on ${target.transaction_id} to "${original}": ${e}`
+              `  cleanup: restore FAILED — manual: set note on ${target.transaction_id} to "${original}": ${describe(e)}`
             );
           }
         }
@@ -425,7 +434,7 @@ async function main(): Promise<void> {
             console.log(`  cleanup: restored budget to ${originalAmount} ✓`);
           } catch (e) {
             console.log(
-              `  cleanup: restore FAILED — manual: setBudget category=${leafCat.category_id} amount=${originalAmount}: ${e}`
+              `  cleanup: restore FAILED — manual: setBudget category=${leafCat.category_id} amount=${originalAmount}: ${describe(e)}`
             );
           }
         }
@@ -484,7 +493,7 @@ async function main(): Promise<void> {
           console.log(`  cleanup: restored state ✓`);
         } catch (e) {
           console.log(
-            `  cleanup: restore FAILED — manual: setRecurringState ${target.recurring_id} to ${originalState}: ${e}`
+            `  cleanup: restore FAILED — manual: setRecurringState ${target.recurring_id} to ${originalState}: ${describe(e)}`
           );
         }
       }

@@ -181,7 +181,9 @@ if (import.meta.main) {
   }
   const input = await Bun.file(inPath).text();
   const lines = input.split('\n').filter((l) => l.trim());
-  const scrubbed = lines.map((l) => JSON.stringify(scrubEntry(JSON.parse(l)))).join('\n');
+  const scrubbed = lines
+    .map((l) => JSON.stringify(scrubEntry(JSON.parse(l) as RawEntry)))
+    .join('\n');
   await Bun.write(outPath, scrubbed + '\n');
   console.log(`scrubbed ${lines.length} entries → ${outPath}`);
 }

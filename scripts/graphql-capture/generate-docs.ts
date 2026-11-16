@@ -141,7 +141,7 @@ export async function generateAll(scrubbedPath: string, outDir: string): Promise
   const entries: RawEntry[] = text
     .split('\n')
     .filter((l) => l.trim())
-    .map((l) => JSON.parse(l));
+    .map((l) => JSON.parse(l) as RawEntry);
   const groups = groupByOperation(entries);
 
   const queriesDir = path.join(outDir, 'operations', 'queries');

@@ -17,7 +17,7 @@ export async function mergeDocuments(jsonlPath: string, documentsPath: string): 
     if (!entry.requestBody) return l;
     let body: { operationName?: string; query?: string; variables?: unknown };
     try {
-      body = JSON.parse(entry.requestBody);
+      body = JSON.parse(entry.requestBody) as typeof body;
     } catch {
       return l;
     }

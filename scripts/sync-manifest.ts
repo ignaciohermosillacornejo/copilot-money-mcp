@@ -26,7 +26,7 @@ const writeManifestPath = join(__dirname, '../manifest.write.json');
 
 function main() {
   const writeMode = process.argv.includes('--write');
-  const manifest: Manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Manifest;
 
   if (writeMode) {
     const writeManifest = buildWriteManifest(manifest);

@@ -15,7 +15,7 @@ import { truncateDescription, type Manifest } from './manifest-utils.js';
 export type { Manifest } from './manifest-utils.js';
 
 export function buildWriteManifest(readOnly: Manifest): Manifest {
-  const clone: Manifest = JSON.parse(JSON.stringify(readOnly));
+  const clone = JSON.parse(JSON.stringify(readOnly)) as Manifest;
 
   const writeSchemas = createWriteToolSchemas();
   const existingNames = new Set(clone.tools.map((t) => t.name));

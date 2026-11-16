@@ -2839,15 +2839,19 @@ export class CopilotMoneyTools {
           // Calculate monthly cost estimate
           if (rec.amount) {
             const freq = rec.frequency?.toLowerCase();
-            if (freq === 'monthly') monthlyCostEstimate += Math.abs(rec.amount);
-            else if (freq === 'biweekly' || freq === 'bi-weekly')
+            if (freq === 'monthly') {
+              monthlyCostEstimate += Math.abs(rec.amount);
+            } else if (freq === 'biweekly' || freq === 'bi-weekly') {
               monthlyCostEstimate += Math.abs(rec.amount) * 2;
-            else if (freq === 'weekly') monthlyCostEstimate += Math.abs(rec.amount) * 4;
-            else if (freq === 'quarterly') monthlyCostEstimate += Math.abs(rec.amount) / 3;
-            else if (freq === 'yearly' || freq === 'annually')
+            } else if (freq === 'weekly') {
+              monthlyCostEstimate += Math.abs(rec.amount) * 4;
+            } else if (freq === 'quarterly') {
+              monthlyCostEstimate += Math.abs(rec.amount) / 3;
+            } else if (freq === 'yearly' || freq === 'annually') {
               monthlyCostEstimate += Math.abs(rec.amount) / 12;
-            else if (freq === 'semiannually' || freq === 'semi-annually')
+            } else if (freq === 'semiannually' || freq === 'semi-annually') {
               monthlyCostEstimate += Math.abs(rec.amount) / 6;
+            }
           }
 
           // Check if paid this month using string comparison (avoids timezone issues)
@@ -3351,8 +3355,9 @@ export class CopilotMoneyTools {
           h.quantity === undefined ||
           h.institution_price === undefined ||
           h.institution_value === undefined
-        )
+        ) {
           continue;
+        }
 
         // Apply ticker filter
         if (tickerSecurityIds && !tickerSecurityIds.has(h.security_id)) continue;

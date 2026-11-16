@@ -46,7 +46,7 @@ interface ApolloCapture {
 function jsTypeToGraphQL(v: unknown): string {
   if (v === null) return 'ID';
   if (Array.isArray(v)) {
-    const first = v[0];
+    const first: unknown = v[0];
     return first !== undefined ? `[${jsTypeToGraphQL(first)}]` : '[String]';
   }
   switch (typeof v) {
@@ -66,7 +66,7 @@ function jsTypeToGraphQL(v: unknown): string {
 function inferSelectionSet(value: unknown, indent = 2): string {
   if (value === null || value === undefined) return '';
   if (Array.isArray(value)) {
-    const first = value.find((x) => x !== null && x !== undefined);
+    const first: unknown = value.find((x) => x !== null && x !== undefined);
     return inferSelectionSet(first, indent);
   }
   if (typeof value !== 'object') return '';
@@ -77,7 +77,7 @@ function inferSelectionSet(value: unknown, indent = 2): string {
       const nested = inferSelectionSet(v, indent + 2);
       lines.push(`${pad}${k} {`, nested, `${pad}}`);
     } else if (Array.isArray(v)) {
-      const first = v.find((x) => x !== null && x !== undefined);
+      const first: unknown = v.find((x) => x !== null && x !== undefined);
       if (first !== undefined && typeof first === 'object') {
         const nested = inferSelectionSet(first, indent + 2);
         lines.push(`${pad}${k} {`, nested, `${pad}}`);
