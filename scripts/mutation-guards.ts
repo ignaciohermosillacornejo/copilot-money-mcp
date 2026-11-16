@@ -458,7 +458,8 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       'A transaction write row must carry every get_transactions_live field the mutation ' +
       'response can supply. Dropping one from WRITE_ROW_FIELDS silently removes it from ' +
       'every create/split/add-to-recurring response, so a caller that reads the field back ' +
-      'from the write gets nothing and must re-read to learn it (#889).',
+      'from the write gets nothing and must re-read to learn it (#889). Not a write-safety ' +
+      'invariant: a response-completeness one on the write-to-read contract.',
     mutation: {
       kind: 'remove',
       find: wholeLines(
