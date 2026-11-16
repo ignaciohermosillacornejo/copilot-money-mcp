@@ -1584,7 +1584,7 @@ describe('CopilotMoneyTools', () => {
       expect(result.view).toBe('subcategories');
       const data = result.data as {
         parent_id: string;
-        parent_name: string;
+        parent_name: string | null;
         subcategories: { category_id: string; category_name: string }[];
       };
       expect(data.parent_id).toBe('food_and_drink');

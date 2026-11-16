@@ -4,17 +4,17 @@
  *
  *   - `getCategoryName()` (`src/utils/categories.ts`) title-cases a
  *     snake_case id it does not know and echoes any other id unchanged.
- *   - `getCategoryDisplayName()` (`src/models/category.ts`) returns the
- *     category id when the category has no name, and `""` for an empty one.
+ *
+ * #867 found a second one, `getCategoryDisplayName()` (`name ?? category_id`),
+ * and deleted it once nothing called it; a resolver like it goes in BANNED.
  *
  * WHY: reached from a field a client reads, either fallback turns a lookup
  * miss (a deleted or unsynced category, or one with no name) into something
  * that looks like a real name. That has shipped three times, #69, #91 and
  * #867, and each fix removed one caller while the function stayed importable
  * everywhere. Code that returns a name uses `lookupKnownCategoryName()`,
- * which answers `null` for an unknown id, or reads a user category's own
- * `name` and treats a missing or empty one as no name, so the caller decides
- * how "no name" looks (an absent key or `null`).
+ * which answers `null` for an unknown id (or a user category with no name),
+ * so the caller decides how "no name" looks (an absent key or `null`).
  *
  * WHAT IT CATCHES: any identifier with a banned name in a TypeScript file
  * under `src/` other than that name's defining module: a named import, a
@@ -40,7 +40,6 @@ const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 /** Each guessing resolver, and the one `src/` file allowed to name it. */
 const BANNED: ReadonlyArray<{ name: string; definingModule: string }> = [
   { name: 'getCategoryName', definingModule: 'src/utils/categories.ts' },
-  { name: 'getCategoryDisplayName', definingModule: 'src/models/category.ts' },
 ];
 
 /** Line numbers of every identifier called `name` in `source`. */

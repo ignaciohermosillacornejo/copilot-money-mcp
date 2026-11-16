@@ -219,7 +219,8 @@ itself returned. Cache-mode `get_transactions` rows still spell the note
 - `category_name` is still resolved to a human-readable name for you, except
   for a category id the app no longer knows (e.g. a deleted category): such a
   row has no `category_name`, as in live mode, but keeps its `category_id`
-  (#867).
+  (#867). `get_categories` reports `null` for `category_name` and
+  `parent_name` in that case, and for a category with no name, in every view.
 
 ## If you maintain a skill or an agent prompt
 

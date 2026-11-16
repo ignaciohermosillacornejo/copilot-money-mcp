@@ -434,6 +434,10 @@ describe('category_name for an id in neither name map (#867)', () => {
       );
       expect(sub).toBeDefined();
       expect(sub?.category_name).toBeNull();
+
+      // The subcategories view's own parent_name, for a parent with no name.
+      const ofUnnamed = wire(await t.getCategories({ parent_id: CAT_UNNAMED }));
+      expect((ofUnnamed.data as { parent_name: unknown }).parent_name).toBeNull();
     });
   });
 

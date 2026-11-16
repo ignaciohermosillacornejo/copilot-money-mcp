@@ -64,10 +64,10 @@ Review found a second resolver of the same kind: `getCategoryDisplayName()`
 synthesized `{ category_id }` for a parent missing from the user's categories, so the same
 row whose `category_name` was now `null` reported the deleted parent's raw id as
 `parent_name`. The tree and subcategories views used it on user categories, where a missing
-name came back as the id and an empty one as `""`. `parent_name` now goes through
-`resolveCategoryName()` (null for an unknown parent), and those views read the category's own
-name, treating a missing or empty one as `null`, as live mode's name map does (#860).
-`getCategoryDisplayName()` has no `src/` caller left. The
+name came back as the id and an empty one as `""`. Every `get_categories` view now names a
+category by `resolveCategoryName()`'s rule (user name map, then Plaid taxonomy, else `null`).
+The user name map already skips a category with a missing or empty name, as live mode's
+does (#860). `getCategoryDisplayName()` had no caller left and was deleted. The
 finance-pulse skill, which used "no `category_name`" to mean uncategorized, now tests
 `category_id` instead, so a row in a deleted category still counts as spending.
 
@@ -84,12 +84,11 @@ passed.
 
 The table is hand-listed, so a new tool that returns `category_name` joins it only if its
 author adds a row. The class-level half is `tests/no-guessing-category-name.test.ts`: an AST
-sweep that fails if any `src/` file other than the defining module references either guessing
-resolver, `getCategoryName` or `getCategoryDisplayName` (import, renamed import, namespace
-access, re-export or call). A new tool cannot reach either fallback without failing it,
-whether or not it joins the table. Mutation-checked: re-importing `getCategoryName` in
-`src/core/database.ts`, or `getCategoryDisplayName` in `src/tools/tools.ts`, fails the sweep.
-A new resolver under a different name is not covered until it is added to the sweep's table.
+sweep that fails if any `src/` file other than `src/utils/categories.ts` references the
+guessing `getCategoryName` (import, renamed import, namespace access, re-export or call). A
+new tool cannot reach the fallback without failing it, whether or not it joins the table.
+Mutation-checked: re-importing it in `src/core/database.ts` fails the sweep. A new resolver
+under a different name is not covered until it is added to the sweep's table.
 The parity test also pins `parent_name` for a deleted parent and the tree / subcategories
 names for an unnamed user category.
 
