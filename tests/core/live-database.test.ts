@@ -1517,6 +1517,19 @@ describe('transaction meta index', () => {
     expect(live.lookupTransactionMeta(['']).size).toBe(0);
   });
 
+  test('indexTransactionMeta drops a non-string id at the funnel, and never buffers it to the meta file (#917)', () => {
+    const live = new LiveCopilotDatabase(
+      { mutate: mock(), query: mock() } as unknown as GraphQLClient,
+      {} as CopilotDatabase
+    );
+    const buffer = spyOn((live as any).metaStore, 'buffer');
+    for (const id of [42, {}, ['x']]) {
+      live.indexTransactionMeta(id as unknown as string, { accountId: 'acct-B', itemId: 'item-B' });
+    }
+    expect((live as any).txnMetaIndex.size).toBe(0);
+    expect(buffer).not.toHaveBeenCalled();
+  });
+
   test('lookupTransactionMeta returns an empty map for unknown ids', () => {
     const live = new LiveCopilotDatabase(
       { mutate: mock(), query: mock() } as unknown as GraphQLClient,
