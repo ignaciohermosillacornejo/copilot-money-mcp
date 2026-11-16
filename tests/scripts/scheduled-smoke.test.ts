@@ -17,6 +17,7 @@ import {
   SKIP_MARKERS,
   classifySmokeOutcome,
   findNotChecked,
+  notCheckedFor,
   runScheduledSmoke,
   summarizeSmokeOutput,
   type SmokeRunResult,
@@ -426,6 +427,23 @@ describe('members that were not checked (#819)', () => {
       write: (s) => written.push(s),
       notify: () => {},
     });
+    expect(written.at(-1)?.not_checked).toEqual([]);
+  });
+
+  test('only a pass records what it did not check', () => {
+    const output = SKIP_MARKERS.map((s) => s.marker).join('\n');
+    expect(notCheckedFor('pass', output)).toHaveLength(SKIP_MARKERS.length);
+    for (const result of ['fail', 'incomplete', 'auth-missing'] as const) {
+      expect(notCheckedFor(result, output)).toEqual([]);
+    }
+    const written: Record<string, unknown>[] = [];
+    runScheduledSmoke({
+      spawn: () =>
+        completed(1, `${SKIP_MARKERS[0].marker}\n[smoke] FAIL — read-surface drift detected:`),
+      write: (s) => written.push(s),
+      notify: () => {},
+    });
+    expect(written.at(-1)?.result).toBe('fail');
     expect(written.at(-1)?.not_checked).toEqual([]);
   });
 

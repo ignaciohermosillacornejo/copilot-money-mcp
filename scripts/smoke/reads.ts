@@ -102,6 +102,15 @@ async function main(): Promise<void> {
   }
 
   const skipped = results.filter((r) => r.status === 'SKIP').length;
+  if (skipped > 0) {
+    // A SKIP_MARKERS entry in scripts/scheduled-smoke.ts. The table rows above
+    // are not lines the weekly run can classify, and the PASS line below is
+    // not the run's last verdict, so without this a run that skipped checks
+    // would be recorded as a clean pass (#819).
+    console.error(
+      `\n[smoke] SKIP — some read operations not checked: ${skipped} of ${READ_SMOKE_CHECKS.length} skipped.`
+    );
+  }
   console.error(
     `\n[smoke] PASS — ${results.length - skipped}/${READ_SMOKE_CHECKS.length} read operations ` +
       `verified against the server${skipped > 0 ? ` (${skipped} skipped)` : ''}.`

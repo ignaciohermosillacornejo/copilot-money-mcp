@@ -243,6 +243,12 @@ describe('conformance ledger', () => {
     }
   });
 
+  test('every attended-only smoke oracle states its reason', () => {
+    for (const [oracle, reason] of Object.entries(ATTENDED_ONLY_SMOKE_ORACLES)) {
+      expect(reason.trim().length, `${oracle} needs a reason`).toBeGreaterThan(0);
+    }
+  });
+
   test('surfaces are unique', () => {
     const seen = new Set<string>();
     const dupes = CONFORMANCE_LEDGER.map((entry) => entry.surface).filter((surface) => {

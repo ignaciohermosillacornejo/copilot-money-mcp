@@ -84,13 +84,18 @@ const ScheduledSmokeStatusSchema = z.object({
     .optional()
     .transform((v) => truncateReport(v ?? null)),
   /**
-   * Composite members that did not really check anything this run. Omitted
+   * Composite members that did not really check anything this run (written
+   * only for a passing run). Omitted
    * when empty (and from files written before #819), so a fully checked run
    * costs `get_connection_status` nothing.
    */
+  // `.catch`: a malformed or future-shaped list (a verdict word this reader
+  // does not know) drops the list, not the whole status, which would read as
+  // "the job is not installed". Same reasoning as truncating `report`.
   not_checked: z
     .array(NotCheckedSchema)
     .optional()
+    .catch(undefined)
     .transform((v) =>
       v === undefined || v.length === 0 ? undefined : v.slice(0, SCHEDULED_SMOKE_NOT_CHECKED_MAX)
     ),

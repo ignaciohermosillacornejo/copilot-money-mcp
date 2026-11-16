@@ -86,6 +86,11 @@ export const SKIP_MARKERS = [
     check: 'account-name parity',
     verdict: 'WARN',
   },
+  {
+    marker: '[smoke] SKIP — some read operations not checked',
+    check: 'some read operations',
+    verdict: 'SKIP',
+  },
 ] as const satisfies ReadonlyArray<{ marker: string } & ScheduledSmokeNotChecked>;
 
 /**
@@ -101,6 +106,19 @@ export function findNotChecked(output: string): ScheduledSmokeNotChecked[] {
     check,
     verdict,
   }));
+}
+
+/**
+ * What a run records as not checked. Only a pass carries the list: on `fail`
+ * the drift is the news, and on `incomplete` nothing was checked to begin
+ * with. The summary and the status record both go through here, so they
+ * cannot disagree.
+ */
+export function notCheckedFor(
+  result: ScheduledSmokeResult,
+  output: string
+): ScheduledSmokeNotChecked[] {
+  return result === 'pass' ? findNotChecked(output) : [];
 }
 
 /** Signatures that mean "could not authenticate", not "the API drifted". */
@@ -177,7 +195,7 @@ export function summarizeSmokeOutput(result: ScheduledSmokeResult, run: SmokeRun
   const marker = verdict ?? reversed.find((l) => l.startsWith('[smoke]')) ?? lines[0] ?? '';
   // A pass that skipped a member says so first, so truncation can only cut the
   // quoted verdict, never the caveat.
-  const notChecked = result === 'pass' ? findNotChecked(run.output) : [];
+  const notChecked = notCheckedFor(result, run.output);
   if (notChecked.length > 0) {
     const names = notChecked.map((n) => `${n.check} (${n.verdict})`).join(', ');
     return `drift check passed; NOT checked: ${names} — ${marker}`.slice(0, 300);
@@ -280,7 +298,7 @@ export function runScheduledSmoke(deps: ScheduledSmokeDeps = DEFAULT_DEPS): numb
       result,
       summary: summarizeSmokeOutput(result, run),
       report,
-      not_checked: findNotChecked(run.output),
+      not_checked: notCheckedFor(result, run.output),
     },
     alarm ? run.output : null
   );

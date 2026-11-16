@@ -192,11 +192,11 @@ export type ConformanceOracle = `smoke:${string}` | `runtime:${string}`;
  * composite, or "gated" would mean "a script exists" rather than "something
  * re-checks this" (enforced by the ledger test, #819).
  */
-export const ATTENDED_ONLY_SMOKE_ORACLES: Readonly<Record<`smoke:${string}`, string>> = {
+export const ATTENDED_ONLY_SMOKE_ORACLES = {
   'smoke:roundtrip':
     'mutates the real account (creates and deletes throwaway rows), so it runs only when a ' +
     'maintainer is watching',
-};
+} as const satisfies Readonly<Record<`smoke:${string}`, string>>;
 
 /**
  * Registered always-on runtime checks that `runtime:<name>` oracles may
