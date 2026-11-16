@@ -46,7 +46,8 @@ export const getTransactionsTool = defineTool({
       '{giftWrapping, rewards, savings, shipping, tax}} — so fields: ["default", "amazon"] ' +
       'answers "what was in this order" without an exported CSV. Ask for any of them by name with ' +
       'fields: ["default", "tag_ids"], or take the whole document with fields: ["all"] ' +
-      '(or "*"). category_name is always resolved to a human-readable name. ' +
+      '(or "*"). category_name is resolved to a human-readable name, and omitted (as in ' +
+      'live mode) when the category id is unknown, e.g. a deleted category. ' +
       '`compact` was removed in v3.0.0 — passing it now raises an error naming this ' +
       'migration.',
     inputSchema: {
