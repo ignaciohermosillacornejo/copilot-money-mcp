@@ -41,7 +41,11 @@ import { CopilotMoneyTools } from '../src/tools/tools.js';
 import { CopilotMoneyServer } from '../src/server.js';
 import { createCombinedDb, cleanupTestDb } from './helpers/test-db.js';
 import { serializedSize, registerContextBudgetChecks } from './helpers/context-budget.js';
-import { SCHEDULED_SMOKE_REPORT_MAX_CHARS } from '../src/utils/scheduled-smoke-status.js';
+import {
+  SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS,
+  SCHEDULED_SMOKE_NOT_CHECKED_MAX,
+  SCHEDULED_SMOKE_REPORT_MAX_CHARS,
+} from '../src/utils/scheduled-smoke-status.js';
 
 const DB_PATH = path.join(__dirname, 'fixtures/context-budget-db');
 
@@ -97,7 +101,11 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   // counter (documents kept after a non-finite numeric field was stripped),
   // which adds 13 chars per flagged collection. The populated worst case
   // measures 1_909; this is that plus the usual ~10% headroom.
-  get_connection_status: 2_100,
+  // 2_100 -> 2_400 by #819: `scheduled_smoke.not_checked` names the composite
+  // members that skipped. The populated worst case (the reader's 4-entry,
+  // 32-char ceilings) measures 2_173; a real file carries one entry or none,
+  // and none adds nothing.
+  get_connection_status: 2_400,
   get_categories: 855,
   // 755 -> 1_065, and this one goes UP: the ratchet was measuring a response
   // whose pattern-detected `recurring` array was always EMPTY, so the #606
@@ -233,7 +241,10 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // restoring the ~10% the rest of the file uses: it is a tripwire on the
   // most-described read tool, and that is the property worth preserving.
   get_accounts: 2_700,
-  get_connection_status: 850,
+  // 850 -> 900 by #819: the description names `scheduled_smoke.not_checked`
+  // (checks a passing run skipped), so a reader does not take a pass that
+  // compared nothing for a clean one. Measures 885.
+  get_connection_status: 900,
   // UNMOVED by #909 (+116: category_name and parent_name are null for a
   // category with no known name, in every view, #867). Measured 1_277 on
   // main, 1_393 with #909 (~0.9%).
@@ -1042,12 +1053,17 @@ describe('context-budget ratchet (#597)', () => {
         // Deliberately over the ceiling: asserts the budget holds against the
         // truncated value, not against a conveniently short path.
         report: `/Users/${'x'.repeat(64)}/.claude/copilot-money/smoke-reports/${'9'.repeat(SCHEDULED_SMOKE_REPORT_MAX_CHARS)}-smoke-failure.txt`,
+        // Over both `not_checked` ceilings (#819), same reasoning as `report`.
+        not_checked: Array.from({ length: SCHEDULED_SMOKE_NOT_CHECKED_MAX * 3 }, () => ({
+          check: 'x'.repeat(SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS * 4),
+          verdict: 'SKIP',
+        })),
       });
       const previous = process.env.COPILOT_MCP_SMOKE_STATUS_PATH;
       process.env.COPILOT_MCP_SMOKE_STATUS_PATH = file;
       try {
         const result = (await runTool('get_connection_status')) as {
-          scheduled_smoke: { report: string } | null;
+          scheduled_smoke: { report: string; not_checked?: unknown[] } | null;
         };
         // Guard against a vacuous pass: if the seam broke and this read null,
         // the size assertion below would trivially hold.
@@ -1055,6 +1071,7 @@ describe('context-budget ratchet (#597)', () => {
         expect(result.scheduled_smoke?.report.length).toBeLessThanOrEqual(
           SCHEDULED_SMOKE_REPORT_MAX_CHARS
         );
+        expect(result.scheduled_smoke?.not_checked).toHaveLength(SCHEDULED_SMOKE_NOT_CHECKED_MAX);
         const size = serializedSize(result);
         if (process.env.CONTEXT_BUDGET_PRINT) {
           console.log(`[response] get_connection_status (populated): ${size} chars`);

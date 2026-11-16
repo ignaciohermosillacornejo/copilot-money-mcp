@@ -35,12 +35,16 @@ async function main(): Promise<void> {
   // a parity check as having nothing to compare when it never looked.
   if (lookupError) {
     console.error(
-      `[smoke] FAIL account-name parity — ${missingDatabaseError(lookupError).message}`
+      `[smoke] FAIL — account-name parity could not read the local cache: ${missingDatabaseError(lookupError).message}`
     );
     process.exit(1);
   }
   if (!db.getDbPath() || !available) {
-    console.error('[smoke] SKIP account-name parity — no local Copilot cache to compare against.');
+    // A SKIP_MARKERS entry in scripts/scheduled-smoke.ts: the weekly run
+    // records this member as not checked instead of as a clean pass (#819).
+    console.error(
+      '[smoke] SKIP — account-name parity not checked: no local Copilot cache to compare against.'
+    );
     return;
   }
 
@@ -62,9 +66,11 @@ async function main(): Promise<void> {
 
   const parity = compareAccountNames(cacheNames, liveNames, await db.getAccounts());
   const { status, detail } = classifyAccountNameParity(parity);
-  log(`${status} account-name parity — ${detail}`);
 
+  // Each verdict word is spelled out, not interpolated, so the composite test
+  // can check every line against the runner's registries.
   if (status === 'FAIL') {
+    log(`account-name parity mismatch: ${detail}`);
     // The marker scripts/scheduled-smoke.ts recognises as a drift verdict.
     // Without it, a real mismatch in the weekly run is reported as "drift NOT
     // checked". The could-not-read-the-cache FAIL above deliberately does not
@@ -72,6 +78,12 @@ async function main(): Promise<void> {
     console.error('[smoke] FAIL — account-name parity drift detected');
     process.exit(1);
   }
+  if (status === 'WARN') {
+    // A SKIP_MARKERS entry: compared, but could not tell the sources apart.
+    log(`WARN — account-name parity inconclusive: ${detail}`);
+    return;
+  }
+  log(`PASS — account-name parity: ${detail}`);
 }
 
 if (import.meta.main) {

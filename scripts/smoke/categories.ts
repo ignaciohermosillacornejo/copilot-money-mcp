@@ -12,13 +12,24 @@
  *      if disabled, all categories return rolloverAmount === 0.
  *
  * Exits non-zero on any assertion failure. Output is intended to be pasted
- * into the PR description.
+ * into the PR description. Assertions about what the server returned (a
+ * non-empty category list, rollover polarity) print a drift verdict the
+ * scheduled run reports as drift; the cache-hit and timing assertions are
+ * about this process, and throw plainly so a slow run reads as "drift NOT
+ * checked" rather than as an API change (#819).
  */
 
 import { setupLiveSmoke } from './_harness.js';
 import { LiveCategoriesTools } from '../../src/tools/live/categories.js';
 import { RefreshCacheTool } from '../../src/tools/live/refresh-cache.js';
 import { fetchUser } from '../../src/core/graphql/queries/user.js';
+
+/** A server-controlled assertion failed: report drift, not a broken run. */
+function serverDrift(message: string): never {
+  console.error('[smoke] server assertion failed:', message);
+  console.error('[smoke] FAIL — categories server drift detected');
+  process.exit(1);
+}
 
 async function main(): Promise<void> {
   const { live, graphql, log } = await setupLiveSmoke({ verbose: true });
@@ -34,7 +45,7 @@ async function main(): Promise<void> {
     throw new Error(`expected cold call _cache_hit=false, got ${cold._cache_hit}`);
   }
   if (cold.count === 0) {
-    throw new Error('expected at least one category');
+    serverDrift('expected at least one category');
   }
 
   // 2. Warm call
@@ -87,13 +98,15 @@ async function main(): Promise<void> {
   } else {
     // If the user has rollovers disabled, EVERY category must report 0.
     if (nonZero.length > 0) {
-      throw new Error(
+      serverDrift(
         `expected rolloverAmount=0 on every category when user has rollovers disabled; found ${nonZero.length} non-zero`
       );
     }
   }
 
-  log('done', { passed: 4 });
+  console.error(
+    '[smoke] PASS — categories refresh smoke: cold, warm, refresh and rollover polarity verified.'
+  );
 }
 
 if (import.meta.main) {

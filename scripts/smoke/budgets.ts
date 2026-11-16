@@ -11,7 +11,11 @@
  *   4. months_window=1 anchors to the current month, not future projection rows
  *
  * Exits non-zero on any assertion failure. Output is intended to be pasted
- * into the PR description.
+ * into the PR description. Assertions about what the server returned (a
+ * non-empty budget list, the month window) print a drift verdict the
+ * scheduled run reports as drift; the cache-hit and timing assertions are
+ * about this process, and throw plainly so a slow run reads as "drift NOT
+ * checked" rather than as an API change (#819).
  *
  * Audit C6 (rollover correctness): exercised end-to-end via the categories
  * smoke (`scripts/smoke/categories.ts`) since LiveBudgetsTools projects from
@@ -21,6 +25,13 @@
 import { setupLiveSmoke } from './_harness.js';
 import { LiveBudgetsTools } from '../../src/tools/live/budgets.js';
 import { RefreshCacheTool } from '../../src/tools/live/refresh-cache.js';
+
+/** A server-controlled assertion failed: report drift, not a broken run. */
+function serverDrift(message: string): never {
+  console.error('[smoke] server assertion failed:', message);
+  console.error('[smoke] FAIL — budgets server drift detected');
+  process.exit(1);
+}
 
 async function main(): Promise<void> {
   const { live, log } = await setupLiveSmoke({ verbose: true });
@@ -33,7 +44,7 @@ async function main(): Promise<void> {
   const coldMs = Date.now() - t0;
   log('cold', { rows: cold.count, total: cold.total_budgeted, hit: cold._cache_hit, ms: coldMs });
   if (cold._cache_hit !== false) throw new Error(`expected cold _cache_hit=false`);
-  if (cold.count === 0) throw new Error('expected at least one budget');
+  if (cold.count === 0) serverDrift('expected at least one budget');
 
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -43,7 +54,7 @@ async function main(): Promise<void> {
     .filter((month) => month !== currentMonth);
   log('months_window=1', { currentMonth, offAnchor: offAnchor.length });
   if (offAnchor.length > 0) {
-    throw new Error(
+    serverDrift(
       `months_window=1 returned non-current budget months: ${[...new Set(offAnchor)].join(', ')}`
     );
   }
@@ -65,7 +76,9 @@ async function main(): Promise<void> {
   log('recold', { rows: recold.count, hit: recold._cache_hit, ms: recoldMs });
   if (recold._cache_hit !== false) throw new Error(`expected post-refresh _cache_hit=false`);
 
-  log('done', { passed: 3 });
+  console.error(
+    '[smoke] PASS — budgets refresh smoke: cold, month window, warm and refresh verified.'
+  );
 }
 
 if (import.meta.main) {

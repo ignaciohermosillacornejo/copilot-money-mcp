@@ -9,12 +9,22 @@
  *   3. refresh_cache --scope recurring invalidates and triggers refetch
  *
  * Exits non-zero on any assertion failure. Output is intended to be pasted
- * into the PR description.
+ * into the PR description. An empty recurring list is about the server and
+ * prints a drift verdict the scheduled run reports as drift; the cache-hit and
+ * timing assertions are about this process, and throw plainly so a slow run
+ * reads as "drift NOT checked" rather than as an API change (#819).
  */
 
 import { setupLiveSmoke } from './_harness.js';
 import { LiveRecurringTools } from '../../src/tools/live/recurring.js';
 import { RefreshCacheTool } from '../../src/tools/live/refresh-cache.js';
+
+/** A server-controlled assertion failed: report drift, not a broken run. */
+function serverDrift(message: string): never {
+  console.error('[smoke] server assertion failed:', message);
+  console.error('[smoke] FAIL — recurring server drift detected');
+  process.exit(1);
+}
 
 async function main(): Promise<void> {
   const { live, log } = await setupLiveSmoke({ verbose: true });
@@ -27,7 +37,7 @@ async function main(): Promise<void> {
   const coldMs = Date.now() - t0;
   log('cold', { rows: cold.count, hit: cold._cache_hit, ms: coldMs });
   if (cold._cache_hit !== false) throw new Error(`expected cold _cache_hit=false`);
-  if (cold.count === 0) throw new Error('expected at least one recurring item');
+  if (cold.count === 0) serverDrift('expected at least one recurring item');
 
   // 2. Warm
   const t1 = Date.now();
@@ -46,7 +56,7 @@ async function main(): Promise<void> {
   log('recold', { rows: recold.count, hit: recold._cache_hit, ms: recoldMs });
   if (recold._cache_hit !== false) throw new Error(`expected post-refresh _cache_hit=false`);
 
-  log('done', { passed: 3 });
+  console.error('[smoke] PASS — recurring refresh smoke: cold, warm and refresh verified.');
 }
 
 if (import.meta.main) {

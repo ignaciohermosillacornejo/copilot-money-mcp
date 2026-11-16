@@ -9,6 +9,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
+  SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS,
+  SCHEDULED_SMOKE_NOT_CHECKED_MAX,
   SCHEDULED_SMOKE_REPORT_MAX_CHARS,
   defaultScheduledSmokeStatusPath,
   readScheduledSmokeStatus,
@@ -85,6 +87,50 @@ describe('readScheduledSmokeStatus', () => {
       })
     );
     expect(readScheduledSmokeStatus(file)?.result).toBe('incomplete');
+  });
+
+  test('a pass that skipped a member says which one (#819)', () => {
+    const file = statusFile(
+      JSON.stringify({
+        last_run: '2026-06-11T10:00:00Z',
+        result: 'pass',
+        summary: 'drift check passed; NOT checked: account-name parity (SKIP)',
+        not_checked: [{ check: 'account-name parity', verdict: 'SKIP' }],
+      })
+    );
+    expect(readScheduledSmokeStatus(file)?.not_checked).toEqual([
+      { check: 'account-name parity', verdict: 'SKIP' },
+    ]);
+  });
+
+  test('omits not_checked when every member was checked, or the writer predates it', () => {
+    for (const extra of [{ not_checked: [] }, {}]) {
+      const file = statusFile(
+        JSON.stringify({ last_run: '2026-06-11T10:00:00Z', result: 'pass', summary: 's', ...extra })
+      );
+      const status = readScheduledSmokeStatus(file);
+      expect(status).not.toBeNull();
+      expect(status && 'not_checked' in status && status.not_checked !== undefined).toBe(false);
+    }
+  });
+
+  test('bounds a hand-edited not_checked list', () => {
+    const file = statusFile(
+      JSON.stringify({
+        last_run: '2026-06-11T10:00:00Z',
+        result: 'pass',
+        summary: 's',
+        not_checked: Array.from({ length: 50 }, () => ({
+          check: 'x'.repeat(500),
+          verdict: 'WARN',
+        })),
+      })
+    );
+    const notChecked = readScheduledSmokeStatus(file)?.not_checked ?? [];
+    expect(notChecked.length).toBe(SCHEDULED_SMOKE_NOT_CHECKED_MAX);
+    for (const entry of notChecked) {
+      expect(entry.check.length).toBe(SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS);
+    }
   });
 
   test('returns null on malformed JSON instead of throwing', () => {
