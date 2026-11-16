@@ -184,7 +184,7 @@ describe('review_transactions surfaces server-side partial application', () => {
       BulkEditTransactions: {
         bulkEditTransactions: {
           updated: [txnPayload('txn-1')],
-          failed: [{ transaction: { id: 'txn-2' }, error: null } as never],
+          failed: [{ transaction: { id: 'txn-2' }, error: null, errorCode: null }],
         },
       },
     });

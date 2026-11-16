@@ -629,6 +629,21 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     }
   );
 
+  test('a field no write sets, present as undefined on a CACHED row, is stored with the cached value, never undefined (#874)', () => {
+    // What is checked is what is stored: the merge spreads the filled row, so
+    // an explicit undefined cannot overwrite the cached value the check saw.
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [queryRow({ tipAmount: 3 })], Date.now());
+
+    live.upsertLiveTransaction(
+      mutationRow({ name: 'Edited', tipAmount: undefined as unknown as number })
+    );
+
+    expect(wc.hasMonth('2024-01')).toBe(true);
+    expect(wc.entriesForMonth('2024-01')[0]).toMatchObject({ name: 'Edited', tipAmount: 3 });
+  });
+
   test('the same omission on an UNCACHED created row is still refused: there is no copy to fill it from (#874)', () => {
     const live = mkLive();
     const wc = live.getTransactionsWindowCache();
@@ -671,6 +686,20 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     expect(wc.hasMonth('2024-01')).toBe(false);
     expect(wc.hasMonth('2024-02')).toBe(false);
     expect(wc.hasMonth('2024-03')).toBe(true);
+  });
+
+  test('one month repeated (a single-month split) is still one requested month (#874)', () => {
+    const live = mkLive();
+    const wc = live.getTransactionsWindowCache();
+    wc.ingestMonth('2024-01', [queryRow()], Date.now());
+    wc.ingestMonth('2024-02', [], Date.now());
+
+    live.upsertLiveTransaction(mutationRow({ date: '2024-01-20' }), {
+      requestedMonths: ['2024-02', '2024-02', '2024-02'],
+    });
+
+    expect(wc.hasMonth('2024-01')).toBe(false);
+    expect(wc.hasMonth('2024-02')).toBe(false);
   });
 
   test('a row in the one requested month, or among several (a split), is filed under its returned date (#874)', () => {

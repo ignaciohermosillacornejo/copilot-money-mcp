@@ -770,12 +770,12 @@ export class LiveCopilotDatabase {
        * edit or a split asked for. Used two ways:
        *  - Refused row: every requested month is dropped too, since a date
        *    the row failed on cannot name its destination.
-       *  - Stored row, exactly ONE requested month: that month is the row's
+       *  - Stored row, exactly ONE distinct requested month: that month is the row's
        *    destination, so a returned date in a different month is drift
        *    (the server echoing a pre-edit date), and the row is not stored:
        *    the requested month, the returned date's month and the cached
-       *    copy's month are dropped instead (#874). With several requested
-       *    months (a split whose children land in different months) the
+       *    copy's month are dropped instead (#874). With several distinct
+       *    requested months (a split whose children land in different months) the
        *    returned date is trusted: split children share one superset of
        *    touched months, so treating every month a child did not land in
        *    as stale would drop each sibling's month in turn and undo the
@@ -813,9 +813,10 @@ export class LiveCopilotDatabase {
     // write sets are filled from the cached copy: a response that merely omits
     // `tipAmount` keeps its month cached, while one that omits `tags` or
     // `name`, which the edit may have changed, is still refused (#874).
-    const fields = LiveCopilotDatabase.uncacheableFields(
-      existing ? LiveCopilotDatabase.fillUnwritableFields(node, existing) : node
-    );
+    // The row as it would be stored: the merge below spreads this, not the
+    // raw node, so what is checked is exactly what is stored.
+    const candidate = existing ? LiveCopilotDatabase.fillUnwritableFields(node, existing) : node;
+    const fields = LiveCopilotDatabase.uncacheableFields(candidate);
     // mutation-guard: a malformed returned row is never cached
     if (fields.length > 0) {
       const months = new Set<string>();
@@ -837,7 +838,9 @@ export class LiveCopilotDatabase {
     }
     const filedMonth = node.date.slice(0, 7);
     const requested = opts.requestedMonths ?? [];
-    const onlyRequested = requested.length === 1 ? requested[0] : undefined;
+    // Distinct months: a split's touched months repeat one month per row.
+    const distinct = [...new Set(requested)];
+    const onlyRequested = distinct.length === 1 ? distinct[0] : undefined;
     // mutation-guard: a row filed outside the one month the request named is never cached
     if (
       onlyRequested !== undefined &&
@@ -863,7 +866,7 @@ export class LiveCopilotDatabase {
       parentId: null,
       isoCurrencyCode: null,
       ...existing,
-      ...node,
+      ...candidate,
       ...(opts.parentId !== undefined ? { parentId: opts.parentId } : {}),
     };
     // A drifted routing id (empty, or not a string) never overwrites the
@@ -917,12 +920,12 @@ export class LiveCopilotDatabase {
   ] as const;
 
   /** `node` with each absent {@link UNWRITABLE_FIELDS} key taken from `existing`. */
-  private static fillUnwritableFields(node: object, existing: TransactionNode): object {
-    const filled: Record<string, unknown> = { ...node };
+  private static fillUnwritableFields<T extends object>(node: T, existing: TransactionNode): T {
+    const filled: Record<string, unknown> = { ...(node as Record<string, unknown>) };
     for (const key of LiveCopilotDatabase.UNWRITABLE_FIELDS) {
       if (filled[key] === undefined) filled[key] = existing[key];
     }
-    return filled;
+    return filled as T;
   }
 
   /**
