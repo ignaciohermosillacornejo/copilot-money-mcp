@@ -28,6 +28,7 @@ import {
   iterateDocuments,
   auditDocumentTable,
   isDocumentTableKey,
+  isDocumentPathParity,
 } from '../../src/core/leveldb-reader.js';
 import type { DocumentTableAudit } from '../../src/core/leveldb-reader.js';
 import {
@@ -471,6 +472,15 @@ export function reportDocumentKeyShape(
       `${shape.oddSegment} yielded document(s) have an odd segment count, i.e. a collection path`
     );
   }
+  // Every yielded document comes from the audited table, so a range that saw
+  // fewer keys than were yielded is the wrong range, and the over-rejection
+  // count below would be a vacuous zero.
+  if (shape.yielded > 0 && audit.tableKeys < shape.yielded) {
+    problems.push(
+      `the remote_document key range matched ${audit.tableKeys} key(s) but ${shape.yielded} ` +
+        `documents were yielded, so the audit range is wrong and over-rejection is unchecked`
+    );
+  }
   if (audit.rejectedNonEmpty > 0) {
     problems.push(
       `${audit.rejectedNonEmpty} remote_document key(s) with data are rejected by the key ` +
@@ -803,7 +813,7 @@ async function main(): Promise<void> {
   // Ids only, for check 9 — no values are kept.
   // A Set: the decoder dedupes same-id documents, so the counts must too.
   const incomeTransferWithCategory = new Set<string>();
-  const keyShape: DocumentKeyShape = { yielded: 0, foreignTable: 0, oddSegment: 0 };
+  const keyShape = { foreignTable: 0, oddSegment: 0 };
   let scanned = 0;
   const started = Date.now();
 
@@ -821,7 +831,7 @@ async function main(): Promise<void> {
     if (doc.fields.size === 0) entry.empty++;
     tallyRoutedDocument(routed, doc.collection, doc.fields.size === 0);
     if (!isDocumentTableKey(doc.key)) keyShape.foreignTable++;
-    if ((doc.collection.split('/').length + 1) % 2 !== 0) keyShape.oddSegment++;
+    if (!isDocumentPathParity(doc.collection)) keyShape.oddSegment++;
 
     for (const leafPath of nonFiniteLeafPaths(doc.fields)) {
       const key = `${pattern}:${leafPath}`;
@@ -853,8 +863,10 @@ async function main(): Promise<void> {
   // Every check below compares against what `iterateDocuments` yields, so it
   // must first be established that what it yields are documents.
   // ---------------------------------------------------------------------
-  keyShape.yielded = scanned;
-  const keyVerdict = reportDocumentKeyShape(keyShape, await auditDocumentTable(dbPath));
+  const keyVerdict = reportDocumentKeyShape(
+    { ...keyShape, yielded: scanned },
+    await auditDocumentTable(dbPath)
+  );
   record('document key shape', keyVerdict.status, keyVerdict.detail);
 
   const all = await decodeAllCollections(dbPath);

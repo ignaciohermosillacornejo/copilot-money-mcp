@@ -658,6 +658,12 @@ describe('reportDocumentKeyShape', () => {
     expect(detail).toContain('3 yielded document(s) have an odd segment count');
   });
 
+  test('FAILs when the audit range saw fewer keys than were yielded (a vacuous audit)', () => {
+    const { status, detail } = reportDocumentKeyShape(clean, { tableKeys: 0, rejectedNonEmpty: 0 });
+    expect(status).toBe('FAIL');
+    expect(detail).toContain('the audit range is wrong');
+  });
+
   test('FAILs when the parser rejects a document-table key that holds data', () => {
     const { status, detail } = reportDocumentKeyShape(clean, { ...audit, rejectedNonEmpty: 2 });
     expect(status).toBe('FAIL');
