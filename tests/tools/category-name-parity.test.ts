@@ -484,6 +484,10 @@ describe('category_name for an id in neither name map (#867)', () => {
         ),
       });
       expect(await knownRow()).toBeUndefined();
+      // The `excluded` field is derived from the same set, so it follows too.
+      const all = wire(await t.getTransactions({ ...RANGE, exclude_excluded: false }));
+      const row = (all.transactions as Row[]).find((r) => r.category_name === KNOWN_NAME);
+      expect(row?.excluded).toBe(true);
     });
   });
 

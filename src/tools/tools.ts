@@ -101,11 +101,7 @@ import {
 } from '../utils/scheduled-smoke-status.js';
 import { computeTotalReturnPercent, roundAmount } from '../utils/round.js';
 import { pLimit } from '../utils/concurrency.js';
-import {
-  isTransferCategory,
-  isKnownPlaidCategory,
-  lookupKnownCategoryName,
-} from '../utils/categories.js';
+import { isTransferCategory, lookupKnownCategoryName } from '../utils/categories.js';
 import {
   TRANSACTION_TYPE_RULES,
   cacheTypeRuleRow,
@@ -1271,65 +1267,63 @@ export class CopilotMoneyTools {
   > {
     const excludedCategoryIds = await this.db.getExcludedCategoryIds();
     const nameOf = await this.knownCategoryNamer();
-    return (
-      // `income` is internal — see INTERNAL_TRANSACTION_FIELDS. The Omit in the
-      // return type makes surfacing it a compile error; the guard row makes it
-      // a test failure.
-      // mutation-guard: the internal income flag is never returned
-      transactions.map(({ income: _internal, ...txn }) => ({
-        ...txn,
-        category_name: nameOf(txn.category_id) ?? undefined,
-        normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
-        // `excluded` answers "is this row excluded from spending?", which is
-        // the question a caller doing spend math is asking — NOT "is the raw
-        // per-transaction flag set?". Those differ, and shipping the raw flag
-        // made the two modes contradict each other: measured 2026-09-11
-        // against a real transaction in a user-excluded category, the Firestore
-        // document carried `excluded: undefined` while live-mode synthesized
-        // `true` from the same category. Copilot does not stamp the
-        // per-transaction flag when a category is excluded, so the raw flag
-        // alone is not the predicate anyone wants.
-        //
-        // This is the same union getTransactions' exclude_excluded filter
-        // applies, so the field agrees with its own tool's filtering, and
-        // matches the live surface for every row live can observe. The
-        // residual gap is the per-transaction flag itself, which GraphQL
-        // exposes nowhere. That half was unverified until the 2026-10-18 parity
-        // run observed it on a real row (#848 item 5); the ledger entry is now
-        // verified-once.
-        excluded:
-          txn.excluded === true ||
-          (txn.category_id ? excludedCategoryIds.has(txn.category_id) : false),
-        // Defaulted to false when the document has no flag (#825), so a default
-        // row always carries it, as a live row does. Still the raw flag — see
-        // the comment below for why it is not the exclude_transfers union.
-        internal_transfer: txn.internal_transfer === true,
-        // `internal_transfer` deliberately does NOT get the same treatment,
-        // and the asymmetry is the point rather than an oversight. The rule is
-        // "the field means the same thing in both modes", not "the field
-        // matches its own filter":
-        //   - `excluded` needed the union above, because the category half is
-        //     exactly what live can compute, so the union is what makes the two
-        //     modes agree.
-        //   - `internal_transfer` is the raw document flag, because that
-        //     already matches live's server-side `type === 'INTERNAL_TRANSFER'`
-        //     classification — measured 508/508 on real data, zero divergence.
-        // getTransactions' exclude_transfers filter is deliberately BROADER
-        // than the field: isTransferCategory() also matches `credit_card` and
-        // any id containing `transfer` or `payment`, because it is a spend
-        // heuristic ("don't count this as spending"), not a claim about what
-        // the transaction IS. Adopting that union here would let a row's
-        // CATEGORY alone set the field, independently of how live typed the
-        // row — trading a cross-mode divergence for an intra-mode one. That
-        // is the mechanism, not an observation: measured 2026-09-11, 0 of 508
-        // joined rows would flip either way, so nothing in the set exercised
-        // it. The choice is currently unobservable and rests on the reasoning.
-        //
-        // Pinned by "a TRANSFER-CATEGORY row without the raw flag reports
-        // internal_transfer falsy" in tests/tools/tools.test.ts — prose alone
-        // let the next reader "fix the asymmetry" without failing anything.
-      }))
-    );
+    // `income` is internal — see INTERNAL_TRANSACTION_FIELDS. The Omit in the
+    // return type makes surfacing it a compile error; the guard row makes it
+    // a test failure.
+    // mutation-guard: the internal income flag is never returned
+    return transactions.map(({ income: _internal, ...txn }) => ({
+      ...txn,
+      category_name: nameOf(txn.category_id) ?? undefined,
+      normalized_merchant: normalizeMerchantName(getTransactionDisplayName(txn)),
+      // `excluded` answers "is this row excluded from spending?", which is
+      // the question a caller doing spend math is asking — NOT "is the raw
+      // per-transaction flag set?". Those differ, and shipping the raw flag
+      // made the two modes contradict each other: measured 2026-09-11
+      // against a real transaction in a user-excluded category, the Firestore
+      // document carried `excluded: undefined` while live-mode synthesized
+      // `true` from the same category. Copilot does not stamp the
+      // per-transaction flag when a category is excluded, so the raw flag
+      // alone is not the predicate anyone wants.
+      //
+      // This is the same union getTransactions' exclude_excluded filter
+      // applies, so the field agrees with its own tool's filtering, and
+      // matches the live surface for every row live can observe. The
+      // residual gap is the per-transaction flag itself, which GraphQL
+      // exposes nowhere. That half was unverified until the 2026-10-18 parity
+      // run observed it on a real row (#848 item 5); the ledger entry is now
+      // verified-once.
+      excluded:
+        txn.excluded === true ||
+        (txn.category_id ? excludedCategoryIds.has(txn.category_id) : false),
+      // Defaulted to false when the document has no flag (#825), so a default
+      // row always carries it, as a live row does. Still the raw flag — see
+      // the comment below for why it is not the exclude_transfers union.
+      internal_transfer: txn.internal_transfer === true,
+      // `internal_transfer` deliberately does NOT get the same treatment,
+      // and the asymmetry is the point rather than an oversight. The rule is
+      // "the field means the same thing in both modes", not "the field
+      // matches its own filter":
+      //   - `excluded` needed the union above, because the category half is
+      //     exactly what live can compute, so the union is what makes the two
+      //     modes agree.
+      //   - `internal_transfer` is the raw document flag, because that
+      //     already matches live's server-side `type === 'INTERNAL_TRANSFER'`
+      //     classification — measured 508/508 on real data, zero divergence.
+      // getTransactions' exclude_transfers filter is deliberately BROADER
+      // than the field: isTransferCategory() also matches `credit_card` and
+      // any id containing `transfer` or `payment`, because it is a spend
+      // heuristic ("don't count this as spending"), not a claim about what
+      // the transaction IS. Adopting that union here would let a row's
+      // CATEGORY alone set the field, independently of how live typed the
+      // row — trading a cross-mode divergence for an intra-mode one. That
+      // is the mechanism, not an observation: measured 2026-09-11, 0 of 508
+      // joined rows would flip either way, so nothing in the set exercised
+      // it. The choice is currently unobservable and rests on the reasoning.
+      //
+      // Pinned by "a TRANSFER-CATEGORY row without the raw flag reports
+      // internal_transfer falsy" in tests/tools/tools.test.ts — prose alone
+      // let the next reader "fix the asymmetry" without failing anything.
+    }));
   }
 
   /**
@@ -2967,12 +2961,11 @@ export class CopilotMoneyTools {
     );
 
     // Filter out budgets with orphaned category references (deleted categories)
-    const categoryMap = await this.db.getCategoryNameMap();
     const nameOf = await this.knownCategoryNamer();
     const budgets = nonTombstone.filter((b) => {
       if (!b.category_id) return true; // Keep budgets without category
-      // Keep if category exists in user categories or Plaid categories
-      return categoryMap.has(b.category_id) || isKnownPlaidCategory(b.category_id);
+      // Keep if the category has a known name: the same rule that names it.
+      return nameOf(b.category_id) !== null;
     });
 
     // Calculate total budgeted amount (monthly equivalent) using the

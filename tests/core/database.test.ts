@@ -525,6 +525,44 @@ describe('CopilotDatabase', () => {
     });
   });
 
+  describe('getExcludedCategoryIds (#909 review)', () => {
+    test('only excluded === true counts', async () => {
+      (db as any)._userCategories = [
+        { category_id: 'Ex1qK5aD3gJ8cX4hY6eC', excluded: true },
+        { category_id: 'Ex2qK5aD3gJ8cX4hY6eC', excluded: false },
+        { category_id: 'Ex3qK5aD3gJ8cX4hY6eC' },
+      ];
+      expect([...(await db.getExcludedCategoryIds())]).toEqual(['Ex1qK5aD3gJ8cX4hY6eC']);
+    });
+
+    // update_category { is_excluded } writes through patchCachedCategoryUpsert;
+    // the memoized set must follow it, or the next default read keeps counting
+    // the category as spending until refresh_database.
+    test('an upsert that excludes a category is seen by the next read', async () => {
+      (db as any)._userCategories = [{ category_id: 'Ex1qK5aD3gJ8cX4hY6eC', name: 'A' }];
+      expect((await db.getExcludedCategoryIds()).size).toBe(0);
+      db.patchCachedCategoryUpsert({ category_id: 'Ex1qK5aD3gJ8cX4hY6eC', excluded: true });
+      expect([...(await db.getExcludedCategoryIds())]).toEqual(['Ex1qK5aD3gJ8cX4hY6eC']);
+    });
+
+    test('deleting an excluded category is seen by the next read', async () => {
+      (db as any)._userCategories = [
+        { category_id: 'Ex1qK5aD3gJ8cX4hY6eC', name: 'A' },
+        { category_id: 'Ex2qK5aD3gJ8cX4hY6eC', name: 'B', excluded: true },
+      ];
+      expect((await db.getExcludedCategoryIds()).size).toBe(1);
+      db.patchCachedCategoryDelete('Ex2qK5aD3gJ8cX4hY6eC');
+      expect((await db.getExcludedCategoryIds()).size).toBe(0);
+    });
+
+    test('clearCache drops the set', async () => {
+      (db as any)._userCategories = [{ category_id: 'Ex1qK5aD3gJ8cX4hY6eC', excluded: true }];
+      expect((await db.getExcludedCategoryIds()).size).toBe(1);
+      db.clearCache();
+      expect((db as any)._excludedCategoryIds).toBeNull();
+    });
+  });
+
   describe('patchCachedRecurringUpsert / patchCachedRecurringDelete', () => {
     test('upsert adds a new recurring', () => {
       (db as any)._recurring = [{ recurring_id: 'r1', name: 'Spotify' }];

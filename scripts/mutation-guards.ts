@@ -1036,11 +1036,11 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     mutation: {
       kind: 'replace',
       find:
-        '      // mutation-guard: the internal income flag is never returned\n' +
-        '      transactions.map(({ income: _internal, ...txn }) => ({',
+        '    // mutation-guard: the internal income flag is never returned\n' +
+        '    return transactions.map(({ income: _internal, ...txn }) => ({',
       with:
-        '      // mutation-guard: the internal income flag is never returned\n' +
-        '      transactions.map((txn) => ({',
+        '    // mutation-guard: the internal income flag is never returned\n' +
+        '    return transactions.map((txn) => ({',
     },
     expectFailingTests: ['the internal `income` flag is never returned'],
     expectFails: 'tests/tools/transaction-type-parity.test.ts',
