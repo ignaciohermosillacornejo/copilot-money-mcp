@@ -85,6 +85,13 @@ describe('CLI entry point', () => {
       expect(stderr).toContain('Invalid --timeout value: abc');
     });
 
+    test('a timeout with trailing text is refused, not truncated to its digits', async () => {
+      const { exitCode, stderr } = await runCli(['--timeout', '5000ms']);
+
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain('Invalid --timeout value: 5000ms');
+    });
+
     test('invalid timeout "0" prints error and exits with code 1', async () => {
       const { exitCode, stderr } = await runCli(['--timeout', '0']);
 
