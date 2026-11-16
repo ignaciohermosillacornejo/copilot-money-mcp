@@ -1833,7 +1833,7 @@ describe('decoder coverage', () => {
     test('decodes plaid accounts via decodeAllCollections', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-db');
       // A document path has an even segment count, and the key parser rejects an
-      // odd one (#807), so the doc sits one subcollection below the account. No
+      // odd one (#807), so the doc sits one subcollection below the account (route reachability: #915). No
       // real cache has been seen to hold a document at a path this route accepts:
       // the 5-segment shape it was written for came from `remote_document_read_time`
       // index keys misparsed as documents.
@@ -2429,14 +2429,17 @@ describe('decoder coverage', () => {
       expect(result.supportDocs[0]?.support_id).toBe('sup1');
     });
 
-    test('handles financial_goals sentinel docs (parent pointers)', async () => {
+    test('drops an odd-segment financial_goals key without disturbing goal history (#807)', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'fg-sentinel-db');
-      // Sentinel docs exist at users/{uid}/financial_goals/{goal_id} — these are
-      // parent-pointer docs that anchor the financial_goal_history subcollection.
-      // The collection path includes '/financial_goals/' and does NOT end with
-      // '/financial_goal_history', so they match the sentinel routing branch.
+      // This fixture was written for keys seen as users/{uid}/financial_goals/{goal_id}
+      // + a leaf id. That 5-segment path is a collection path: the real keys were
+      // `remote_document_read_time` index entries misparsed as documents, which the
+      // key parser now rejects on table name and parity (#807). So the doc below
+      // never reaches the router any more; the test now pins that a key of that
+      // shape is dropped without disturbing the goal history beside it. Whether
+      // the `financial_goal_sentinels` route is reachable at all is #915.
       await createDeepTestDb(dbPath, [
-        // Sentinel doc: collection is users/user1/financial_goals/goal1, doc is a leaf
+        // Odd-segment "sentinel": rejected by the key parser
         {
           collection: 'users/user1/financial_goals/goal1',
           id: 'sentinel',
@@ -2455,8 +2458,7 @@ describe('decoder coverage', () => {
 
       const result = await decodeAllCollections(dbPath);
 
-      // The sentinel doc should be silently consumed without errors
-      // The goal history should still be decoded
+      // The odd-segment key is dropped by the parser; the history still decodes.
       expect(result.goalHistory.length).toBe(1);
       expect(result.goalHistory[0]?.goal_id).toBe('goal1');
     });
@@ -3807,7 +3809,7 @@ describe('decoder coverage', () => {
     test('plaid account with numeric limit and string verification_status', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-fields-db');
       // A document path has an even segment count, and the key parser rejects an
-      // odd one (#807), so the doc sits one subcollection below the account. No
+      // odd one (#807), so the doc sits one subcollection below the account (route reachability: #915). No
       // real cache has been seen to hold a document at a path this route accepts:
       // the 5-segment shape it was written for came from `remote_document_read_time`
       // index keys misparsed as documents.

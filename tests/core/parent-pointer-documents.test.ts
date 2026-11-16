@@ -220,8 +220,12 @@ describe('no route builds a row from a fieldless document, every route from a po
       id: '2026-01-15',
       populated: { current_balance: 100 },
     },
+    // `items/{i}/accounts/{a}` + id is an odd (collection) path the key parser
+    // rejects (#807), so the doc sits one subcollection lower, the only shape
+    // the route still accepts. Whether the route is reachable on a real cache
+    // at all is #915.
     plaid_accounts: {
-      collection: `items/${I}/accounts/${A}`,
+      collection: `items/${I}/accounts/${A}/details`,
       id: 'pa_7Kd2mQxZ',
       populated: { name: 'Synthetic Checking' },
     },

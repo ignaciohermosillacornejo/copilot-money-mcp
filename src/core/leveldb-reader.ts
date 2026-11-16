@@ -526,8 +526,10 @@ const SUBCOLLECTION_KEY_REGEX = /documents\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/
 function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: string } | null {
   const keyStr = keyBuffer.toString('utf8');
 
-  // Look for 'remote_document' marker
-  if (!keyStr.includes('remote_document')) {
+  // Only keys from the `remote_document` table itself. A sibling table whose
+  // name merely starts with it (`remote_document_read_time`) is rejected here,
+  // for the string-path format as well as the binary one (#807).
+  if (!isDocumentTableKey(keyStr)) {
     return null;
   }
 
@@ -591,19 +593,23 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
         }
         if (keyBuffer[pos] === 0xbe) {
           pos++;
-          // Find the end of this string (next 0x00 or end of buffer)
+          // The string runs to its 0x00 0x01 terminator. It used to stop at
+          // 0x80 too and keep only printable ASCII, but 0x80 is a UTF-8
+          // continuation byte and a non-ASCII segment is still a segment:
+          // dropping one flips path parity and, with the parity check below,
+          // would drop a real document silently (#807).
           let strEnd = pos;
-          while (
-            strEnd < keyBuffer.length &&
-            keyBuffer[strEnd] !== 0x00 &&
-            keyBuffer[strEnd] !== 0x80
-          ) {
+          while (strEnd < keyBuffer.length && keyBuffer[strEnd] !== 0x00) {
             strEnd++;
           }
           if (strEnd > pos) {
             const str = keyBuffer.slice(pos, strEnd).toString('utf8');
-            // Filter out non-printable strings
-            if (str.length > 0 && /^[\x20-\x7e]+$/.test(str)) {
+            // A control character means this is not a path segment.
+            const hasControl = Array.from(str).some((c) => {
+              const code = c.charCodeAt(0);
+              return code < 0x20 || code === 0x7f;
+            });
+            if (!hasControl) {
               segments.push(str);
             }
           }
@@ -831,7 +837,11 @@ const DOCUMENT_TABLE_GTE = Buffer.concat([
   Buffer.from('remote_document', 'utf8'),
   Buffer.from([0x00, 0x01]),
 ]);
-const DOCUMENT_TABLE_LT = Buffer.concat([DOCUMENT_TABLE_GTE.subarray(0, -1), Buffer.from([0x02])]);
+const DOCUMENT_TABLE_LT = Buffer.concat([
+  Buffer.from([0x85]),
+  Buffer.from('remote_document', 'utf8'),
+  Buffer.from([0x00, 0x02]),
+]);
 
 /** What {@link auditDocumentTable} counted. Counts only, so it is PII-safe to log. */
 export interface DocumentTableAudit {
@@ -851,7 +861,9 @@ export interface DocumentTableAudit {
  * segment it drops, a shape it does not expect) now vanishes silently instead
  * of being misread. `smoke:cache` calls this so that loss is loud.
  *
- * Reads a temp copy, like {@link iterateDocuments}.
+ * Reads a temp copy, like {@link iterateDocuments}. Called right after an
+ * iteration it normally reuses that copy, but if the source changed in between
+ * it makes a fresh one, which costs a full copy of the cache.
  */
 export async function auditDocumentTable(dbPath: string): Promise<DocumentTableAudit> {
   const tempDbPath = copyDatabaseToTemp(dbPath);
@@ -874,6 +886,17 @@ export async function auditDocumentTable(dbPath: string): Promise<DocumentTableA
     releaseTempDatabase(dbPath);
   }
   return audit;
+}
+
+/**
+ * Does a document at `collection`/{id} have a document path's parity (#807)?
+ *
+ * A Firestore document path has an even number of segments; an odd count is a
+ * collection path. One definition, so the key parser's guard and the
+ * `smoke:cache` oracle that checks it cannot drift apart.
+ */
+export function isDocumentPathParity(collection: string): boolean {
+  return (collection.split('/').length + 1) % 2 === 0;
 }
 
 /**

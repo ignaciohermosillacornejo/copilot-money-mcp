@@ -15,6 +15,7 @@ import {
   _getTempDbCache,
   auditDocumentTable,
   isDocumentTableKey,
+  isDocumentPathParity,
 } from '../../src/core/leveldb-reader.js';
 import { encodeFirestoreDocument } from '../../src/core/protobuf-parser.js';
 import path from 'node:path';
@@ -234,8 +235,7 @@ describe('leveldb-reader', () => {
         const odd = KEYS.flatMap(({ label, key }) => {
           const parsed = parseDocumentKey(key);
           if (!parsed) return [];
-          const segments = parsed.collection.split('/').length + 1;
-          return segments % 2 === 0 ? [] : [`${label}: ${segments} segments`];
+          return isDocumentPathParity(parsed.collection) ? [] : [label];
         });
         expect(odd).toEqual([]);
       });
@@ -281,7 +281,7 @@ describe('leveldb-reader', () => {
         for await (const doc of iterateDocuments(dbPath)) {
           emitted.push(`${doc.collection}/${doc.documentId}`);
         }
-        const odd = emitted.filter((p) => p.split('/').length % 2 !== 0);
+        const odd = emitted.filter((p) => !isDocumentPathParity(p.slice(0, p.lastIndexOf('/'))));
         expect(odd).toEqual([]);
         expect(emitted.sort()).toEqual(
           [
@@ -311,6 +311,30 @@ describe('leveldb-reader', () => {
         // keys are outside the table's range. Rejected with data: the 3- and
         // 5-segment document-table keys.
         expect(await auditDocumentTable(dbPath)).toEqual({ tableKeys: 6, rejectedNonEmpty: 2 });
+      });
+
+      test('a non-ASCII segment is kept, so it does not flip parity and drop the document', () => {
+        // 0xC4 0x80 is 'Ā': its second byte is the 0x80 the parser used to stop at.
+        expect(parseDocumentKey(documentTableKey(['users', ITEM, 'tags', 'Āb€']))).toEqual({
+          collection: `users/${ITEM}/tags`,
+          documentId: 'Āb€',
+        });
+      });
+
+      test('the string-path format rejects a sibling table too', () => {
+        expect(
+          parseDocumentKey(
+            Buffer.from(
+              'remote_document_read_time/projects/p/databases/(default)/documents/users/u1',
+              'utf8'
+            )
+          )
+        ).toBeNull();
+        expect(
+          parseDocumentKey(
+            Buffer.from('remote_document/projects/p/databases/(default)/documents/users/u1', 'utf8')
+          )
+        ).toEqual({ collection: 'users', documentId: 'u1' });
       });
 
       test('isDocumentTableKey tells the document table from its sibling', () => {
