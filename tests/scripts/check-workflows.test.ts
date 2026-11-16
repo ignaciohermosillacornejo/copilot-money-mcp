@@ -1131,6 +1131,31 @@ jobs:
     );
   });
 
+  test('an unquoted trust list repeated at workflow and job level is reported once', async () => {
+    await withWorkflows(
+      {
+        'twice.yml': `name: Twice
+on: push
+env:
+  APPROVERS: ["octocat"]
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      APPROVERS: ["octocat"]
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr.split('must be a quoted JSON string').length - 1).toBe(1);
+      }
+    );
+  });
+
   test('an exclusion (`!=`) is not a declaration of trust', async () => {
     // `github.actor != 'dependabot[bot]'` is in claude-review.yml today.
     // Demanding that a DENIED login appear in the trust list would be exactly

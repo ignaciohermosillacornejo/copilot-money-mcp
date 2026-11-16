@@ -138,6 +138,15 @@ if (onlySection && !VALID_SECTIONS.includes(onlySection)) {
   process.exit(2);
 }
 
+/** A non-Error thrown value as JSON, falling back to String() when it cannot be. */
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value); // cyclic: never let the diagnostic itself throw
+  }
+}
+
 function sectionEnabled(name: string): boolean {
   if (onlySection) return name === onlySection;
   if (name === 'errors' && skipErrors) return false;
@@ -1756,7 +1765,7 @@ async function smokeBulkReviewTransactions(
     if (!caught) throw new Error('no error thrown from invalid id');
     if (!(caught instanceof GraphQLError)) {
       throw new Error(
-        `expected GraphQLError, got: ${caught instanceof Error ? caught.message : JSON.stringify(caught)}`
+        `expected GraphQLError, got: ${caught instanceof Error ? caught.message : safeJson(caught)}`
       );
     }
     console.log(`    classified as code=${caught.code} (${caught.message.slice(0, 80)})`);
