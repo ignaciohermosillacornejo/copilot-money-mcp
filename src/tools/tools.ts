@@ -927,6 +927,7 @@ export class CopilotMoneyTools {
       tags: () => live.getTagsCache().invalidate(),
       recurring: () => {
         live.getRecurringCache().invalidate();
+        // mutation-guard: a possibly-applied recurring write drops its derived snapshots
         live.invalidateRecurringDerivedSnapshots();
       },
     };
@@ -962,15 +963,26 @@ export class CopilotMoneyTools {
   }
 
   /**
-   * Drop the cached live months holding a row that matches `predicate`
-   * (#911 review): after an accepted write when `e` is undefined, or after a
-   * thrown one that may have applied. For a delete or relink whose response
+   * After an ACCEPTED write: drop the cached live months holding a row that
+   * matches `predicate` (#911 review). For a delete or relink whose response
    * names no transactions but whose effect reaches every row linked to the
    * entity; a refetch for nothing if the assumed effect does not happen.
    */
-  private dropLinkedRowMonths(predicate: (row: TransactionNode) => boolean, e?: unknown): void {
-    if (e !== undefined && !(e instanceof GraphQLError && e.writeMayHaveApplied)) return;
+  private dropLinkedRowMonths(predicate: (row: TransactionNode) => boolean): void {
     this.liveDb?.invalidateLiveMonthsMatching(predicate);
+  }
+
+  /**
+   * After the same write THREW: drop those months only if it may have
+   * applied. A rejection that cannot have written leaves them cached.
+   */
+  private dropLinkedRowMonthsIfApplied(
+    predicate: (row: TransactionNode) => boolean,
+    e: unknown
+  ): void {
+    // mutation-guard: a rejected write keeps its linked-row months
+    if (!(e instanceof GraphQLError && e.writeMayHaveApplied)) return;
+    this.dropLinkedRowMonths(predicate);
   }
 
   /** Live rows linked to recurring `id`. */
@@ -983,9 +995,14 @@ export class CopilotMoneyTools {
     return (row) => row.categoryId === id;
   }
 
-  /** Live rows carrying tag `id`. */
+  /**
+   * Live rows carrying tag `id`. `tags` is present on every cached row (the
+   * read schema requires it, read-validation.ts), but a row missing it is
+   * treated as untagged rather than thrown on, so an applied delete_tag can
+   * never surface as a TypeError.
+   */
   private static hasTag(id: string): (row: TransactionNode) => boolean {
-    return (row) => row.tags.some((t) => t.id === id);
+    return (row) => row.tags?.some((t) => t.id === id) ?? false;
   }
 
   /** YYYY-MM of `date` when it is a string long enough to have one. */
@@ -5823,7 +5840,7 @@ export class CopilotMoneyTools {
       this.dropLinkedRowMonths(CopilotMoneyTools.hasTag(args.tag_id));
       return { success: true, tag_id: result.id, deleted: true };
     } catch (e) {
-      this.dropLinkedRowMonths(CopilotMoneyTools.hasTag(args.tag_id), e);
+      this.dropLinkedRowMonthsIfApplied(CopilotMoneyTools.hasTag(args.tag_id), e);
       this.afterPossiblyAppliedEntityWrite(e, 'tags');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
@@ -5917,7 +5934,7 @@ export class CopilotMoneyTools {
       this.afterCategoryWrite();
       return { success: true, category_id: result.id, deleted: true };
     } catch (e) {
-      this.dropLinkedRowMonths(CopilotMoneyTools.inCategory(args.category_id), e);
+      this.dropLinkedRowMonthsIfApplied(CopilotMoneyTools.inCategory(args.category_id), e);
       this.afterPossiblyAppliedEntityWrite(e, 'categories');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
@@ -6066,7 +6083,7 @@ export class CopilotMoneyTools {
       this.afterRecurringWrite();
       return { success: true, recurring_id: result.id, deleted: true };
     } catch (e) {
-      this.dropLinkedRowMonths(CopilotMoneyTools.inSeries(args.recurring_id), e);
+      this.dropLinkedRowMonthsIfApplied(CopilotMoneyTools.inSeries(args.recurring_id), e);
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
@@ -6271,6 +6288,7 @@ export class CopilotMoneyTools {
       // A create that may have landed may have linked the seed row too; the
       // generic helper below has no transaction id, so its month goes here.
       if (e instanceof GraphQLError && e.writeMayHaveApplied) {
+        // mutation-guard: a possibly-applied create_recurring drops its seed month
         this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);
       }
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
@@ -6409,7 +6427,7 @@ export class CopilotMoneyTools {
       return { success: true, recurring_id: result.id, updated: Object.keys(result.changed) };
     } catch (e) {
       if (args.category_id !== undefined) {
-        this.dropLinkedRowMonths(CopilotMoneyTools.inSeries(args.recurring_id), e);
+        this.dropLinkedRowMonthsIfApplied(CopilotMoneyTools.inSeries(args.recurring_id), e);
       }
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });

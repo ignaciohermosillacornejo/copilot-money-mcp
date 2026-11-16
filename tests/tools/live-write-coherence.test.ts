@@ -1768,7 +1768,19 @@ describe('a malformed returned row is never cached (#864 review)', () => {
 // fails the scope-classification tests until a family list names it or
 // exempts it with a reason.
 
-type WriteFamily = 'transaction' | 'recurring' | 'category' | 'reference';
+type WriteFamily = 'transaction' | 'recurring' | 'category' | 'category_create' | 'tag';
+
+/**
+ * Whether a write reaches transaction rows its response does not name, by a
+ * field those rows carry (#911 review). `row` is what a linked cached row
+ * looks like; `args` overrides the table's args when only some calls reach
+ * them. Required on every write (null = reaches none), so a new write tool is
+ * asked this as well as its family.
+ */
+interface LinkedRows {
+  row: Partial<TransactionNode>;
+  args?: Record<string, unknown>;
+}
 
 const FAMILY_DROPS: Record<WriteFamily, readonly SnapshotKey[]> = {
   transaction: LiveCopilotDatabase.TRANSACTION_DERIVED_SNAPSHOTS,
@@ -1776,11 +1788,11 @@ const FAMILY_DROPS: Record<WriteFamily, readonly SnapshotKey[]> = {
   // update_category, delete_category, set_budget: monthly spend's budget
   // comparison and its category-based exclusions (#911 review).
   category: LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS,
-  // Writes that drop no derived snapshot: create_category (a new category
-  // holds no rows) and the tag writes (no probed snapshot is computed from
-  // tags; delete_tag drops the cached months of rows carrying the tag, tested
-  // below). Each patches its own snapshot.
-  reference: [],
+  // A new category holds no rows yet, so no monthly-spend input moves.
+  category_create: [],
+  // Empty, but a list: a snapshot computed from tags must be classified in
+  // SNAPSHOTS_NOT_DROPPED_BY_TAG_WRITES or added here.
+  tag: LiveCopilotDatabase.TAG_DERIVED_SNAPSHOTS,
 };
 
 const RECURRING_RESPONSE = {
@@ -1798,6 +1810,7 @@ const NON_TRANSACTION_WRITES: Record<
     family: Exclude<WriteFamily, 'transaction'>;
     mocks: MockResponsesByOp;
     args: Record<string, unknown>;
+    linked: LinkedRows | null;
   }
 > = {
   create_recurring: {
@@ -1808,11 +1821,18 @@ const NON_TRANSACTION_WRITES: Record<
       },
     },
     args: { ...routing, transaction_id: TX_RECURRING, frequency: 'MONTHLY' },
+    // Its seed row is named by id; dropped by its own test above.
+    linked: null,
   },
   update_recurring: {
     family: 'recurring',
     mocks: { EditRecurring: { editRecurring: { recurring: RECURRING_RESPONSE } } },
     args: { recurring_id: RECURRING_ID, name: 'Gym' },
+    // Only a category change reaches the series' rows.
+    linked: {
+      row: { recurringId: RECURRING_ID },
+      args: { recurring_id: RECURRING_ID, category_id: CAT_NEW },
+    },
   },
   set_recurring_state: {
     family: 'recurring',
@@ -1820,21 +1840,26 @@ const NON_TRANSACTION_WRITES: Record<
       EditRecurring: { editRecurring: { recurring: { ...RECURRING_RESPONSE, state: 'PAUSED' } } },
     },
     args: { recurring_id: RECURRING_ID, state: 'PAUSED' },
+    // A state change does not touch the series' rows.
+    linked: null,
   },
   delete_recurring: {
     family: 'recurring',
     mocks: { DeleteRecurring: { deleteRecurring: true } },
     args: { recurring_id: RECURRING_ID },
+    linked: { row: { recurringId: RECURRING_ID } },
   },
   create_category: {
     // Not 'category': a new category holds no rows, so no monthly-spend input moves.
-    family: 'reference',
+    family: 'category_create',
     mocks: {
       CreateCategory: {
         createCategory: { id: 'bN4mV7cX1zL8kJ5hG2fD', name: 'Pets', colorName: 'BLUE1' },
       },
     },
     args: { name: 'Pets', color_name: 'BLUE1', emoji: '🐶' },
+    // A new category holds no rows.
+    linked: null,
   },
   update_category: {
     family: 'category',
@@ -1844,45 +1869,64 @@ const NON_TRANSACTION_WRITES: Record<
       },
     },
     args: { category_id: CAT_OLD, name: 'Food' },
+    // category_name and excluded are projected from the categories list, not stored.
+    linked: null,
   },
   delete_category: {
     family: 'category',
     mocks: { DeleteCategory: { deleteCategory: true } },
     args: { category_id: CAT_NEW },
+    linked: { row: { categoryId: CAT_NEW } },
   },
   set_budget: {
     family: 'category',
     mocks: { EditBudget: { editCategoryBudget: true } },
     args: { category_id: CAT_OLD, amount: '100' },
+    // A budget lives on the category, not on rows.
+    linked: null,
   },
   create_tag: {
-    family: 'reference',
+    family: 'tag',
     mocks: {
       CreateTag: { createTag: { id: 'dF6gH9jK2lZ5xC8vB1nM', name: 'Work', colorName: 'RED1' } },
     },
     args: { name: 'Work', color_name: 'RED1' },
+    // A new tag is on no rows.
+    linked: null,
   },
   update_tag: {
-    family: 'reference',
+    family: 'tag',
     mocks: { EditTag: { editTag: { ...TAG_NODE, name: 'Trip 2' } } },
     args: { tag_id: TAG_ID, name: 'Trip 2' },
+    // Rows carry tag ids, which a rename does not change.
+    linked: null,
   },
   delete_tag: {
-    family: 'reference',
+    family: 'tag',
     mocks: { DeleteTag: { deleteTag: true } },
     args: { tag_id: TAG_ID },
+    linked: { row: { tags: [TAG_NODE] } },
   },
 };
 
 /** Every write tool, its family, and how to run it successfully. */
 const WRITE_TABLE: Readonly<
-  Record<string, { family: WriteFamily; mocks: MockResponsesByOp; args: Record<string, unknown> }>
+  Record<
+    string,
+    {
+      family: WriteFamily;
+      mocks: MockResponsesByOp;
+      args: Record<string, unknown>;
+      linked: LinkedRows | null;
+    }
+  >
 > = {
   ...NON_TRANSACTION_WRITES,
   ...Object.fromEntries(
     Object.entries(CASES).map(([name, c]) => [
       name,
-      { family: 'transaction' as const, mocks: c.mocks, args: c.args },
+      // A transaction write names its rows; its own write-through covers them.
+      { family: 'transaction' as const, mocks: c.mocks, args: c.args, linked: null },
     ])
   ),
 };
@@ -1914,6 +1958,11 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
       'category',
       LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS,
       LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_CATEGORY_WRITES,
+    ],
+    [
+      'tag',
+      LiveCopilotDatabase.TAG_DERIVED_SNAPSHOTS,
+      LiveCopilotDatabase.SNAPSHOTS_NOT_DROPPED_BY_TAG_WRITES,
     ],
   ] as const)(
     'every refresh_cache scope is classified for %s writes too',
@@ -2006,32 +2055,18 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
    */
   const LINKED_ROW_WRITES: Array<
     [string, MockResponsesByOp, Record<string, unknown>, Partial<TransactionNode>]
-  > = [
-    [
-      'delete_recurring',
-      NON_TRANSACTION_WRITES.delete_recurring!.mocks,
-      NON_TRANSACTION_WRITES.delete_recurring!.args,
-      { recurringId: RECURRING_ID },
-    ],
-    [
-      'update_recurring',
-      NON_TRANSACTION_WRITES.update_recurring!.mocks,
-      { recurring_id: RECURRING_ID, category_id: CAT_NEW },
-      { recurringId: RECURRING_ID },
-    ],
-    [
+  > = Object.entries(WRITE_TABLE).flatMap(([name, c]) =>
+    c.linked === null ? [] : [[name, c.mocks, c.linked.args ?? c.args, c.linked.row]]
+  );
+
+  test('the linked-row writes are the ones expected (#911 review)', () => {
+    expect(LINKED_ROW_WRITES.map(([name]) => name).sort()).toEqual([
       'delete_category',
-      NON_TRANSACTION_WRITES.delete_category!.mocks,
-      NON_TRANSACTION_WRITES.delete_category!.args,
-      { categoryId: CAT_NEW },
-    ],
-    [
+      'delete_recurring',
       'delete_tag',
-      NON_TRANSACTION_WRITES.delete_tag!.mocks,
-      NON_TRANSACTION_WRITES.delete_tag!.args,
-      { tags: [TAG_NODE] },
-    ],
-  ];
+      'update_recurring',
+    ]);
+  });
 
   /** Warm the cold month, link one cached row, and confirm it is still cached. */
   async function warmLinked(mocks: MockResponsesByOp, link: Partial<TransactionNode>) {

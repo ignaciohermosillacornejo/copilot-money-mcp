@@ -429,6 +429,59 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/tools/live-write-coherence.test.ts',
   },
   {
+    name: 'a possibly-applied create_recurring drops its seed month',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'A create_recurring the server may have applied may have linked its seed transaction ' +
+      '(unverified: Mutation.createRecurring:links-seed-transaction). Its catch must drop the ' +
+      "seed row's cached month, as a failed transaction write does (#832), or the cold tier " +
+      'serves the row unlinked for up to a week (#911).',
+    mutation: {
+      kind: 'remove',
+      find: wholeLines(
+        '        // mutation-guard: a possibly-applied create_recurring drops its seed month',
+        '        this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);'
+      ),
+    },
+    expectFailingTests: ["a create_recurring that may have applied drops the seed row's month too"],
+    expectFails: 'tests/tools/live-write-coherence.test.ts',
+  },
+  {
+    name: 'a rejected write keeps its linked-row months',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'A delete or recategorize that THREW drops the cached months of its linked rows only ' +
+      'when it may have applied. Without the writeMayHaveApplied check a validation error, ' +
+      'which cannot have written, would discard every month holding a linked row (#911).',
+    mutation: {
+      kind: 'replace',
+      find:
+        '    // mutation-guard: a rejected write keeps its linked-row months\n' +
+        '    if (!(e instanceof GraphQLError && e.writeMayHaveApplied)) return;',
+      with: '    // mutation-guard: a rejected write keeps its linked-row months\n' + '    void e;',
+    },
+    expectFailingTests: ['a rejection that cannot have written keeps them'],
+    expectFails: 'tests/tools/live-write-coherence.test.ts',
+  },
+  {
+    name: 'a possibly-applied recurring write drops its derived snapshots',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'A recurring write that may have applied must drop the snapshots computed from ' +
+      'recurrings (LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS), not only the recurring ' +
+      'list, or get_upcoming_recurrings_live and get_monthly_spend_live serve pre-write ' +
+      'figures for up to an hour (#868, #911).',
+    mutation: {
+      kind: 'remove',
+      find: wholeLines(
+        '        // mutation-guard: a possibly-applied recurring write drops its derived snapshots',
+        '        live.invalidateRecurringDerivedSnapshots();'
+      ),
+    },
+    expectFailingTests: ['a writeApplied error drops the snapshot'],
+    expectFails: 'tests/tools/possibly-applied-entity-write.test.ts',
+  },
+  {
     name: 'create_transaction writes through to the live cache',
     file: 'src/tools/tools.ts',
     invariant:

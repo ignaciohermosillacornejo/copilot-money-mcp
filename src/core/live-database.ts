@@ -1160,6 +1160,36 @@ export class LiveCopilotDatabase {
     investment_prices: 'market data',
   };
 
+  /**
+   * The snapshots a tag write can make stale: none. No derived snapshot is
+   * computed from tags (cached rows carry tag ids, and delete_tag drops the
+   * months of the rows carrying the deleted one itself). An empty list rather
+   * than no list, so a snapshot added later must be classified here or in
+   * SNAPSHOTS_NOT_DROPPED_BY_TAG_WRITES, as for the other families.
+   */
+  static readonly TAG_DERIVED_SNAPSHOTS = [] as const;
+
+  /** refresh_cache scopes a tag write leaves alone, and why. */
+  static readonly SNAPSHOTS_NOT_DROPPED_BY_TAG_WRITES: Readonly<Record<string, string>> = {
+    tags: "the write's own snapshot, patched in place on success",
+    transactions: "a month-keyed window, not a snapshot; delete_tag drops its rows' months itself",
+    accounts: 'balances come from amounts, which a tag write does not change',
+    networth: 'a sum of account balances (same reason)',
+    balance_history: 'account balances over time (same reason)',
+    monthly_spend: 'spend is not split by tag',
+    categories: 'reference data',
+    budgets: 'served from the categories list',
+    recurring: 'recurrings carry no tags',
+    upcoming_recurrings: 'computed from recurring amounts and dates',
+    user: 'account settings',
+    holdings: 'priced from market data',
+    investment_allocation: 'priced from market data',
+    top_movers: 'priced from market data',
+    aggregated_holdings: 'priced from market data',
+    investment_balance: 'priced from market data',
+    investment_prices: 'market data',
+  };
+
   private derivedSnapshotsByKey?: Record<DerivedSnapshotKey, { invalidate(): void }>;
 
   /**
