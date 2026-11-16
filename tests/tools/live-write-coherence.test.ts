@@ -902,54 +902,46 @@ describe('write responses use live row field names (#825)', () => {
     expect(() => liveRowFromMutation(tx)).not.toThrow();
   });
 
-  // The lower bound's oracle. Every get_transactions_live field is either on
-  // every write row, on a split child only, or left out for a documented
-  // reason (WRITE_ROW_FIELDS' docblock). These lists name the exclusions,
-  // never the write-row fields themselves, so the required set below is
-  // derived from the live read mapper rather than from WRITE_ROW_FIELDS:
-  // deleting a field from WRITE_ROW_FIELDS orphans it here, and a new live
-  // field must be classified before it ships.
-  const LEFT_OUT_OF_WRITE_ROWS = ['category_name', 'excluded', 'iso_currency_code', 'tag_ids'];
+  // The lower bound's oracle. Every get_transactions_live field is on every
+  // write row (WRITE_ROW_FIELDS), on some write rows only, or never on one.
+  // These lists name only the fields outside WRITE_ROW_FIELDS, so the
+  // required set below is derived from the live read mapper rather than from
+  // WRITE_ROW_FIELDS: deleting a field from WRITE_ROW_FIELDS orphans it here,
+  // and a new live field must be classified before it ships.
+  /** Never on a write row: needs the category index, or the fragment omits it. */
+  const NEVER_ON_WRITE_ROWS = ['category_name', 'excluded', 'iso_currency_code'];
+  /**
+   * On a write row, but only when there are tags to report: mapped by the
+   * write path itself (toWriteTransactionRow), outside WRITE_ROW_FIELDS.
+   */
+  const CONDITIONAL_ON_WRITE_ROWS = ['tag_ids'];
+  /** On a split child's row only (SPLIT_CHILD_FIELD). */
   const SPLIT_CHILD_ONLY = ['parent_transaction_id'];
+  const NOT_ON_EVERY_ROW = [
+    ...NEVER_ON_WRITE_ROWS,
+    ...CONDITIONAL_ON_WRITE_ROWS,
+    ...SPLIT_CHILD_ONLY,
+  ];
   const REQUIRED_ON_EVERY_ROW = [...LIVE_TRANSACTION_KNOWN_FIELDS].filter(
-    (f) => !LEFT_OUT_OF_WRITE_ROWS.includes(f) && !SPLIT_CHILD_ONLY.includes(f)
+    (f) => !NOT_ON_EVERY_ROW.includes(f)
   );
 
-  test('every live field is a write-row field, the split-child field, or left out', () => {
-    for (const f of [...LEFT_OUT_OF_WRITE_ROWS, ...SPLIT_CHILD_ONLY]) {
-      expect(LIVE_TRANSACTION_KNOWN_FIELDS.has(f)).toBe(true);
-    }
-    const classified = [...writeRowFields(), ...SPLIT_CHILD_ONLY, ...LEFT_OUT_OF_WRITE_ROWS];
-    expect(new Set(classified).size).toBe(classified.length);
+  test('every live field is a write-row field, a conditional or split-child field, or left out', () => {
+    const unknown = NOT_ON_EVERY_ROW.filter((f) => !LIVE_TRANSACTION_KNOWN_FIELDS.has(f));
+    expect(unknown).toEqual([]);
+    const classified = [...writeRowFields(), ...NOT_ON_EVERY_ROW];
+    const dupes = classified.filter((f, i) => classified.indexOf(f) !== i);
+    expect(dupes).toEqual([]);
     expect(classified.sort()).toEqual([...LIVE_TRANSACTION_KNOWN_FIELDS].sort());
   });
 
-  // The lower bound on the rows themselves: every returned row carries every
-  // required live field (the upper bound is the next test). Object.keys keeps
-  // a key whose value is undefined, so a field the fixture leaves empty still
-  // counts as present.
-  test.each(Object.keys(RESPONSE_ROWS).filter((name) => RESPONSE_ROWS[name]! > 0))(
-    '%s: every returned transaction row carries every write-row field',
-    async (toolName) => {
-      const c = CASES[toolName]!;
-      const { call, read } = setup(c.mocks);
-      await read();
-      const rows = transactionRowsIn(await call(toolName, c.args));
-      expect(rows).toHaveLength(RESPONSE_ROWS[toolName]!);
-      expect(REQUIRED_ON_EVERY_ROW.length).toBeGreaterThan(0);
-      for (const row of rows) {
-        const keys = Object.keys(row);
-        const missing = REQUIRED_ON_EVERY_ROW.filter((k) => !keys.includes(k));
-        expect({ id: row.transaction_id, missing }).toEqual({
-          id: row.transaction_id,
-          missing: [],
-        });
-      }
-    }
-  );
-
+  // Both bounds on the rows themselves, in one walk: every returned row's
+  // keys are get_transactions_live fields (upper), and every row carries
+  // every field required on every row (lower). Object.keys keeps a key whose
+  // value is undefined, so a misnamed key is caught, and a field the fixture
+  // leaves empty still counts as present.
   test.each(Object.keys(RESPONSE_ROWS))(
-    '%s: every returned transaction row key is a get_transactions_live field',
+    '%s: every returned transaction row key is a get_transactions_live field, and none is missing',
     async (toolName) => {
       const c = CASES[toolName]!;
       const { call, read } = setup(c.mocks);
@@ -957,13 +949,15 @@ describe('write responses use live row field names (#825)', () => {
       const response = await call(toolName, c.args);
       const rows = transactionRowsIn(response);
       expect(rows).toHaveLength(RESPONSE_ROWS[toolName]!);
+      expect(REQUIRED_ON_EVERY_ROW.length).toBeGreaterThan(0);
       for (const row of rows) {
-        // Object.keys keeps a key whose value is undefined, so a misnamed key
-        // is caught even when the fixture leaves that field empty.
-        const foreign = Object.keys(row).filter((k) => !LIVE_TRANSACTION_KNOWN_FIELDS.has(k));
-        expect({ id: row.transaction_id, foreign }).toEqual({
+        const keys = Object.keys(row);
+        const foreign = keys.filter((k) => !LIVE_TRANSACTION_KNOWN_FIELDS.has(k));
+        const missing = REQUIRED_ON_EVERY_ROW.filter((k) => !keys.includes(k));
+        expect({ id: row.transaction_id, foreign, missing }).toEqual({
           id: row.transaction_id,
           foreign: [],
+          missing: [],
         });
       }
     }
