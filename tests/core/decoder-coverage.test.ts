@@ -2645,6 +2645,22 @@ describe('decoder coverage', () => {
       }
     });
 
+    test.each(['5000ms', '5e3', '99999999999'])(
+      'returns default timeout for %s, which --timeout would refuse too',
+      (value) => {
+        const original = process.env.DECODE_TIMEOUT_MS;
+        process.env.DECODE_TIMEOUT_MS = value;
+
+        expect(getDecodeTimeoutMs()).toBe(90_000);
+
+        if (original !== undefined) {
+          process.env.DECODE_TIMEOUT_MS = original;
+        } else {
+          delete process.env.DECODE_TIMEOUT_MS;
+        }
+      }
+    );
+
     test('returns default timeout when env var is zero', () => {
       const original = process.env.DECODE_TIMEOUT_MS;
       process.env.DECODE_TIMEOUT_MS = '0';

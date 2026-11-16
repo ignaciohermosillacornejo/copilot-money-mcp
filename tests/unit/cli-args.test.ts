@@ -97,6 +97,14 @@ describe('parseCliArgs', () => {
         }
       });
 
+      test(`${flag.name} followed by a flag in another case or dash count is refused`, () => {
+        for (const other of ['-V', '-Write', '-H']) {
+          expect(errorOf([flag.name, other])).toBe(`${flag.name} requires a value`);
+        }
+        // A non-dashed word that happens to spell a flag is still a value.
+        expect(valueOf(parseCliArgs([flag.name, 'WRITE']), flag.name)).toBe('WRITE');
+      });
+
       test(`an empty ${flag.name}= is refused`, () => {
         expect(errorOf([`${flag.name}=`])).toBe(`${flag.name} requires a value`);
         expect(errorOf([`${flag.name}=  `])).toBe(`${flag.name} requires a value`);

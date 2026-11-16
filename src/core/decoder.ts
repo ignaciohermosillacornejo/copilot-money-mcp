@@ -58,6 +58,7 @@ import {
 import { Security, SecuritySchema } from '../models/security.js';
 import { UserProfile, UserProfileSchema } from '../models/user-profile.js';
 import { Tag, TagSchema } from '../models/tag.js';
+import { parseTimeoutMs } from '../utils/timeout.js';
 import {
   AmazonIntegration,
   AmazonIntegrationSchema,
@@ -3730,8 +3731,10 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
 export function getDecodeTimeoutMs(): number {
   const envValue = process.env.DECODE_TIMEOUT_MS;
   if (envValue !== undefined) {
-    const ms = parseInt(envValue, 10);
-    if (!isNaN(ms) && ms > 0) {
+    // Same rules as --timeout, which the help text says this matches; an
+    // invalid value falls back to the default rather than stopping startup.
+    const ms = parseTimeoutMs(envValue);
+    if (ms !== undefined) {
       return ms;
     }
   }
