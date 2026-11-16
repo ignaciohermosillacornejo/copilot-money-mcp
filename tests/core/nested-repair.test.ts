@@ -94,6 +94,28 @@ describe('repairNestedIssues', () => {
     });
   });
 
+  test('never claims a removal for an issue path that runs past the data', () => {
+    // One repairable issue (a null price) and, while it is present, one issue
+    // two levels past the data. Only the price is actually removed, so only
+    // the price may be reported.
+    const Schema = z
+      .object({
+        id: z.string(),
+        items: z.array(z.object({ name: z.string(), price: z.number().nullable().optional() })),
+      })
+      .superRefine((doc, ctx) => {
+        if (doc.items[0]?.price === null) {
+          ctx.addIssue({ code: 'custom', path: ['items', 0, 'price'], message: 'no null' });
+          ctx.addIssue({ code: 'custom', path: ['items', 0, 'name', 'a', 'b'], message: 'deep' });
+        }
+      });
+
+    const result = repairNestedIssues(Schema, { id: 'x', items: [{ name: 'n', price: null }] });
+
+    expect(result).toMatchObject({ ok: true, data: { id: 'x', items: [{ name: 'n' }] } });
+    expect(result.ok && result.removed.map((r) => r.path)).toEqual(['items.0.price']);
+  });
+
   test('refuses a top-level failure outright', () => {
     const Schema = z.object({ id: z.string(), items: z.array(z.number()).optional() });
 
