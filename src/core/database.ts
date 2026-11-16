@@ -266,8 +266,9 @@ function getCacheTTLMs(): number {
  *   injected or never loaded).
  * - `note`: human-readable health line. Terse in the zero-drop case; when
  *   drops exist it explains what happened and what to do. Repaired documents
- *   (#659 — a non-finite numeric field removed so the rest of the document
- *   survives) are reported here too: they are partial data loss, not silent.
+ *   (#659 — a non-finite numeric field removed; #902 — a rejected nested value
+ *   removed; either way the rest of the document survives) are reported here
+ *   too: they are partial data loss, not silent.
  * - `collections`: per-collection `{ decoded, dropped, repaired,
  *   unread_field_warnings }` counters, present only when at least one
  *   collection has drops, repairs, or unread-field warnings (so clean output
@@ -880,7 +881,7 @@ export class CopilotDatabase {
     }
 
     // Repairs are partial data loss — the document survived, one field did
-    // not — so they are reported even though nothing was dropped (#659).
+    // not — so they are reported even though nothing was dropped (#659, #902).
     if (totalRepaired > 0) {
       const docs = totalRepaired === 1 ? 'document' : 'documents';
       const unreadClause =
@@ -891,8 +892,10 @@ export class CopilotDatabase {
         status: 'ok',
         note:
           `All ${totalDecoded} validated documents are present, but ${totalRepaired} ${docs} held a ` +
-          'non-finite number (NaN or ±Infinity) the schema cannot represent — that field was dropped ' +
-          `and the rest of the document kept. See 'non-finite field' warnings on stderr for the paths.${unreadClause}`,
+          'value the schema cannot represent — a non-finite number (NaN or ±Infinity), or a nested ' +
+          'value of the wrong type such as a null price on one holding. That value (or the one nested ' +
+          'entry holding it) was dropped and the rest of the document kept. See the ' +
+          `'non-finite field' / 'invalid nested field' warnings on stderr for the paths.${unreadClause}`,
         collections: flagged,
       };
     }

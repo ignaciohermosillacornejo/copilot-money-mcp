@@ -717,8 +717,14 @@ describe('validateOrWarn — warn dedupe collapses positional paths', () => {
   });
 
   test('schema drops dedupe the same way', () => {
+    // The non-empty refine makes the nested failure unrepairable: the #902
+    // repair removes the bad entry, which leaves `history` empty and fails at
+    // the top level, so the document still drops and the drop warn is what
+    // gets deduped.
     const Strict = z.object({
-      history: z.record(z.string(), z.object({ price: z.number() })),
+      history: z
+        .record(z.string(), z.object({ price: z.number() }))
+        .refine((r) => Object.keys(r).length > 0, 'history must not be empty'),
     });
 
     validateOrWarn(
@@ -750,5 +756,216 @@ describe('validateOrWarn — warn dedupe collapses positional paths', () => {
     );
 
     expect(warnSpy).toHaveBeenCalledTimes(2);
+  });
+});
+
+/**
+ * Nested-value repair (#902). A `null` `institution_price` on one holding of an
+ * MX-linked 401k removed the whole account from `get_accounts`: nested
+ * containers reach Zod verbatim, and a Zod failure cost the document. Any
+ * value the schema rejects below the top level now costs that value — or, for
+ * a required nested field, the one element holding it. Top-level failures are
+ * left alone: those fields come from the decoder's typed getters, so a
+ * mismatch there is real drift and still drops.
+ *
+ * The schema-by-schema sweep over the real models lives in
+ * `tests/core/nested-field-sweep.test.ts`; these pin the mechanism.
+ */
+describe('validateOrWarn — nested value repair (#902)', () => {
+  let warnSpy: ReturnType<typeof spyOn>;
+
+  const Holding = z.object({
+    security_id: z.string(),
+    institution_price: z.number().optional(),
+    cost_basis: z.number().nullable().optional(),
+  });
+  const AccountLike = z.object({
+    account_id: z.string(),
+    current_balance: z.number(),
+    nickname: z.string().optional(),
+    holdings: z.array(Holding).optional(),
+    details: z.object({ total: z.number().optional() }).optional(),
+    amounts: z.record(z.string(), z.number()).optional(),
+  });
+  const base = { account_id: 'acc_1', current_balance: 5000 };
+  const ctx = { collection: 'accounts', docId: 'doc1' };
+
+  beforeEach(() => {
+    __resetWarnedKeys();
+    warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    warnSpy.mockRestore();
+  });
+
+  test('a null optional leaf on one holding costs that leaf, not the account', () => {
+    const result = validateOrWarn(
+      AccountLike,
+      {
+        ...base,
+        holdings: [
+          { security_id: 'sec_1', institution_price: 25 },
+          { security_id: 'sec_2', institution_price: null },
+        ],
+      },
+      ctx
+    );
+
+    expect(result).toEqual({
+      ...base,
+      holdings: [{ security_id: 'sec_1', institution_price: 25 }, { security_id: 'sec_2' }],
+    });
+    expect(getDecodeStats().accounts).toEqual({
+      decoded: 1,
+      dropped: 0,
+      repaired: 1,
+      unread_field_warnings: 0,
+    });
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const message = warnSpy.mock.calls[0]?.[0] as string;
+    expect(message).toContain('invalid nested field');
+    expect(message).toContain('collection=accounts');
+    expect(message).toContain('docId=doc1');
+    expect(message).toContain('paths=holdings.1.institution_price');
+    expect(message).toContain('code=invalid_type');
+    expect(message).toContain('document kept');
+  });
+
+  test.each([
+    [
+      'a wrong-type leaf in a nested object',
+      { ...base, details: { total: 'not-a-number' } },
+      { ...base, details: {} },
+    ],
+    [
+      'a wrong-type entry in a record',
+      { ...base, amounts: { '2026-08': 100, '2026-09': null } },
+      { ...base, amounts: { '2026-08': 100 } },
+    ],
+    [
+      'a null array element',
+      { ...base, holdings: [null, { security_id: 'sec_2' }] },
+      { ...base, holdings: [{ security_id: 'sec_2' }] },
+    ],
+    [
+      'a required nested field that is null — the element goes, its siblings stay',
+      { ...base, holdings: [{ security_id: null }, { security_id: 'sec_2' }] },
+      { ...base, holdings: [{ security_id: 'sec_2' }] },
+    ],
+    [
+      'a required nested field that is missing',
+      { ...base, holdings: [{ institution_price: 1 }, { security_id: 'sec_2' }] },
+      { ...base, holdings: [{ security_id: 'sec_2' }] },
+    ],
+  ])('keeps the document for %s', (_label, input, expected) => {
+    const result = validateOrWarn(AccountLike, input, ctx);
+
+    expect(result).toEqual(expected);
+    expect(getDecodeStats().accounts?.repaired).toBe(1);
+    expect(getDecodeStats().accounts?.dropped).toBe(0);
+  });
+
+  test('a null on a nullable nested field is valid data, not a repair', () => {
+    const result = validateOrWarn(
+      AccountLike,
+      { ...base, holdings: [{ security_id: 'sec_1', cost_basis: null }] },
+      ctx
+    );
+
+    expect(result).toEqual({ ...base, holdings: [{ security_id: 'sec_1', cost_basis: null }] });
+    expect(getDecodeStats().accounts?.repaired).toBe(0);
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  test('a bad top-level optional field still drops — top level is not repaired', () => {
+    const result = validateOrWarn(AccountLike, { ...base, nickname: 42 }, ctx);
+
+    expect(result).toBeNull();
+    expect(getDecodeStats().accounts).toEqual({
+      decoded: 0,
+      dropped: 1,
+      repaired: 0,
+      unread_field_warnings: 0,
+    });
+    expect(warnSpy.mock.calls[0]?.[0]).toContain('schema drop');
+  });
+
+  test('a nested repair cannot rescue a document that also fails at the top level', () => {
+    const result = validateOrWarn(
+      AccountLike,
+      { account_id: 'acc_1', holdings: [{ security_id: 'sec_1', institution_price: null }] },
+      ctx
+    );
+
+    expect(result).toBeNull();
+    expect(getDecodeStats().accounts?.dropped).toBe(1);
+  });
+
+  test('never removes the top-level container itself', () => {
+    // Removing the only element leaves an empty array that the schema
+    // rejects at the top level — the repair must stop there, not delete
+    // `holdings` to make the document pass.
+    const NonEmpty = z.object({
+      account_id: z.string(),
+      holdings: z.array(Holding).nonempty().optional(),
+    });
+    const result = validateOrWarn(
+      NonEmpty,
+      { account_id: 'acc_1', holdings: [{ security_id: null }] },
+      ctx
+    );
+
+    expect(result).toBeNull();
+    expect(getDecodeStats().accounts?.dropped).toBe(1);
+  });
+
+  test('a non-finite and a null value in one document are both repaired, counted once', () => {
+    const result = validateOrWarn(
+      AccountLike,
+      {
+        ...base,
+        holdings: [
+          { security_id: 'sec_1', institution_price: Infinity },
+          { security_id: 'sec_2', institution_price: null },
+        ],
+      },
+      ctx
+    );
+
+    expect(result).toEqual({
+      ...base,
+      holdings: [{ security_id: 'sec_1' }, { security_id: 'sec_2' }],
+    });
+    expect(getDecodeStats().accounts?.repaired).toBe(1);
+    const messages = warnSpy.mock.calls.map((c) => c[0] as string);
+    expect(messages.some((m) => m.includes('non-finite field'))).toBe(true);
+    expect(messages.some((m) => m.includes('invalid nested field'))).toBe(true);
+  });
+
+  test('one warn per failure shape, every document counted', () => {
+    validateOrWarn(
+      AccountLike,
+      { ...base, holdings: [{ security_id: 'sec_1', institution_price: null }] },
+      ctx
+    );
+    validateOrWarn(
+      AccountLike,
+      {
+        ...base,
+        holdings: [{ security_id: 'sec_1' }, { security_id: 'sec_2', institution_price: null }],
+      },
+      { collection: 'accounts', docId: 'doc2' }
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(getDecodeStats().accounts?.repaired).toBe(2);
+  });
+
+  test('does not mutate the input document', () => {
+    const input = { ...base, holdings: [{ security_id: 'sec_1', institution_price: null }] };
+    validateOrWarn(AccountLike, input, ctx);
+
+    expect(input.holdings[0]).toEqual({ security_id: 'sec_1', institution_price: null });
   });
 });

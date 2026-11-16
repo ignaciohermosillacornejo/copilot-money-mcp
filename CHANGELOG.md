@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A bad value inside a nested container no longer removes the whole document** ([#902](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/902)). One holding with `institution_price: null` (seen on an MX-linked 401k) made the account fail schema validation, so it vanished from `get_accounts` and its balance from `total_balance` / `total_assets`, with only `decode_health: degraded` to say so. Any value the schema rejects below the top level of a cached document — inside `holdings`, `items`, `contributions`, `history`, `daily_data` and the like — now costs that value, or for a required nested field the one element holding it, and the document is kept and counted as `repaired`. Top-level mismatches still drop the document and warn, as before. This extends the [#659](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/659) repair, which covered only `NaN` / `±Infinity`. Warnings on stderr read `invalid nested field: … paths=…` where they read `schema drop` before.
+
 ## [3.0.0] - 2026-10-25
 
 > **Upgrading from v2.x?** This release changes the shape of read responses.

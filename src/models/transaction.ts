@@ -143,8 +143,11 @@ export const TransactionSchema = z
      * TYPED AS AN OPAQUE MAP ANYWAY, deliberately. A nested schema here does
      * not merely fail to help — it adds a way to LOSE a transaction, since a
      * sub-field that arrives with an unexpected type fails the parse and
-     * `validateOrWarn` drops the WHOLE document (the #302/#659 class: an
-     * unusable leaf costing the row it sits on). The probe is itself the
+     * `validateOrWarn` dropped the WHOLE document (the #302/#659 class: an
+     * unusable leaf costing the row it sits on). Since #902 a rejected
+     * nested value costs only that value, so the risk is now a silently
+     * stripped sub-field rather than a missing row — still a loss the opaque
+     * map does not have. The probe is itself the
      * argument: `price` came back `double` on 33 items and `integer` on 1,
      * and four of the five `other` keys mixed both types across 26
      * documents, so "the type I saw" is demonstrably not "the type it is".
