@@ -561,7 +561,11 @@ export class CopilotDatabase {
     if (data.tags !== undefined) this._tags = data.tags;
     if (data.holdingsHistory !== undefined) this._holdingsHistory = data.holdingsHistory;
     if (data.balanceHistory !== undefined) this._balanceHistory = data.balanceHistory;
+    // The name map is derived from userCategories: injecting new categories
+    // without a map drops the old one so the next read rebuilds it, rather
+    // than leaving a fixture whose two halves disagree.
     if (data.categoryNameMap !== undefined) this._categoryNameMap = data.categoryNameMap;
+    else if (data.userCategories !== undefined) this._categoryNameMap = null;
     if (data.accountNameMap !== undefined) this._accountNameMap = data.accountNameMap;
     // Unions, like every decode: injecting [] does not reset the accumulated
     // split-parent ids — only forgetSplitParentIds() does.

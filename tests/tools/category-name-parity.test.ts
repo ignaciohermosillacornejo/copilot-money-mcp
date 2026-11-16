@@ -369,7 +369,15 @@ describe('category_name for an id in neither name map (#867)', () => {
     const CAT_ORPHAN = 'Or7pH4nK2mW9vR3xT6sB';
     const CAT_UNNAMED = 'Un4mD8qL3xK7vR2pW5sC';
 
-    function tools(): CopilotMoneyTools {
+    const USER_CATEGORIES = [
+      { category_id: CAT_KNOWN, name: KNOWN_NAME, order: 0 },
+      { category_id: CAT_ORPHAN, name: 'Orphan', parent_category_id: CAT_OPAQUE, order: 1 },
+      { category_id: CAT_UNNAMED, name: '', parent_category_id: CAT_KNOWN, order: 2 },
+    ];
+
+    // No categoryNameMap: the database derives it from userCategories, so the
+    // real builder (and its skip of a nameless category) is what runs.
+    function fixture(): { db: CopilotDatabase; tools: CopilotMoneyTools } {
       const db = new CopilotDatabase('/fake/path');
       db._injectDataForTesting({
         transactions: [CAT_KNOWN, CAT_ORPHAN, CAT_UNNAMED].map((categoryId, i) => ({
@@ -387,19 +395,12 @@ describe('category_name for an id in neither name map (#867)', () => {
         investmentPrices: [],
         items: [],
         tags: [],
-        userCategories: [
-          { category_id: CAT_KNOWN, name: KNOWN_NAME, order: 0 },
-          { category_id: CAT_ORPHAN, name: 'Orphan', parent_category_id: CAT_OPAQUE, order: 1 },
-          { category_id: CAT_UNNAMED, name: '', parent_category_id: CAT_KNOWN, order: 2 },
-        ],
-        categoryNameMap: new Map([
-          [CAT_KNOWN, KNOWN_NAME],
-          [CAT_ORPHAN, 'Orphan'],
-        ]),
+        userCategories: USER_CATEGORIES,
         accountNameMap: new Map(),
       });
-      return new CopilotMoneyTools(db);
+      return { db, tools: new CopilotMoneyTools(db) };
     }
+    const tools = (): CopilotMoneyTools => fixture().tools;
 
     const listRow = async (id: string): Promise<Row> => {
       const r = wire(await tools().getCategories({ view: 'list', ...RANGE }));
@@ -438,6 +439,31 @@ describe('category_name for an id in neither name map (#867)', () => {
       // The subcategories view's own parent_name, for a parent with no name.
       const ofUnnamed = wire(await t.getCategories({ parent_id: CAT_UNNAMED }));
       expect((ofUnnamed.data as { parent_name: unknown }).parent_name).toBeNull();
+    });
+
+    test('every view sees a rename once the database reloads its categories', async () => {
+      // The tools class used to keep its own copy of the name map, which
+      // nothing but refresh_database dropped: after a cache reload (TTL or a
+      // category write) every view kept the old name.
+      const { db, tools: t } = fixture();
+      const nameIn = async (): Promise<unknown[]> => {
+        const list = wire(await t.getCategories({ view: 'list', ...RANGE }));
+        const tree = wire(await t.getCategories({ view: 'tree' }));
+        const search = wire(await t.getCategories({ view: 'search', query: 'shop' }));
+        const pick = (rows: Row[]) => rows.find((c) => c.category_id === CAT_KNOWN)?.category_name;
+        return [
+          pick((list.data as { categories: Row[] }).categories),
+          pick((tree.data as { categories: Row[] }).categories),
+          pick((search.data as { categories: Row[] }).categories),
+        ];
+      };
+      expect(await nameIn()).toEqual([KNOWN_NAME, KNOWN_NAME, KNOWN_NAME]);
+      db._injectDataForTesting({
+        userCategories: USER_CATEGORIES.map((c) =>
+          c.category_id === CAT_KNOWN ? { ...c, name: 'Shop Renamed' } : c
+        ),
+      });
+      expect(await nameIn()).toEqual(['Shop Renamed', 'Shop Renamed', 'Shop Renamed']);
     });
   });
 
