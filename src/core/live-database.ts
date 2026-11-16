@@ -821,8 +821,9 @@ export class LiveCopilotDatabase {
     if (fields.length > 0) {
       const months = new Set<string>();
       // A drifted date names no month unless it starts with one.
-      if (typeof node.date === 'string' && isCalendarMonth(node.date.slice(0, 7))) {
-        months.add(node.date.slice(0, 7));
+      const date: unknown = candidate.date;
+      if (typeof date === 'string' && isCalendarMonth(date.slice(0, 7))) {
+        months.add(date.slice(0, 7));
       }
       const stale = this.dropRowMonths(months, existing, opts.requestedMonths ?? []);
       // Not silent (#864 review): name the failed fields, once per set. The
@@ -836,7 +837,8 @@ export class LiveCopilotDatabase {
       );
       return;
     }
-    const filedMonth = node.date.slice(0, 7);
+    // The month the merged row is stored under: read from what is stored.
+    const filedMonth = candidate.date.slice(0, 7);
     const requested = opts.requestedMonths ?? [];
     // Distinct months: a split's touched months repeat one month per row.
     const distinct = [...new Set(requested)];
