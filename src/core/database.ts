@@ -1678,10 +1678,8 @@ export class CopilotDatabase {
       if (!seenIds.has(categoryId)) {
         // Fall back to the Plaid taxonomy; an id in neither map gets no name
         // rather than a made-up one (#867).
-        const category: Category = {
-          category_id: categoryId,
-          name: lookupKnownCategoryName(categoryId) ?? undefined,
-        };
+        const name = lookupKnownCategoryName(categoryId);
+        const category: Category = { category_id: categoryId, ...(name !== null ? { name } : {}) };
         uniqueCategories.push(category);
         seenIds.add(categoryId);
       }

@@ -132,7 +132,7 @@ import {
 } from '../models/index.js';
 import type { GoalHistory } from '../models/goal-history.js';
 import { isItemHealthy, itemNeedsAttention, getItemDisplayName } from '../models/item.js';
-import { type Category, getCategoryDisplayName } from '../models/category.js';
+import { type Category } from '../models/category.js';
 import { redactUserPaths } from '../utils/redact-paths.js';
 
 // ============================================
@@ -462,6 +462,18 @@ function validateOffset(offset: number | undefined): number {
  * Default category ID for uncategorized transactions.
  */
 const DEFAULT_CATEGORY_ID = 'uncategorized';
+
+/**
+ * A user category's own name, or `null` when it has none (missing or empty).
+ *
+ * Deliberately NOT getCategoryDisplayName(), whose fallback returns the
+ * category id as the "name" (#867). Live mode's category name map skips a
+ * category without a name for the same reason (#860), so the name is absent
+ * rather than an id or "".
+ */
+function userCategoryName(category: Category): string | null {
+  return category.name || null;
+}
 
 /**
  * Gets the category ID or returns the default 'uncategorized'.
@@ -2229,10 +2241,10 @@ export class CopilotMoneyTools {
         count: children.length,
         data: {
           parent_id: parent.category_id,
-          parent_name: getCategoryDisplayName(parent),
+          parent_name: userCategoryName(parent),
           subcategories: children.map((child) => ({
             category_id: child.category_id,
-            category_name: getCategoryDisplayName(child),
+            category_name: userCategoryName(child),
             emoji: child.emoji ?? null,
           })),
         },
@@ -2259,11 +2271,11 @@ export class CopilotMoneyTools {
           const children = childMap.get(root.category_id) ?? [];
           return {
             category_id: root.category_id,
-            category_name: getCategoryDisplayName(root),
+            category_name: userCategoryName(root),
             emoji: root.emoji ?? null,
             children: children.map((child) => ({
               category_id: child.category_id,
-              category_name: getCategoryDisplayName(child),
+              category_name: userCategoryName(child),
               emoji: child.emoji ?? null,
             })),
           };
@@ -2294,7 +2306,7 @@ export class CopilotMoneyTools {
             query: query.trim(),
             categories: matches.map((cat) => ({
               category_id: cat.category_id,
-              category_name: getCategoryDisplayName(cat),
+              category_name: userCategoryName(cat),
               emoji: cat.emoji ?? null,
               parent_category_id: cat.parent_category_id ?? null,
             })),
@@ -2347,12 +2359,10 @@ export class CopilotMoneyTools {
                 category_id,
                 category_name: (await this.resolveCategoryName(category_id)) ?? null,
                 parent_category_id: userCat?.parent_category_id ?? null,
+                // A parent missing from the name maps (deleted or unsynced)
+                // gets null, not its id, the same rule as category_name.
                 parent_name: userCat?.parent_category_id
-                  ? getCategoryDisplayName(
-                      userCatMap.get(userCat.parent_category_id) ?? {
-                        category_id: userCat.parent_category_id,
-                      }
-                    )
+                  ? ((await this.resolveCategoryName(userCat.parent_category_id)) ?? null)
                   : null,
                 transaction_count: stats.count,
                 total_amount: roundAmount(stats.totalAmount),
