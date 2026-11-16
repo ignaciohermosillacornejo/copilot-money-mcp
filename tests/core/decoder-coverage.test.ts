@@ -19,6 +19,7 @@ import {
   getDecodeTimeoutMs,
 } from '../../src/core/decoder.js';
 import {
+  iterateDocuments,
   createTestDatabase,
   cleanupAllTempDatabases,
   LevelDBReader,
@@ -2458,7 +2459,15 @@ describe('decoder coverage', () => {
 
       const result = await decodeAllCollections(dbPath);
 
-      // The odd-segment key is dropped by the parser; the history still decodes.
+      // The odd-segment key is dropped at the reader, which is the observable
+      // part: the route it used to reach has no processor, so the decoded
+      // result alone could not tell a drop from an accepted key.
+      const yielded: string[] = [];
+      for await (const doc of iterateDocuments(dbPath)) {
+        yielded.push(`${doc.collection}/${doc.documentId}`);
+      }
+      expect(yielded).toEqual(['users/user1/financial_goals/goal1/financial_goal_history/2024-01']);
+      // The history still decodes.
       expect(result.goalHistory.length).toBe(1);
       expect(result.goalHistory[0]?.goal_id).toBe('goal1');
     });

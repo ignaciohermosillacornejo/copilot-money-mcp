@@ -504,6 +504,15 @@ const DOCUMENT_KEY_REGEX = /documents\/([^/]+)\/([^/]+)$/;
  */
 const SUBCOLLECTION_KEY_REGEX = /documents\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/;
 
+/** True when `str` holds a C0 control character or DEL. */
+function hasControlCharacter(str: string): boolean {
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+}
+
 /**
  * Parse a LevelDB key in the binary format used by Firestore SDK.
  *
@@ -602,14 +611,13 @@ function parseBinaryKey(keyBuffer: Buffer): { collection: string; documentId: st
           while (strEnd < keyBuffer.length && keyBuffer[strEnd] !== 0x00) {
             strEnd++;
           }
-          if (strEnd > pos) {
+          // A segment with no terminator is a truncated key, not a segment.
+          // Invalid UTF-8 inside a segment decodes lossily (U+FFFD): the id no
+          // longer round-trips, but the segment still counts, so parity holds.
+          if (strEnd > pos && strEnd < keyBuffer.length) {
             const str = keyBuffer.slice(pos, strEnd).toString('utf8');
             // A control character means this is not a path segment.
-            const hasControl = Array.from(str).some((c) => {
-              const code = c.charCodeAt(0);
-              return code < 0x20 || code === 0x7f;
-            });
-            if (!hasControl) {
+            if (!hasControlCharacter(str)) {
               segments.push(str);
             }
           }
@@ -654,6 +662,13 @@ export function parseDocumentKey(
   // If it's a buffer, use the binary parser
   if (Buffer.isBuffer(key)) {
     return parseBinaryKey(key);
+  }
+
+  // A key that names a table must name this one: the path regexes below do
+  // not look at the table, so a sibling table's key would otherwise parse
+  // (#807). A key naming no table keeps the legacy behaviour.
+  if (key.includes('remote_document') && !isDocumentTableKey(key)) {
+    return null;
   }
 
   // For strings, try the legacy path-based format first

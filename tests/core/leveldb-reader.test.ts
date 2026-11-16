@@ -115,17 +115,20 @@ describe('leveldb-reader', () => {
       const remoteDoc = Buffer.from('remote_document', 'utf8');
       const sep = Buffer.from([0x00, 0x01, 0xbe]);
       const items = Buffer.from('items', 'utf8');
+      const item1 = Buffer.from('item1', 'utf8');
       const collectionParent = Buffer.from('collection_parent', 'utf8');
       const doc1 = Buffer.from('doc1', 'utf8');
       const end = Buffer.from([0x00, 0x01, 0x80]);
 
-      // Key: items -> collection_parent -> doc1
-      // Last two are: collection_parent, doc1 - should skip
+      // Key: items -> item1 -> collection_parent -> doc1. Four segments, so the
+      // path passes the parity check (#807) and only the skip list rejects it.
       const keyBuffer = Buffer.concat([
         marker,
         remoteDoc,
         sep,
         items,
+        sep,
+        item1,
         sep,
         collectionParent,
         sep,
@@ -321,7 +324,25 @@ describe('leveldb-reader', () => {
         });
       });
 
+      test('an unterminated trailing segment is not a segment', () => {
+        // A truncated key: the last string has no 0x00 0x01 terminator.
+        const truncated = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, 'u1'),
+          stringComponent(0xbe, 'tags'),
+          Buffer.from([0xbe]),
+          Buffer.from('tag1', 'utf8'),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(truncated)).toBeNull();
+      });
+
       test('the string-path format rejects a sibling table too', () => {
+        const sibling =
+          'remote_document_read_time/projects/p/databases/(default)/documents/users/u1';
+        // The string overload, not just the Buffer one.
+        expect(parseDocumentKey(sibling)).toBeNull();
         expect(
           parseDocumentKey(
             Buffer.from(
