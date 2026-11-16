@@ -35,6 +35,7 @@ import {
   hasCategoryOnIncomeOrTransfer,
   reportIncomeTransferCategory,
   reportDocumentKeyShape,
+  auditDocumentTableOrNull,
 } from '../../scripts/smoke/cache.js';
 import type { CollectionRoute } from '../../src/core/decoder.js';
 import type {
@@ -676,6 +677,43 @@ describe('reportDocumentKeyShape', () => {
     const { status, detail } = reportDocumentKeyShape(clean, { ...audit, rejectedNonEmpty: 2 });
     expect(status).toBe('FAIL');
     expect(detail).toContain('2 remote_document key(s) with data are rejected');
+  });
+
+  test('FAILs a thrown audit as incomplete, not as a wrong key range', () => {
+    const { status, detail } = reportDocumentKeyShape(clean, null);
+    expect(status).toBe('FAIL');
+    expect(detail).toContain('the document-table audit did not complete');
+    expect(detail).not.toContain('the audit range is wrong');
+    // Also when nothing was yielded: an incomplete audit is never a WARN.
+    expect(
+      reportDocumentKeyShape({ yielded: 0, foreignTable: 0, oddSegment: 0 }, null).status
+    ).toBe('FAIL');
+  });
+});
+
+describe('auditDocumentTableOrNull', () => {
+  test('returns null and logs a redacted error when the audit throws', async () => {
+    const logged: string[] = [];
+    const original = console.error;
+    console.error = (...args: unknown[]) => {
+      logged.push(args.map(String).join(' '));
+    };
+    try {
+      const result = await auditDocumentTableOrNull('/Users/someone/db', () =>
+        Promise.reject(new Error('cannot open /Users/someone/db'))
+      );
+      expect(result).toBeNull();
+    } finally {
+      console.error = original;
+    }
+    expect(logged).toHaveLength(1);
+    expect(logged[0]).toContain('document table audit failed');
+    expect(logged[0]).not.toContain('/Users/someone');
+  });
+
+  test('passes a completed audit through', async () => {
+    const audit = { tableKeys: 3, rejectedNonEmpty: 0 };
+    expect(await auditDocumentTableOrNull('db', () => Promise.resolve(audit))).toEqual(audit);
   });
 });
 

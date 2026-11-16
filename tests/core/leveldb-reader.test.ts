@@ -345,6 +345,32 @@ describe('leveldb-reader', () => {
           Buffer.from([0x80]),
         ]);
         expect(parseDocumentKey(control)).toBeNull();
+        // The two keys above have an even number of complete segments, so if
+        // a guard is deleted the bad segment is pushed, the count goes odd and
+        // parity rejects the key anyway. This one has an odd number, so
+        // without the control-character guard it would come back as the
+        // document users/ta\x07gs: it is the detector for that guard.
+        const controlOdd = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, 'ta\x07gs'),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(controlOdd)).toBeNull();
+      });
+
+      test('an empty segment rejects the key', () => {
+        // Four complete segments, the first empty. Without the empty-segment
+        // guard this parses as the document /users/{ITEM}/tags.
+        const key = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          stringComponent(0xbe, ''),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, ITEM),
+          stringComponent(0xbe, 'tags'),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(key)).toBeNull();
       });
 
       test('an escaped NUL inside a segment rejects the key rather than truncating it', () => {
@@ -361,6 +387,22 @@ describe('leveldb-reader', () => {
           Buffer.from([0x80]),
         ]);
         expect(parseDocumentKey(key)).toBeNull();
+        // The detector for the escape check: the third segment is
+        // "tags\0\xBEt1", whose escaped NUL is followed by a 0xBE byte. A
+        // parser that took 0x00 0xFF as a terminator would resume on that byte
+        // as a string label and return the document users/{ITEM}/tags/t1.
+        const resyncs = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, ITEM),
+          Buffer.from([0xbe]),
+          Buffer.from('tags', 'utf8'),
+          Buffer.from([0x00, 0xff, 0xbe]),
+          Buffer.from('t1', 'utf8'),
+          Buffer.from([0x00, 0x01]),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(resyncs)).toBeNull();
       });
 
       test('a non-string component rejects the key rather than being skipped', () => {
@@ -374,6 +416,16 @@ describe('leveldb-reader', () => {
           Buffer.from([0x80]),
         ]);
         expect(parseDocumentKey(key)).toBeNull();
+        // The detector for the label check: a non-string component whose
+        // payload reads as a clean string, before ONE string segment. Read as
+        // a segment, it would make the document {collection: '9', id: 'users'}.
+        const oneSegment = Buffer.concat([
+          stringComponent(0x85, 'remote_document'),
+          stringComponent(0x90, '9'),
+          stringComponent(0xbe, 'users'),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(oneSegment)).toBeNull();
       });
 
       test('a key with no end marker rejects', () => {
@@ -399,6 +451,18 @@ describe('leveldb-reader', () => {
           Buffer.from([0x80]),
         ]);
         expect(parseDocumentKey(key)).toBeNull();
+        // The detector for the terminator check: 0x00 0x02 is two bytes, like
+        // 0x00 0x01, so a parser that checked only the 0x00 would step onto
+        // the next component and return the document users/{ITEM}.
+        const notTerminated = Buffer.concat([
+          Buffer.from([0x85]),
+          Buffer.from('remote_document', 'utf8'),
+          Buffer.from([0x00, 0x02]),
+          stringComponent(0xbe, 'users'),
+          stringComponent(0xbe, ITEM),
+          Buffer.from([0x80]),
+        ]);
+        expect(parseDocumentKey(notTerminated)).toBeNull();
       });
 
       test('an unterminated trailing segment is not a segment', () => {

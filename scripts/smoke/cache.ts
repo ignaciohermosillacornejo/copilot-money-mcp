@@ -446,6 +446,27 @@ export interface DocumentKeyShape {
 }
 
 /**
+ * Run check 0's document-table audit, returning null if it throws.
+ *
+ * A failed audit must not abort the smoke before any check is printed: it
+ * FAILs check 0 as an incomplete audit, and the rest still run. The error is
+ * logged with user paths redacted.
+ */
+export async function auditDocumentTableOrNull(
+  dbPath: string,
+  audit: (path: string) => Promise<DocumentTableAudit> = auditDocumentTable
+): Promise<DocumentTableAudit | null> {
+  try {
+    return await audit(dbPath);
+  } catch (err: unknown) {
+    console.error(
+      `[cache-smoke] document table audit failed: ${redactUserPaths(err instanceof Error ? err.message : String(err))}`
+    );
+    return null;
+  }
+}
+
+/**
  * Check 0's verdict — are the reader's documents documents (#807)?
  *
  * Every other check compares the decoder against `iterateDocuments`, so a key
@@ -457,12 +478,19 @@ export interface DocumentKeyShape {
  * table name read off the key, and path parity), and in the other direction
  * counts the document-table keys with data that the parser rejects, since a
  * guard that rejects too much loses documents just as silently.
+ *
+ * `audit` is null when the document-table audit threw (see
+ * `auditDocumentTableOrNull`); that FAILs as an incomplete audit rather than
+ * being blamed on the key range.
  */
 export function reportDocumentKeyShape(
   shape: DocumentKeyShape,
-  audit: DocumentTableAudit
+  audit: DocumentTableAudit | null
 ): { status: Status; detail: string } {
   const problems: string[] = [];
+  if (audit === null) {
+    problems.push('the document-table audit did not complete, so over-rejection is unchecked');
+  }
   if (shape.foreignTable > 0) {
     problems.push(
       `${shape.foreignTable} yielded document(s) come from a table other than remote_document`
@@ -476,13 +504,13 @@ export function reportDocumentKeyShape(
   // Every yielded document comes from the audited table, so a range that saw
   // fewer keys than were yielded is the wrong range, and the over-rejection
   // count below would be a vacuous zero.
-  if (shape.yielded > 0 && audit.tableKeys < shape.yielded) {
+  if (audit !== null && shape.yielded > 0 && audit.tableKeys < shape.yielded) {
     problems.push(
       `the remote_document key range matched ${audit.tableKeys} key(s) but ${shape.yielded} ` +
         `documents were yielded, so the audit range is wrong and over-rejection is unchecked`
     );
   }
-  if (audit.rejectedNonEmpty > 0) {
+  if (audit !== null && audit.rejectedNonEmpty > 0) {
     problems.push(
       `${audit.rejectedNonEmpty} remote_document key(s) with data are rejected by the key ` +
         `parser (unreadable key shape, odd path, or skip list) and never reach the decoder`
@@ -503,7 +531,7 @@ export function reportDocumentKeyShape(
     status: 'PASS',
     detail:
       `all ${shape.yielded} yielded documents are remote_document keys with an even path, ` +
-      `and none of the table's ${audit.tableKeys} keys is rejected while holding data`,
+      `and none of the table's ${audit?.tableKeys ?? 0} keys is rejected while holding data`,
   };
 }
 
@@ -867,16 +895,7 @@ async function main(): Promise<void> {
   // must first be established that what it yields are documents. Reported before
   // the raw-scan line, whose count is only meaningful if this holds.
   // ---------------------------------------------------------------------
-  // A failed audit must not abort the smoke before any check is printed. An
-  // empty audit FAILs check 0 through its range guard, and the rest still run.
-  let audit: DocumentTableAudit = { tableKeys: 0, rejectedNonEmpty: 0 };
-  try {
-    audit = await auditDocumentTable(dbPath);
-  } catch (err: unknown) {
-    console.error(
-      `[cache-smoke] document table audit failed: ${redactUserPaths(err instanceof Error ? err.message : String(err))}`
-    );
-  }
+  const audit = await auditDocumentTableOrNull(dbPath);
   const keyVerdict = reportDocumentKeyShape({ ...keyShape, yielded: scanned }, audit);
   record('document key shape', keyVerdict.status, keyVerdict.detail);
 
