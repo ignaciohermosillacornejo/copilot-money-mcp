@@ -1148,8 +1148,15 @@ export class LiveCopilotDatabase {
     accounts: 'balances come from amounts, which a category write does not change',
     networth: 'a sum of account balances (same reason)',
     balance_history: 'account balances over time (same reason)',
-    recurring: 'a recurring keeps its own category id',
-    upcoming_recurrings: 'computed from recurring amounts and dates',
+    // Unverified, like the transactions line above: DeleteCategory takes no
+    // replacement, so the server may null or reassign a recurring's
+    // categoryId. Until that is probed, a delete_category can leave the
+    // recurring snapshots serving the dead id (category_name null) for their
+    // TTL (6 h / 1 h). Accepted for now; the fix is to drop these two
+    // snapshots from delete_category alone, not from every category write.
+    recurring: "unverified: a recurring keeps its category id; the snapshot's TTL is accepted",
+    upcoming_recurrings:
+      "unverified: computed from recurrings, same assumption; the snapshot's TTL is accepted",
     tags: 'reference data',
     user: 'account settings',
     holdings: 'priced from market data',
@@ -1205,6 +1212,9 @@ export class LiveCopilotDatabase {
       monthly_spend: this.monthlySpendCache,
       upcoming_recurrings: this.upcomingRecurringsCache,
       recurring: this.recurringCache,
+      // The whole map, every account and time frame, on purpose: the
+      // invalidation carries no account id to narrow with, and each entry is
+      // refetched on its next read.
       balance_history: { invalidate: () => this.balanceHistoryCache.clear() },
     };
     return this.derivedSnapshotsByKey;

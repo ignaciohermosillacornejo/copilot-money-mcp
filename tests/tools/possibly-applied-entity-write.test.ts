@@ -55,7 +55,8 @@ function cacheFor(
 
 type DerivedKey =
   | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number]
-  | (typeof LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS)[number];
+  | (typeof LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS)[number]
+  | (typeof LiveCopilotDatabase.TAG_DERIVED_SNAPSHOTS)[number];
 
 /**
  * The snapshots a recurring (#868) or category (#911 review) write derives;
@@ -71,7 +72,7 @@ const DERIVED: Record<DerivedKey, (live: LiveCopilotDatabase) => SnapshotCache<u
 const DERIVED_BY_SCOPE: Record<Scope, readonly DerivedKey[]> = {
   recurring: LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS,
   categories: LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS,
-  tags: [],
+  tags: LiveCopilotDatabase.TAG_DERIVED_SNAPSHOTS,
 };
 
 /** Which derived snapshots are still cached, by key. */
