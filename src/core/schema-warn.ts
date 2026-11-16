@@ -91,12 +91,17 @@ export function resetDecodeStats(): void {
  * which is what #659's reporter saw. Only the KEY collapses — the logged path
  * keeps its real indices, because a warn naming `<n>` is not actionable.
  *
- * Non-numeric dynamic keys (a `YYYY-MM-DD` under `daily_data`) still key
- * separately. Collapsing those would need a heuristic for "is this a field
- * name", and no collection has flooded on one yet.
+ * Date-shaped map keys (`YYYY-MM-DD` under `daily_data` / `adjustments`,
+ * `YYYY-MM` under budget `amounts`) collapse to `<date>` for the same reason
+ * (#902 review): once nested values are repaired rather than dropped, a null
+ * across goal history would otherwise warn once per month. No heuristic is
+ * needed — no model declares a field whose NAME is a date. Other non-numeric
+ * dynamic keys still key separately.
  */
 function dedupeShape(path: string): string {
-  return path.replace(/(^|\.)\d+(?=\.|$)/g, '$1<n>');
+  return path
+    .replace(/(^|\.)\d+(?=\.|$)/g, '$1<n>')
+    .replace(/(^|\.)\d{4}-\d{2}(?:-\d{2})?(?=\.|$)/g, '$1<date>');
 }
 
 /**
@@ -205,16 +210,21 @@ export function validateOrWarn<T>(schema: ZodType<T>, data: unknown, ctx: Decode
     return repair.data;
   }
 
-  // The repair giving up after its round bound is NOT the expected refusal of
-  // a top-level failure: without this line it would look exactly like the
+  // A repair that gave up — ran out of rounds (`exhausted`) or found nothing
+  // it could remove (`no-progress`) — is NOT the expected refusal of a
+  // top-level failure: without this line it would look exactly like the
   // pre-#902 drop, a nested path in a `schema drop` warn with no hint that a
   // repair ran. Say so separately.
-  if (repair.reason === 'exhausted') {
-    const key = `${ctx.collection}::exhausted`;
+  if (repair.reason !== 'top-level') {
+    const key = `${ctx.collection}::gave-up::${repair.reason}`;
     if (!warnedNestedKeys.has(key)) {
       warnedNestedKeys.add(key);
+      const why =
+        repair.reason === 'exhausted'
+          ? 'hit its round limit before the document validated'
+          : 'found nothing it could remove for a nested issue';
       console.warn(
-        `[copilot-money-mcp] nested repair exhausted: collection=${ctx.collection} docId=${ctx.docId} — the nested-value repair hit its round limit before the document validated; it is dropped (see the schema drop warn). This is a bug in copilot-money-mcp, please report it.`
+        `[copilot-money-mcp] nested repair gave up: collection=${ctx.collection} docId=${ctx.docId} reason=${repair.reason} — the nested-value repair ${why}; the document is dropped (see the schema drop warn). This is a bug in copilot-money-mcp, please report it.`
       );
     }
   }

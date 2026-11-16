@@ -657,8 +657,8 @@ describe('validateOrWarn — non-finite repair', () => {
  * thing, which is what #659's reporter saw. Numeric segments collapse in the
  * KEY only; the logged path stays exact so the warn is still actionable.
  *
- * Non-numeric dynamic keys (a `YYYY-MM-DD` in `daily_data`) still key
- * separately — pre-existing behaviour, not something this repair changed.
+ * Date-shaped map keys (`YYYY-MM-DD`, `YYYY-MM`) collapse to `<date>` too
+ * (#902 review); other non-numeric dynamic keys still key separately.
  */
 describe('validateOrWarn — warn dedupe collapses positional paths', () => {
   let warnSpy: ReturnType<typeof spyOn>;
@@ -1012,15 +1012,57 @@ describe('validateOrWarn — nested value repair (#902)', () => {
     expect(result).toBeNull();
     expect(getDecodeStats().accounts?.dropped).toBe(1);
     const messages = warnSpy.mock.calls.map((c) => c[0] as string);
-    expect(messages.some((m) => m.includes('nested repair exhausted'))).toBe(true);
+    expect(
+      messages.some((m) => m.includes('nested repair gave up') && m.includes('reason=exhausted'))
+    ).toBe(true);
     expect(messages.some((m) => m.includes('schema drop'))).toBe(true);
   });
 
-  test('a top-level refusal does not claim the repair was exhausted', () => {
+  test('a repair that finds nothing to remove says so too', () => {
+    // An issue reported two levels past where the data stops: neither the
+    // node nor its parent exists, so a round can remove nothing.
+    const Refined = z
+      .object({ id: z.string(), items: z.array(z.object({ name: z.string() })) })
+      .superRefine((doc, ctx2) => {
+        ctx2.addIssue({ code: 'custom', path: ['items', 0, 'name', 'a', 'b'], message: 'bad' });
+        void doc;
+      });
+
+    const result = validateOrWarn(Refined, { id: 'x', items: [{ name: 'n' }] }, ctx);
+
+    expect(result).toBeNull();
+    const messages = warnSpy.mock.calls.map((c) => c[0] as string);
+    expect(
+      messages.some((m) => m.includes('nested repair gave up') && m.includes('reason=no-progress'))
+    ).toBe(true);
+  });
+
+  test('date-keyed failures under different dates share one warn', () => {
+    const GoalHistoryLike = z.object({
+      goal_id: z.string(),
+      daily_data: z.record(z.string(), z.object({ amount: z.number().optional() })),
+    });
+
+    validateOrWarn(
+      GoalHistoryLike,
+      { goal_id: 'g1', daily_data: { '2026-07-01': { amount: null } } },
+      { collection: 'goal_history', docId: '2026-07' }
+    );
+    validateOrWarn(
+      GoalHistoryLike,
+      { goal_id: 'g1', daily_data: { '2026-08-01': { amount: null } } },
+      { collection: 'goal_history', docId: '2026-08' }
+    );
+
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(getDecodeStats().goal_history?.repaired).toBe(2);
+  });
+
+  test('a top-level refusal does not claim the repair gave up', () => {
     validateOrWarn(AccountLike, { ...base, nickname: 42 }, ctx);
 
     const messages = warnSpy.mock.calls.map((c) => c[0] as string);
-    expect(messages.some((m) => m.includes('nested repair exhausted'))).toBe(false);
+    expect(messages.some((m) => m.includes('nested repair gave up'))).toBe(false);
   });
 
   test('does not mutate the input document', () => {
