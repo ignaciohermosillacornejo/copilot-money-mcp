@@ -24,7 +24,12 @@ import { LiveCategoriesTools } from '../../src/tools/live/categories.js';
 import { RefreshCacheTool } from '../../src/tools/live/refresh-cache.js';
 import { fetchUser } from '../../src/core/graphql/queries/user.js';
 
-/** A server-controlled assertion failed: report drift, not a broken run. */
+/**
+ * A server-controlled assertion failed: report drift, not a broken run.
+ * Deliberately a per-file copy: tests/scripts/smoke-composite-verdicts.test.ts
+ * reads each member's printed literals, so the marker must be spelled out in
+ * this file. Moving it into a shared helper would hide it from that check.
+ */
 function serverDrift(message: string): never {
   console.error('[smoke] server assertion failed:', message);
   console.error('[smoke] FAIL — categories server drift detected');

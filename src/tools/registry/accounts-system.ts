@@ -116,7 +116,7 @@ export const getConnectionStatusTool = defineTool({
       'validation failure (a "degraded" status means some documents are missing from results). ' +
       'Also reports scheduled_smoke: the last scheduled API-drift check with timestamp, or null ' +
       'if the weekly job is not installed. Only "fail" means the API drifted; "auth-missing" ' +
-      'and "incomplete" mean drift is unknown; not_checked lists checks a passing run skipped.',
+      'and "incomplete" mean drift is unknown; on a pass, not_checked lists checks that were skipped.',
     inputSchema: {
       type: 'object',
       properties: {},

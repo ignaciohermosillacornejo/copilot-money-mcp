@@ -98,6 +98,33 @@ describe('bun run smoke composite verdicts (#818, #819)', () => {
     expect(offenders).toEqual([]);
   });
 
+  /**
+   * The SKIP/WARN line check above only sees `[smoke] `-prefixed lines. A
+   * member can also record a SKIP or WARN as a row status and print it in a
+   * table (`reads.ts` did, with `${r.status}`), which no line check can read.
+   * So a member whose source assigns or compares a quoted 'SKIP' or 'WARN'
+   * status must also print a registered marker with that verdict (#819
+   * review). Status words that live only in an imported helper are out of
+   * reach; `account-names.ts` still compares 'WARN' itself, so it is covered.
+   */
+  test('a member that records a SKIP or WARN status prints a registered marker for it', () => {
+    const offenders: string[] = [];
+    for (const m of members) {
+      const source = fs.readFileSync(path.join(ROOT, m), 'utf8');
+      const printed = printedLines(source);
+      for (const verdict of ['SKIP', 'WARN'] as const) {
+        if (!new RegExp(`['"\`]${verdict}['"\`]`).test(source)) continue;
+        const registered = SKIP_MARKERS.filter((s) => s.verdict === verdict);
+        if (!printed.some((l) => registered.some((s) => l.startsWith(s.marker)))) {
+          offenders.push(
+            `${m}: has a '${verdict}' status but prints no ${verdict} SKIP_MARKERS line`
+          );
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   test('every registered skip marker is printed by some member', () => {
     const printed = members.flatMap(linesOf);
     const dead = SKIP_MARKERS.filter((s) => !printed.some((l) => l.startsWith(s.marker)));

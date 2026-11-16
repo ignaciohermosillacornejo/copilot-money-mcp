@@ -114,6 +114,23 @@ describe('readScheduledSmokeStatus', () => {
     }
   });
 
+  test('a malformed not_checked drops the list, not the whole status', () => {
+    for (const bogus of [['account-name parity'], [{ check: 'x', verdict: 'INFO' }], 'SKIP']) {
+      const file = statusFile(
+        JSON.stringify({
+          last_run: '2026-06-11T10:00:00Z',
+          result: 'pass',
+          summary: 's',
+          not_checked: bogus,
+        })
+      );
+      const status = readScheduledSmokeStatus(file);
+      expect(status?.result).toBe('pass');
+      expect(status?.summary).toBe('s');
+      expect(status?.not_checked).toBeUndefined();
+    }
+  });
+
   test('bounds a hand-edited not_checked list', () => {
     const file = statusFile(
       JSON.stringify({

@@ -49,10 +49,13 @@ machines and one that slept through its run. See
 
 A member can exit 0 without having compared anything: `smoke:account-names`
 SKIPs when there is no local cache, and WARNs when the data cannot tell its
-two sources apart. Neither is drift, so neither raises an alarm, but neither is
+two sources apart; `smoke:reads` skips individual operations when there is no
+row to key them off. None of that is drift, so none of it raises an alarm, but none of it is
 a passing check either. Such a member prints a line from `SKIP_MARKERS`; the
 run is still `pass`, its summary leads with `NOT checked: account-name parity
-(SKIP)`, and the status records the member under `not_checked`. Before #819 a
+(SKIP)`, and the status records the member under `not_checked` (a `fail` or
+`incomplete` run records none: there the drift, or the non-completion, is the
+news). Before #819 a
 moved cache directory would have kept reporting a clean weekly check while the
 parity gate compared nothing.
 
@@ -64,7 +67,9 @@ in `incomplete`, because a slow laptop is not an API change.
 
 `tests/scripts/smoke-composite-verdicts.test.ts` holds every composite member
 to this: a drift marker on the list, a `[smoke] PASS — …` line the summary
-recognises, and no SKIP or WARN line that is not registered.
+recognises, and no SKIP or WARN line that is not registered. A member whose
+source records a `'SKIP'` or `'WARN'` status (say, as a table row) must also
+print a registered marker with that verdict.
 
 Every run writes `~/.claude/copilot-money/scheduled-smoke.json`
 (`last_run`, `result`, `summary`, `report`, `not_checked`). The `get_connection_status` MCP
