@@ -54,9 +54,11 @@ instruction, or drop the backticks when the line is prose about the field.
 It reads every `.md` file under a skill's folder, not just `SKILL.md`, and also
 fails a markdown table row (blockquoted tables included) whose cell count
 differs from its header, since Markdown would render it shifted or blank without
-a warning. Its OK line reports how many tables it checked, and
-`skills/release-parity-test/test-matrix.md` must yield at least the floor in
-`TABLE_FLOORS`, so a parser that stops seeing tables fails instead of passing.
+a warning, and a separator row whose cell count differs from its header, since
+Markdown would not render a table at all. A file that holds tables declares a
+floor with `<!-- check-skills: tables >= N -->` and must yield at least N, so a
+parser that stops seeing tables fails instead of passing; raise N when you add
+a table. The OK line reports the tables checked and the floors enforced.
 
 Every skill declares the server mode(s) it runs in, in its frontmatter:
 

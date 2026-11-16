@@ -1,5 +1,7 @@
 # Release parity test matrix
 
+<!-- check-skills: tables >= 16 -->
+
 The case list for `skills/release-parity-test/SKILL.md`. Each case compares up to
 three sources for the same fact:
 

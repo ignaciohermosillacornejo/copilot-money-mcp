@@ -117,8 +117,6 @@ async function makeRepo(opts: {
   /** Extra markdown files beside SKILL.md, e.g. a test matrix the skill reads. */
   extraDocs?: Record<string, string>;
   sourceFiles?: Record<string, string | null>;
-  /** The skill's folder name (default `demo`); `skill` must name it to match. */
-  skillDir?: string;
 }): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'check-skills-'));
   // EITHER body, not just `dumpBody`. Gating on `dumpBody` alone meant a case
@@ -144,11 +142,10 @@ async function makeRepo(opts: {
     await mkdir(join(root, path, '..'), { recursive: true });
     await writeFile(join(root, path), body);
   }
-  const skillDir = opts.skillDir ?? 'demo';
-  await mkdir(join(root, 'skills', skillDir), { recursive: true });
-  await writeFile(join(root, 'skills', skillDir, 'SKILL.md'), opts.skill ?? SKILL_BODY);
+  await mkdir(join(root, 'skills', 'demo'), { recursive: true });
+  await writeFile(join(root, 'skills', 'demo', 'SKILL.md'), opts.skill ?? SKILL_BODY);
   for (const [name, body] of Object.entries(opts.extraDocs ?? {})) {
-    const path = join(root, 'skills', skillDir, name);
+    const path = join(root, 'skills', 'demo', name);
     await mkdir(join(path, '..'), { recursive: true });
     await writeFile(path, body);
   }
@@ -171,7 +168,6 @@ async function withRepo(
     skill?: string;
     extraDocs?: Record<string, string>;
     sourceFiles?: Record<string, string | null>;
-    skillDir?: string;
     env?: Record<string, string>;
   },
   assertions: (result: { code: number; stderr: string; stdout: string }) => void
@@ -548,6 +544,43 @@ Call \`get_transactions\` and then \`delete_everything\`.
         expect(stderr).toContain(
           'demo/test-matrix.md:2: table separator has 4 cells, its header has 3'
         );
+        // No header exists, so the row below is not checked against one.
+        expect(stderr).not.toContain('table row has');
+      }
+    );
+  });
+
+  test('a missing trailing pipe is GFM-legal on any row, the separator included', async () => {
+    // The cell count used to come up one short without a trailing pipe, so a
+    // separator written `|---|---` was reported as "not a table at all".
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: { 'test-matrix.md': '| ID | Case |\n|---|---\n| A-1 | ok\n| A-2 ||\n' },
+      },
+      ({ code, stdout, stderr }) => {
+        expect(stderr).not.toContain('FAIL');
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 tables checked');
+      }
+    );
+  });
+
+  test('a quoted fence shown inside a fence does not close it', async () => {
+    // Blockquote markers were stripped from every line before the close test,
+    // so `> ```` inside a plain fence closed it, and the table-shaped lines
+    // after it were checked as a table.
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: {
+          'test-matrix.md': '```\n> ```\n| ID | Case |\n|---|---|\n| A-1 | ok | extra |\n```\n',
+        },
+      },
+      ({ code, stdout, stderr }) => {
+        expect(stderr).not.toContain('FAIL');
+        expect(code).toBe(0);
+        expect(stdout).toContain('0 tables checked');
       }
     );
   });
@@ -568,25 +601,60 @@ Call \`get_transactions\` and then \`delete_everything\`.
     );
   });
 
-  test('fails when the release-parity-test matrix yields fewer tables than its floor', async () => {
+  test('fails when a file yields fewer tables than its declared floor', async () => {
     // The non-vacuity floor: a parser regression that stops seeing tables
     // (a fence that never closes, an unrecognised separator) passes every
-    // per-row check by checking nothing. The real matrix has a known number of
-    // tables, so seeing fewer is reported instead of read as a clean run.
+    // per-row check by checking nothing. A file that declares how many tables
+    // it holds reports seeing fewer instead of reading as a clean run.
     await withRepo(
       {
         dumpBody: WORKING_DUMP,
-        skillDir: 'release-parity-test',
-        skill: SKILL_BODY.replace('name: demo', 'name: release-parity-test'),
-        extraDocs: { 'test-matrix.md': '```\n\n| X | Y |\n|---|---|\n| 1 | 2 |\n' },
+        extraDocs: {
+          'test-matrix.md':
+            '<!-- check-skills: tables >= 1 -->\n```\n\n| X | Y |\n|---|---|\n| 1 | 2 |\n',
+        },
       },
       ({ code, stderr }) => {
         expect(code).toBe(1);
-        expect(stderr).toContain(
-          'release-parity-test/test-matrix.md: 0 tables checked, expected at least'
-        );
+        expect(stderr).toContain('demo/test-matrix.md: 0 tables checked, expected at least 1');
       }
     );
+  });
+
+  test('counts the table floors it enforced', async () => {
+    await withRepo(
+      {
+        dumpBody: WORKING_DUMP,
+        extraDocs: {
+          'test-matrix.md': '<!-- check-skills: tables >= 1 -->\n| X | Y |\n|---|---|\n| 1 | 2 |\n',
+        },
+      },
+      ({ code, stdout }) => {
+        expect(code).toBe(0);
+        expect(stdout).toContain('1 tables checked, 1 table floors enforced');
+      }
+    );
+  });
+
+  test('a malformed or repeated floor marker fails instead of enforcing nothing', async () => {
+    for (const [doc, message] of [
+      [
+        '<!-- check-skills: table >= 1 -->\n| X | Y |\n|---|---|\n',
+        'demo/test-matrix.md:1: unrecognised check-skills marker',
+      ],
+      [
+        '<!-- check-skills: tables >= 1 -->\n<!-- check-skills: tables >= 1 -->\n| X | Y |\n|---|---|\n',
+        'demo/test-matrix.md: 2 check-skills markers',
+      ],
+    ]) {
+      await withRepo(
+        { dumpBody: WORKING_DUMP, extraDocs: { 'test-matrix.md': doc } },
+        ({ code, stderr }) => {
+          expect(code).toBe(1);
+          expect(stderr).toContain(message);
+        }
+      );
+    }
   });
 
   test('accepts tables whose rows match, including escaped pipes in a cell', async () => {
@@ -1133,9 +1201,21 @@ describe('the real repository', () => {
     expect(stderr).not.toContain('FAIL');
     expect(code).toBe(0);
     expect(stdout).toContain('skills validated');
-    // The floor guards release-parity-test alone; this keeps the other skills'
-    // tables (finance-trip's blockquoted ones among them) in the count too.
+    // The floors guard only the files that declare one; this keeps every
+    // skill's tables in the count too.
     const tables = Number(/(\d+) tables checked/.exec(stdout)?.[1] ?? 0);
     expect(tables).toBeGreaterThanOrEqual(20);
+    // Every floor marker under skills/ must be one the linter enforced. A
+    // marker in a file the linter stopped reading (a skill that lost its
+    // SKILL.md, a doc outside skill_docs) would otherwise go quiet.
+    const markers = (
+      await Promise.all(
+        [...new Bun.Glob('skills/**/*.md').scanSync({ cwd: REAL_REPO })].map((path) =>
+          Bun.file(join(REAL_REPO, path)).text()
+        )
+      )
+    ).filter((text) => /<!--\s*check-skills:/.test(text)).length;
+    expect(markers).toBeGreaterThanOrEqual(2);
+    expect(stdout).toContain(`${markers} table floors enforced`);
   });
 });

@@ -7,6 +7,8 @@ metadata:
 
 # Finance Trip
 
+<!-- check-skills: tables >= 2 -->
+
 ## When to use
 
 - The user wants to tag travel transactions for a trip
