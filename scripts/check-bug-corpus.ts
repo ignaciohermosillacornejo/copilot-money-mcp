@@ -149,8 +149,9 @@ for (const m of chartRows) {
 }
 if (chartRows.length === 0) problems.push('README.md: found no found-by chart rows');
 for (const token of byDetected.keys()) {
-  if (!charted.has(token))
+  if (!charted.has(token)) {
     problems.push(`found-by \`${token}\` is used by entries but has no chart row`);
+  }
 }
 
 // ── 3 and 4. The index ──────────────────────────────────────────────────────
@@ -215,12 +216,14 @@ for (const part of indexSection.split(/^(?=\*\*`[\w-]+`\*\* — \d+$)/m)) {
 for (const e of entries) {
   const where = linkedFrom.get(e.file) ?? [];
   if (where.length === 0) problems.push(`${e.file} has no index row`);
-  if (where.length > 1)
+  if (where.length > 1) {
     problems.push(`${e.file} has ${where.length} index rows (${where.join(', ')})`);
+  }
 }
 for (const cls of byClass.keys()) {
-  if (!sectioned.has(cls))
+  if (!sectioned.has(cls)) {
     problems.push(`class \`${cls}\` is used by entries but has no index section`);
+  }
 }
 
 // ── Report ──────────────────────────────────────────────────────────────────

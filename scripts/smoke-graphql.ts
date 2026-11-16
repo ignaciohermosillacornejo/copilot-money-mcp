@@ -667,7 +667,7 @@ async function smokeTransactionsHappyPath(
 
   // tagIds round-trip: create two sentinel tags, attach, clear, delete tags.
   // Record original tag set by reading local cache field.
-  const origTagIds = Array.isArray(candidate.tags) ? [...candidate.tags] : [];
+  const origTagIds = [...(candidate.tag_ids ?? [])];
   await step('transactions', 'tagIds: set [2] → clear [] → restore', async () => {
     const tagA = await createTag(client, {
       input: { name: 'GQL-TEST-TAG-TX-A', colorName: 'OLIVE1' },
@@ -1756,7 +1756,7 @@ async function smokeBulkReviewTransactions(
     if (!caught) throw new Error('no error thrown from invalid id');
     if (!(caught instanceof GraphQLError)) {
       throw new Error(
-        `expected GraphQLError, got: ${caught instanceof Error ? caught.message : String(caught)}`
+        `expected GraphQLError, got: ${caught instanceof Error ? caught.message : JSON.stringify(caught)}`
       );
     }
     console.log(`    classified as code=${caught.code} (${caught.message.slice(0, 80)})`);

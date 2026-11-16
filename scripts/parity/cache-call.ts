@@ -80,8 +80,8 @@ async function main(): Promise<void> {
   const db = new CopilotDatabase(process.env.PARITY_DB_PATH || undefined);
   console.error(`[parity:cache] database: ${db.getDbPath() ?? '(none found)'}`);
   const tools = new CopilotMoneyTools(db);
-  const fn = tools[method] as (a: unknown) => Promise<unknown>;
-  const result = await fn.call(tools, args);
+  const fn = (tools[method] as (a: unknown) => Promise<unknown>).bind(tools);
+  const result = await fn(args);
   console.log(JSON.stringify(result));
 }
 

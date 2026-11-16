@@ -123,6 +123,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * A parsed YAML value as the text the patterns below test. `if:` and env values
+ * are scalars in practice (strings, sometimes a bare `true`), which this renders
+ * exactly as `String()` would; a mapping or list renders as JSON rather than
+ * `[object Object]`, so its contents stay visible to the patterns.
+ */
+function scalarText(value: unknown): string {
+  return typeof value === 'string' ? value : (JSON.stringify(value) ?? 'undefined');
+}
+
+/**
  * The trigger names of a workflow's `on:` block, which YAML allows in three
  * shapes: `on: push`, `on: [push, pull_request]`, and the mapping form.
  */
@@ -214,8 +224,9 @@ function* stringValuesOutsideGates(node: unknown, key = ''): Generator<string> {
   if (key === 'if' || TRUST_LIST_KEYS.includes(key)) return;
   if (typeof node === 'string') yield node;
   else if (Array.isArray(node)) for (const v of node) yield* stringValuesOutsideGates(v, key);
-  else if (isRecord(node))
+  else if (isRecord(node)) {
     for (const [k, v] of Object.entries(node)) yield* stringValuesOutsideGates(v, k);
+  }
 }
 
 /**
@@ -254,10 +265,10 @@ function* stringValues(node: unknown): Generator<string> {
 function* ifExpressions(jobs: Record<string, unknown>): Generator<string> {
   for (const job of Object.values(jobs)) {
     if (!isRecord(job)) continue;
-    if (job.if !== undefined) yield String(job.if);
+    if (job.if !== undefined) yield scalarText(job.if);
     if (!Array.isArray(job.steps)) continue;
     for (const step of job.steps) {
-      if (isRecord(step) && step.if !== undefined) yield String(step.if);
+      if (isRecord(step) && step.if !== undefined) yield scalarText(step.if);
     }
   }
 }
@@ -299,7 +310,7 @@ function* envBlocks(
 function reachableUnderDispatch(job: unknown): boolean {
   if (!isRecord(job)) return false;
   if (job.if === undefined) return true;
-  return POSITIVE_DISPATCH_TEST.test(String(job.if));
+  return POSITIVE_DISPATCH_TEST.test(scalarText(job.if));
 }
 
 const problems: string[] = [];
@@ -417,7 +428,7 @@ for (const file of files) {
     for (const key of TRUST_LIST_KEYS) {
       if (env[key] === undefined) continue;
       declarationKey = key;
-      declarations.push(String(env[key]));
+      declarations.push(scalarText(env[key]));
     }
   }
   let declared: Set<string> | null = null;

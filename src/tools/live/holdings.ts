@@ -279,8 +279,9 @@ export class LiveHoldingsTools {
       if (
         tickerFilter &&
         !tickerMatches(h.security.symbol, tickerFilter, isCashSecurityType(h.security.type))
-      )
+      ) {
         return false;
+      }
       return true;
     });
 

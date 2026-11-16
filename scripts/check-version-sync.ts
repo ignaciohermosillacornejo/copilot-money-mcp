@@ -33,10 +33,23 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Overridable so tests can drive the real script against a synthetic repo root.
 const ROOT = process.env.CHECK_VERSION_SYNC_ROOT ?? join(__dirname, '..');
 
-const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
-const server = JSON.parse(readFileSync(join(ROOT, 'server.json'), 'utf-8'));
-const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf-8'));
-const lockfile = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf-8'));
+// The shapes below declare only the fields this check reads; the presence and
+// type of each is what the comparisons further down verify.
+interface ServerJson {
+  version: string;
+  name?: string;
+  packages?: { registryType?: string; identifier?: string; version?: string }[];
+}
+interface Lockfile {
+  version: string;
+  packages?: Record<string, { version?: string } | undefined>;
+}
+const readJson = <T>(file: string): T => JSON.parse(readFileSync(join(ROOT, file), 'utf-8')) as T;
+
+const pkg = readJson<{ version: string; name?: string }>('package.json');
+const server = readJson<ServerJson>('server.json');
+const manifest = readJson<{ version: string }>('manifest.json');
+const lockfile = readJson<Lockfile>('package-lock.json');
 const changelog = readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf-8');
 
 const pkgVersion: string = pkg.version;

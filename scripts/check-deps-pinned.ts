@@ -26,7 +26,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PACKAGE_JSON =
   process.env.CHECK_DEPS_PINNED_PACKAGE_JSON ?? join(__dirname, '../package.json');
 
-const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf-8'));
+const pkg = JSON.parse(readFileSync(PACKAGE_JSON, 'utf-8')) as Partial<
+  Record<(typeof DEPENDENCY_FIELDS)[number], Record<string, string>>
+>;
 
 const DEPENDENCY_FIELDS = [
   'dependencies',
@@ -50,7 +52,7 @@ function isFloating(spec: string): boolean {
 
 const offenders: string[] = [];
 for (const field of DEPENDENCY_FIELDS) {
-  const deps: Record<string, string> = pkg[field] ?? {};
+  const deps = pkg[field] ?? {};
   for (const [name, spec] of Object.entries(deps)) {
     if (isFloating(spec)) {
       offenders.push(`${field}.${name} = ${JSON.stringify(spec)}`);

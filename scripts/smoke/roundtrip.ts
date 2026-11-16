@@ -123,8 +123,8 @@ async function main(): Promise<void> {
   log(`run marker: ${ctx.state.marker}`);
 
   const results: RoundtripResult[] = [];
-  let cleanupFailures: CleanupFailure[] = [];
-  let sweepResidue: ResidueRecord[] = [];
+  let cleanupFailures: CleanupFailure[];
+  let sweepResidue: ResidueRecord[];
   try {
     // Sequential on purpose: later checks consume objects created by earlier
     // ones, and one mutation at a time is what the maintainer can follow live.
