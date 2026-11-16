@@ -112,7 +112,7 @@ a class yet.
 ## How we find bugs
 
 Recorded per entry, using a fixed vocabulary so the corpus stays countable. Here is what
-this corpus actually says, across all 62 entries:
+this corpus actually says, across all 63 entries:
 
 | Found by | Count | |
 |---|---|---|
