@@ -82,12 +82,6 @@ replaced by a SKIP (test-matrix.md, How to extend).
    again; right after a write, wait 30 seconds and reload once. If an input
    misbehaves (masked or content-editable fields), stop and ask the user to do
    that one step; never commit a value you have not read back.
-8. **Raw GraphQL only for a named unverified surface.** A probe that calls the
-   wrappers in `src/core/graphql/` directly skips every refusal the MCP tools
-   make, so it is allowed only to settle a named `unverified` ledger entry, only
-   with the user's yes in chat for that run, and only on rows logged in the
-   cleanup ledger (W-24 is the pattern). The run itself never edits the repo:
-   a ledger reclass it earns lands in a follow-up PR carrying its evidence.
 8. **A write that errors may still have landed.** On any write error do not
    retry. That includes `writeMayHaveApplied`, a bulk edit's "N/M succeeded",
    `deleted: false`, and a shape error after the call. First run
@@ -100,6 +94,12 @@ replaced by a SKIP (test-matrix.md, How to extend).
    must contain no real merchant name, since a real recurring's rule could pick
    the row up (REC-05). Use `set_budget` only on the test category, and restore
    a budget to its previous value: `"0"` is a budget of zero, not "no budget".
+10. **Raw GraphQL only for a named unverified surface.** A probe that calls the
+    wrappers in `src/core/graphql/` directly skips every refusal the MCP tools
+    make, so it is allowed only to settle a named `unverified` ledger entry, only
+    with the user's yes in chat for that run, and only on rows logged in the
+    cleanup ledger (W-24 is the pattern). The run itself never edits the repo:
+    a ledger reclass it earns lands in a follow-up PR carrying its evidence.
 
 ## Phase 0 — Preflight (section P)
 
