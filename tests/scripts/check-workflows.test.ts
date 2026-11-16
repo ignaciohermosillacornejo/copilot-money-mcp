@@ -1102,6 +1102,33 @@ jobs:
     );
   });
 
+  test('an unquoted YAML list as the trust list fails, naming the missing quotes', async () => {
+    // `APPROVERS: ["octocat"]` parses as a YAML sequence, not the JSON string
+    // `fromJSON()` and `jq` read. Rendering it back to JSON would make it look
+    // like a valid declaration, so the gate must demand a string.
+    await withWorkflows(
+      {
+        'unquoted.yml': `name: Unquoted
+on: push
+env:
+  APPROVERS: ["octocat"]
+jobs:
+  publish:
+    if: github.actor == 'octocat'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - run: echo hi
+`,
+      },
+      ({ code, stderr }) => {
+        expect(code).toBe(1);
+        expect(stderr).toContain('must be a quoted JSON string');
+        expect(stderr).toContain('YAML list');
+      }
+    );
+  });
+
   test('an exclusion (`!=`) is not a declaration of trust', async () => {
     // `github.actor != 'dependabot[bot]'` is in claude-review.yml today.
     // Demanding that a DENIED login appear in the trust list would be exactly
