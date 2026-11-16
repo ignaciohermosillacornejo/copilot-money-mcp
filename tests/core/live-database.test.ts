@@ -766,6 +766,20 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     expect(lines[0]).toContain('(invalid date)');
   });
 
+  // Each case wrapped: test.each spreads an array case into arguments.
+  test.each([[424242], [{}], [['x']]])(
+    'a drifted non-string id (%p) is never indexed or persisted as a routing mapping (#917 review)',
+    (id) => {
+      const live = mkLive();
+      const flush = spyOn((live as any).metaStore, 'flush');
+      captureWarnings(() => {
+        live.upsertLiveTransaction(mutationRow({ id: id as unknown as string }));
+      });
+      expect((live as any).txnMetaIndex.size).toBe(0);
+      expect(flush).not.toHaveBeenCalled();
+    }
+  );
+
   test('a drifted non-string id is not printed in the refusal warning (#875)', () => {
     // Same rule as the read path's stripInvalidTransactionNodes: a value the
     // schema flagged is never echoed to stderr, only its field name.
