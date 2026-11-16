@@ -236,7 +236,20 @@ describe('CopilotDatabase', () => {
       const result = await db.getCategories();
       const unknown = result.find((c) => c.category_id === 'retired_custom_bucket');
       expect(unknown).toBeDefined();
-      expect(unknown?.name).toBeUndefined();
+      expect('name' in (unknown ?? {})).toBe(false);
+    });
+
+    test('getCategoryNameMap skips a category with a missing or empty name (#867)', async () => {
+      // get_categories names every view through this map, so a category left
+      // out of it gets no name rather than its id or "".
+      (db as any)._userCategories = [
+        { category_id: 'Nm3dK8qL2xW7vR4pT6sB', name: 'Named' },
+        { category_id: 'Em5pT9wK3nR8qL2xV4sC', name: '' },
+        { category_id: 'Ms7nG2vL4xK9qT3wR5sD' },
+      ];
+      (db as any)._categoryNameMap = null;
+      const map = await db.getCategoryNameMap();
+      expect([...map.entries()]).toEqual([['Nm3dK8qL2xW7vR4pT6sB', 'Named']]);
     });
   });
 

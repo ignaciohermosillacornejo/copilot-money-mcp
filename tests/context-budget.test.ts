@@ -234,8 +234,9 @@ const SCHEMA_BUDGETS: Record<string, number> = {
   // most-described read tool, and that is the property worth preserving.
   get_accounts: 2_700,
   get_connection_status: 850,
-  // UNMOVED by #909 (+79: list rows report category_name null for an unknown
-  // category id, #867). Measured 1_277 on main, 1_356 with #909 (~3.5%).
+  // UNMOVED by #909 (+116: category_name and parent_name are null for a
+  // category with no known name, in every view, #867). Measured 1_277 on
+  // main, 1_393 with #909 (~0.9%).
   get_categories: 1_405,
   // Raised from 1_900 by #606: adds the `fields` param (excludes the
   // pattern-detected row's embedded `transactions` array — the matched
@@ -600,9 +601,9 @@ const SCHEMA_BUDGETS: Record<string, number> = {
 // 2026-10-20). That left ~0.1% under 84_920, below the ~1% this ceiling is
 // kept at, so the raise restores the policy headroom.
 //
-// UNMOVED by #909 (+160: get_transactions +81 and get_categories +79, each
-// saying how an unknown category id's category_name looks, #867). Measured
-// 84_940 on main, 85_100 with #909 (~0.7%), within the 85_700 in force.
+// UNMOVED by #909 (+197: get_transactions +81 and get_categories +116, each
+// saying how a category with no known name looks, #867). Measured 84_940 on
+// main, 85_137 with #909 (~0.7%), within the 85_700 in force.
 const SCHEMA_TOTAL_BUDGET = 85_700;
 
 // ---------------------------------------------------------------------------

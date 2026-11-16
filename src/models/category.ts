@@ -58,10 +58,3 @@ export const CategorySchema = z
   .passthrough();
 
 export type Category = z.infer<typeof CategorySchema>;
-
-/**
- * Get the best display name for a category.
- */
-export function getCategoryDisplayName(category: Category): string {
-  return category.name ?? category.category_id;
-}

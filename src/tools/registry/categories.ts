@@ -16,7 +16,8 @@ export const getCategoriesTool = defineTool({
       'search - search user categories by keyword. Use parent_id to get subcategories. ' +
       'For list view, use period (e.g., "this_month") or start_date/end_date to filter by date. ' +
       'Includes all categories, even those with $0 spent (matching UI behavior). ' +
-      'A list row whose category id is unknown (e.g. deleted) has category_name null.',
+      'category_name and parent_name are null for a category with no known name ' +
+      '(e.g. deleted, or unnamed), in every view.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -464,18 +464,6 @@ function validateOffset(offset: number | undefined): number {
 const DEFAULT_CATEGORY_ID = 'uncategorized';
 
 /**
- * A user category's own name, or `null` when it has none (missing or empty).
- *
- * Deliberately NOT getCategoryDisplayName(), whose fallback returns the
- * category id as the "name" (#867). Live mode's category name map skips a
- * category without a name for the same reason (#860), so the name is absent
- * rather than an id or "".
- */
-function userCategoryName(category: Category): string | null {
-  return category.name || null;
-}
-
-/**
  * Gets the category ID or returns the default 'uncategorized'.
  *
  * @param categoryId - The category ID (may be null or undefined)
@@ -1396,6 +1384,21 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * resolveCategoryName()'s rule as a synchronous lookup, for code that names
+   * many categories inside nested `.map()`s: the known name, or `null`.
+   *
+   * get_categories uses it in every view so one category gets one name
+   * whichever view returns it. A user category with a missing or empty name
+   * is not in the user name map (getCategoryNameMap skips it, as live mode's
+   * map does, #860), so it gets null or its Plaid-taxonomy name, never its id
+   * or "" (#867).
+   */
+  private async knownCategoryNamer(): Promise<(categoryId: string) => string | null> {
+    const userCategoryMap = await this.getUserCategoryMap();
+    return (categoryId) => lookupKnownCategoryName(categoryId, userCategoryMap);
+  }
+
+  /**
    * Resolve account ID to account name.
    *
    * @param accountId - The account ID to look up
@@ -2235,16 +2238,17 @@ export class CopilotMoneyTools {
       }
 
       const children = allUserCats.filter((c) => c.parent_category_id === parent_id);
+      const nameOf = await this.knownCategoryNamer();
 
       return {
         view: 'subcategories',
         count: children.length,
         data: {
           parent_id: parent.category_id,
-          parent_name: userCategoryName(parent),
+          parent_name: nameOf(parent.category_id),
           subcategories: children.map((child) => ({
             category_id: child.category_id,
-            category_name: userCategoryName(child),
+            category_name: nameOf(child.category_id),
             emoji: child.emoji ?? null,
           })),
         },
@@ -2255,6 +2259,7 @@ export class CopilotMoneyTools {
       case 'tree': {
         // Build hierarchy from user categories
         const allUserCats = await this.db.getUserCategories();
+        const nameOf = await this.knownCategoryNamer();
 
         // Separate root categories (no parent) and children
         const roots = allUserCats.filter((c) => !c.parent_category_id);
@@ -2271,11 +2276,11 @@ export class CopilotMoneyTools {
           const children = childMap.get(root.category_id) ?? [];
           return {
             category_id: root.category_id,
-            category_name: userCategoryName(root),
+            category_name: nameOf(root.category_id),
             emoji: root.emoji ?? null,
             children: children.map((child) => ({
               category_id: child.category_id,
-              category_name: userCategoryName(child),
+              category_name: nameOf(child.category_id),
               emoji: child.emoji ?? null,
             })),
           };
@@ -2298,6 +2303,9 @@ export class CopilotMoneyTools {
         const searchTerm = query.trim().toLowerCase();
         const userCats = await this.db.getUserCategories();
         const matches = userCats.filter((c) => c.name?.toLowerCase().includes(searchTerm));
+        // Never null here: a match has a non-empty name, so it is in the user
+        // name map. Same rule as the other views all the same.
+        const nameOf = await this.knownCategoryNamer();
 
         return {
           view: 'search',
@@ -2306,7 +2314,7 @@ export class CopilotMoneyTools {
             query: query.trim(),
             categories: matches.map((cat) => ({
               category_id: cat.category_id,
-              category_name: userCategoryName(cat),
+              category_name: nameOf(cat.category_id),
               emoji: cat.emoji ?? null,
               parent_category_id: cat.parent_category_id ?? null,
             })),
