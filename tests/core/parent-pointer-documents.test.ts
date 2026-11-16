@@ -366,7 +366,8 @@ describe('no route builds a row from a fieldless document, every route from a po
       // pin nothing. The count is read per run, so a fixture that later gains
       // a second field is covered with no other edit.
       const keys = Object.keys(populated);
-      for (const dropped of keys.length >= 2 ? keys : []) {
+      if (keys.length < 2) return;
+      for (const dropped of keys) {
         const fields = Object.fromEntries(
           Object.entries(populated).filter(([key]) => key !== dropped)
         );
