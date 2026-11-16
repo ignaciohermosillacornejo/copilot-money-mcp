@@ -76,6 +76,7 @@ src/
 │   ├── date.ts         # Date period parsing (this_month, last_30_days, etc.)
 │   └── categories.ts   # Category name resolution
 ├── server.ts           # MCP server (CopilotMoneyServer class)
+├── cli-args.ts         # CLI_FLAGS (the one flag table; check:server-json reads it) + parser
 └── cli.ts              # CLI entry point with --db-path, --write, --live-reads options
 ```
 

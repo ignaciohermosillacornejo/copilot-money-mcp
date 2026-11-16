@@ -103,9 +103,9 @@ function parseArgs(): {
   }
 
   const dbPath = values['--db-path'];
-  const verbose = booleans['--verbose'] === true;
-  const writeFlagSeen = booleans['--write'] === true;
-  let liveReadsEnabled = booleans['--live-reads'] === true;
+  const verbose = booleans['--verbose'];
+  const writeFlagSeen = booleans['--write'];
+  let liveReadsEnabled = booleans['--live-reads'];
   const browserFlag = values['--browser'];
   const profileFlag = values['--browser-profile'];
   const dataDirFlag = values['--browser-data-dir'];
