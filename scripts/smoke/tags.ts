@@ -9,9 +9,13 @@
  *   3. refresh_cache --scope tags invalidates and triggers refetch
  *
  * Exits non-zero on any assertion failure. Output is intended to be pasted
- * into the PR description. An empty tag list is about the server and prints a
- * drift verdict the scheduled run reports as drift; the cache-hit and timing
- * assertions are about this process, and throw plainly so a slow run reads as
+ * into the PR description. A row with no id is about the server and prints a
+ * drift verdict the scheduled run reports as drift. An empty list is not: an
+ * account can simply have no tags, so it prints a registered SKIP
+ * marker and the run records the comparison as not checked rather than as
+ * drift or as a clean pass (#913). The cache-hit and timing assertions are
+ * about this process and still run on an empty list (an empty snapshot is
+ * cached like any other); they throw plainly so a slow run reads as
  * "drift NOT checked" rather than as an API change (#819).
  */
 
@@ -42,7 +46,13 @@ async function main(): Promise<void> {
   const coldMs = Date.now() - t0;
   log('cold', { rows: cold.count, hit: cold._cache_hit, ms: coldMs });
   if (cold._cache_hit !== false) throw new Error(`expected cold _cache_hit=false`);
-  if (cold.count === 0) serverDrift('expected at least one tag');
+  if (cold.count === 0) {
+    // A SKIP_MARKERS entry in scripts/scheduled-smoke.ts: an account with no
+    // tags has nothing to compare, which is not evidence the API changed.
+    console.error('[smoke] SKIP — tags rows not checked: the account has no tags.');
+  }
+  const missingId = cold.tags.filter((r) => !r.id).length;
+  if (missingId > 0) serverDrift(`${missingId} of ${cold.count} tags came back with no id`);
 
   // 2. Warm
   const t1 = Date.now();

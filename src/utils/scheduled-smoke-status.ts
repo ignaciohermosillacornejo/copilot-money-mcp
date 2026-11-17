@@ -45,9 +45,12 @@ function truncateReport(value: string | null): string | null {
 /**
  * Bounds for `not_checked` as surfaced by the reader. The writer records at
  * most one entry per registered skip marker (a handful); these ceilings only
- * matter for a hand-edited or foreign file, same reasoning as `report`.
+ * matter for a hand-edited or foreign file, same reasoning as `report`. The
+ * count must stay at or above `SKIP_MARKERS.length` in scripts/scheduled-smoke.ts
+ * (tests/scripts/scheduled-smoke.test.ts enforces it), or a run that skipped
+ * every member would surface with some of them silently dropped.
  */
-export const SCHEDULED_SMOKE_NOT_CHECKED_MAX = 4;
+export const SCHEDULED_SMOKE_NOT_CHECKED_MAX = 6;
 export const SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS = 32;
 
 /**

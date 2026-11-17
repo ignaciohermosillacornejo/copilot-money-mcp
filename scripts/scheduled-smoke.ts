@@ -57,8 +57,10 @@ export const DRIFT_VERDICT_MARKERS = [
   '[smoke] FAIL — synthesized-field absence drift detected',
   '[smoke] FAIL — read-surface drift detected',
   '[smoke] FAIL — account-name parity drift detected',
-  // The refresh smokes' server-controlled assertions (a non-empty list, the
-  // budget month window, rollover polarity). Their local assertions — cache
+  // The refresh smokes' server-controlled assertions (a non-empty category or
+  // budget list, a row id on every tag and recurring item, the budget month
+  // window, rollover polarity). An empty tag or recurring list is a SKIP
+  // marker below, not drift: an account can have none (#913). Their local assertions — cache
   // hits, the warm-call timing bound — still throw without a marker, and stay
   // `incomplete`: a slow laptop is not an API change (#819).
   '[smoke] FAIL — budgets server drift detected',
@@ -89,6 +91,16 @@ export const SKIP_MARKERS = [
   {
     marker: '[smoke] SKIP — some read operations not checked',
     check: 'some read operations',
+    verdict: 'SKIP',
+  },
+  {
+    marker: '[smoke] SKIP — tags rows not checked',
+    check: 'tags rows',
+    verdict: 'SKIP',
+  },
+  {
+    marker: '[smoke] SKIP — recurring rows not checked',
+    check: 'recurring rows',
     verdict: 'SKIP',
   },
 ] as const satisfies ReadonlyArray<{ marker: string } & ScheduledSmokeNotChecked>;
