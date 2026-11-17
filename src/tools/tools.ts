@@ -893,12 +893,17 @@ export class CopilotMoneyTools {
       // Never let cache housekeeping mask the write's own error, which the
       // caller rethrows next and is the one that matters; but leave a trace,
       // since a failure here is the stale-cache bug this exists to prevent.
-      console.error(
-        `[copilot-money-mcp] live-cache invalidation after a failed write threw: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      );
+      CopilotMoneyTools.traceHousekeepingFailure(e);
     }
+  }
+
+  /** The one trace for catch-path housekeeping that threw. */
+  private static traceHousekeepingFailure(e: unknown): void {
+    console.error(
+      `[copilot-money-mcp] live-cache invalidation after a failed write threw: ${
+        e instanceof Error ? e.message : String(e)
+      }`
+    );
   }
 
   /**
@@ -931,7 +936,8 @@ export class CopilotMoneyTools {
         live.invalidateRecurringDerivedSnapshots();
       },
     };
-    drop[scope]();
+    // Runs in a catch, one line above the rethrow: it must not mask it.
+    this.housekeepAfterThrow(drop[scope]);
   }
 
   /**
@@ -976,17 +982,15 @@ export class CopilotMoneyTools {
    * Runs catch-path cache housekeeping so that a throw inside it cannot mask
    * the write's own error, which the caller rethrows next and which carries
    * the "may have applied" signal (#875/#887). Same reasoning and same trace
-   * as invalidateAfterFailedWrite (#911 review).
+   * as invalidateAfterFailedWrite (#911 review). The success-path drops are
+   * left unwrapped on purpose, like the existing success-path write-throughs:
+   * there a throw surfaces a cache bug instead of hiding it behind a success.
    */
   private housekeepAfterThrow(housekeeping: () => void): void {
     try {
       housekeeping();
     } catch (e) {
-      console.error(
-        `[copilot-money-mcp] live-cache invalidation after a failed write threw: ${
-          e instanceof Error ? e.message : String(e)
-        }`
-      );
+      CopilotMoneyTools.traceHousekeepingFailure(e);
     }
   }
 

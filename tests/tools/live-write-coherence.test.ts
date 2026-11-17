@@ -2122,7 +2122,10 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
   async function rejectionWithFailingHousekeeping(
     run: () => Promise<unknown>,
     liveDb: LiveCopilotDatabase,
-    method: 'invalidateLiveMonthsMatching' | 'invalidateLiveTransactionMonths'
+    method:
+      | 'invalidateLiveMonthsMatching'
+      | 'invalidateLiveTransactionMonths'
+      | 'invalidateRecurringDerivedSnapshots'
   ): Promise<Error> {
     const scan = spyOn(liveDb, method).mockImplementation(() => {
       throw new Error('housekeeping boom');
@@ -2136,9 +2139,16 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
         (err: unknown) => err as Error
       );
     } finally {
-      expect(scan).toHaveBeenCalled();
+      // Restore first, so a failed assertion cannot leave console.error muted.
+      const scanned = scan.mock.calls.length;
+      const traced = log.mock.calls.map((c) => String(c[0]));
       scan.mockRestore();
       log.mockRestore();
+      expect(scanned).toBeGreaterThan(0);
+      // The trace is half the wrapper's contract: a swallowed failure is logged.
+      expect(
+        traced.some((m) => m.includes('live-cache invalidation after a failed write threw'))
+      ).toBe(true);
     }
   }
 
@@ -2170,6 +2180,20 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
       () => call('create_recurring', WRITE_TABLE.create_recurring!.args),
       liveDb,
       'invalidateLiveTransactionMonths'
+    );
+    expect(err.message).not.toContain('housekeeping boom');
+    expect(err.cause).toBeInstanceOf(GraphQLError);
+  });
+
+  test("delete_recurring: a throw in the derived-snapshot drop does not mask the write's error (#911 review)", async () => {
+    const { call, read, liveDb } = setup({
+      DeleteRecurring: unusablePayloadError('DeleteRecurring', 'deleteRecurring', null),
+    });
+    await read();
+    const err = await rejectionWithFailingHousekeeping(
+      () => call('delete_recurring', { recurring_id: RECURRING_ID }),
+      liveDb,
+      'invalidateRecurringDerivedSnapshots'
     );
     expect(err.message).not.toContain('housekeeping boom');
     expect(err.cause).toBeInstanceOf(GraphQLError);
