@@ -69,7 +69,10 @@ async function main(): Promise<void> {
   await refresh.refresh({ scope: 'categories' });
   log('refreshed', { scope: 'categories' });
   const t2 = Date.now();
-  const recold = await tools.getCategories({});
+  // `budget` is asked for explicitly: the default preset drops it (#597), and
+  // the rollover check below is about what the server put in it. Without it
+  // every row reads as rollover 0 and the check can never fail (#913 review).
+  const recold = await tools.getCategories({ fields: ['default', 'budget'] });
   const recoldMs = Date.now() - t2;
   log('recold', { rows: recold.count, hit: recold._cache_hit, ms: recoldMs });
   if (recold._cache_hit !== false) {
@@ -82,9 +85,11 @@ async function main(): Promise<void> {
   const rolloversEnabled =
     user.budgetingConfig?.isEnabled === true &&
     user.budgetingConfig.rolloversConfig?.isEnabled === true;
+  // No `?? 0`: a row whose budget did not come back is left out, so a blind
+  // run shows categories_with_rollover_amount: 0 instead of the row count.
   const rolloverAmounts = recold.categories
-    .map((c) => c.budget?.current?.rolloverAmount ?? 0)
-    .filter((n) => Number.isFinite(n));
+    .map((c) => c.budget?.current?.rolloverAmount)
+    .filter((n): n is number => typeof n === 'number' && Number.isFinite(n));
   const nonZero = rolloverAmounts.filter((n) => n !== 0);
   log('rollover', {
     user_rollovers_enabled: rolloversEnabled,

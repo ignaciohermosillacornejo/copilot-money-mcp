@@ -131,6 +131,23 @@ describe('bun run smoke composite verdicts (#818, #819)', () => {
     expect(dead.map((s) => s.marker)).toEqual([]);
   });
 
+  /**
+   * A drift check that reads a field the default preset can drop must ask for
+   * it, or a local preset trim reads as server drift (or, for rollover, makes
+   * the check unfalsifiable). The live tools project rows after the cache
+   * read, so the request costs nothing (#913 review).
+   */
+  test('a drift check asks for the projected field it reads', () => {
+    const REQUIRED: Record<string, string> = {
+      'scripts/smoke/recurring.ts': "getRecurring({ fields: ['default', 'id'] })",
+      'scripts/smoke/categories.ts': "getCategories({ fields: ['default', 'budget'] })",
+    };
+    const missing = Object.entries(REQUIRED).filter(
+      ([m, call]) => !fs.readFileSync(path.join(ROOT, m), 'utf8').includes(call)
+    );
+    expect(missing.map(([m, call]) => `${m}: ${call}`)).toEqual([]);
+  });
+
   test('no stale entries: every classified script is still in the composite', () => {
     expect(Object.keys(MARKER_OF).filter((m) => !members.includes(m))).toEqual([]);
   });
