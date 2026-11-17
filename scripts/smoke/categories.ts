@@ -96,7 +96,15 @@ async function main(): Promise<void> {
     categories_with_rollover_amount: rolloverAmounts.length,
     categories_with_nonzero_rollover: nonZero.length,
   });
-  if (rolloversEnabled) {
+  const rolloverCompared = rolloverAmounts.length > 0;
+  if (!rolloverCompared) {
+    // A SKIP_MARKERS entry in scripts/scheduled-smoke.ts: no category came
+    // back with a rollover number (budgeting off leaves budget.current null),
+    // so there is nothing to compare, which is neither a pass nor drift.
+    console.error(
+      '[smoke] SKIP — rollover polarity not checked: no category carried a rollover amount.'
+    );
+  } else if (rolloversEnabled) {
     // Gentle assertion: if the user has rollovers on but no rollover effects
     // happen to be active this period (legitimately possible when every
     // category zeroes out), don't fail. Just log the count.
@@ -114,9 +122,13 @@ async function main(): Promise<void> {
     }
   }
 
-  console.error(
-    '[smoke] PASS — categories refresh smoke: cold, warm, refresh and rollover polarity verified.'
-  );
+  if (rolloverCompared) {
+    console.error(
+      '[smoke] PASS — categories refresh smoke: cold, warm, refresh and rollover polarity verified.'
+    );
+  } else {
+    console.error('[smoke] PASS — categories refresh smoke: cold, warm and refresh verified.');
+  }
 }
 
 if (import.meta.main) {

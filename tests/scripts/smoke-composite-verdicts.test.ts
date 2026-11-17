@@ -138,14 +138,15 @@ describe('bun run smoke composite verdicts (#818, #819)', () => {
    * read, so the request costs nothing (#913 review).
    */
   test('a drift check asks for the projected field it reads', () => {
-    const REQUIRED: Record<string, string> = {
-      'scripts/smoke/recurring.ts': "getRecurring({ fields: ['default', 'id'] })",
-      'scripts/smoke/categories.ts': "getCategories({ fields: ['default', 'budget'] })",
+    // The call, then a `fields:` list naming the field, in any order or wrap.
+    const REQUIRED: Record<string, RegExp> = {
+      'scripts/smoke/recurring.ts': /getRecurring\(\{[^)]*fields:\s*\[[^\]]*'id'/,
+      'scripts/smoke/categories.ts': /getCategories\(\{[^)]*fields:\s*\[[^\]]*'budget'/,
     };
     const missing = Object.entries(REQUIRED).filter(
-      ([m, call]) => !fs.readFileSync(path.join(ROOT, m), 'utf8').includes(call)
+      ([m, pattern]) => !pattern.test(fs.readFileSync(path.join(ROOT, m), 'utf8'))
     );
-    expect(missing.map(([m, call]) => `${m}: ${call}`)).toEqual([]);
+    expect(missing.map(([m, pattern]) => `${m}: ${pattern}`)).toEqual([]);
   });
 
   test('no stale entries: every classified script is still in the composite', () => {

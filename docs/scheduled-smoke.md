@@ -67,7 +67,9 @@ the warm-call timing bound) throws plainly and lands in `incomplete`, because a
 slow laptop is not an API change. An empty tag or recurring list is neither:
 an account can simply have none, so `tags` and `recurring` print a registered
 SKIP marker (`tags rows` / `recurring rows`) and the run records what it could
-not compare (#913).
+not compare (#913). Likewise `categories` prints `rollover polarity` as a SKIP
+when no category came back with a rollover amount (budgeting off), rather than
+claiming the polarity was verified.
 
 `tests/scripts/smoke-composite-verdicts.test.ts` holds every composite member
 to this: a drift marker on the list, a `[smoke] PASS — …` line the summary
