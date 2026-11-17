@@ -42,7 +42,11 @@ async function main(): Promise<void> {
 
   // 1. Cold
   const t0 = Date.now();
-  const cold = await tools.getRecurring({});
+  // `id` is asked for explicitly: the drift check below is about the server
+  // returning ids, so it must not depend on the default field preset, which
+  // is trimmed for context budget (#704). The cache is not keyed by fields,
+  // so the warm call below still hits this snapshot.
+  const cold = await tools.getRecurring({ fields: ['default', 'id'] });
   const coldMs = Date.now() - t0;
   log('cold', { rows: cold.count, hit: cold._cache_hit, ms: coldMs });
   if (cold._cache_hit !== false) throw new Error(`expected cold _cache_hit=false`);
