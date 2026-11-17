@@ -60,9 +60,9 @@ export const DRIFT_VERDICT_MARKERS = [
   // The refresh smokes' server-controlled assertions (a non-empty category or
   // budget list, a row id on every tag and recurring item, the budget month
   // window, rollover polarity). An empty tag or recurring list is a SKIP
-  // marker below, not drift: an account can have none (#913). Their local assertions — cache
-  // hits, the warm-call timing bound — still throw without a marker, and stay
-  // `incomplete`: a slow laptop is not an API change (#819).
+  // marker below, not drift: an account can have none (#913). Their local
+  // assertions (cache hits, the warm-call timing bound) still throw without a
+  // marker, and stay `incomplete`: a slow laptop is not an API change (#819).
   '[smoke] FAIL — budgets server drift detected',
   '[smoke] FAIL — categories server drift detected',
   '[smoke] FAIL — recurring server drift detected',
