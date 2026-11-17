@@ -190,12 +190,13 @@ describe('LiveBalanceHistoryTools — cache behavior', () => {
     expect(client.query).toHaveBeenCalledTimes(2);
   });
 
-  test('clearCache() drops every entry — next call refetches', async () => {
+  test('clearing the shared map drops every entry — next call refetches', async () => {
     const client = makeClient(sampleRows);
-    const tools = new LiveBalanceHistoryTools(makeLive(client));
+    const live = makeLive(client);
+    const tools = new LiveBalanceHistoryTools(live);
 
     await tools.getBalanceHistory({ item_id: ITEM_ID, account_id: ACCOUNT_ID });
-    tools.clearCache();
+    live.getBalanceHistoryCache().clear();
     const after = await tools.getBalanceHistory({
       item_id: ITEM_ID,
       account_id: ACCOUNT_ID,

@@ -94,7 +94,8 @@ export class LiveBalanceHistoryTools {
   /**
    * Per-(itemId, accountId, timeFrame) cache, held by LiveCopilotDatabase.
    * Bounded by the small product of accounts × timeFrames (see class JSDoc).
-   * Cleared by `clearCache()` on refresh_cache and by every transaction write.
+   * Cleared through LiveCopilotDatabase by refresh_cache and by every
+   * transaction write; this class never clears it itself.
    * Each entry carries its own `expires_at`, set by the instance that fetched
    * it, so two instances over one LiveCopilotDatabase never disagree about
    * whether a shared entry is fresh.
@@ -108,11 +109,6 @@ export class LiveBalanceHistoryTools {
   ) {
     this.ttlMs = opts.ttlMs ?? ONE_HOUR_MS;
     this.cache = live.getBalanceHistoryCache();
-  }
-
-  /** Public for refresh_cache. Drops every cached tuple. */
-  clearCache(): void {
-    this.cache.clear();
   }
 
   async getBalanceHistory(args: GetBalanceHistoryLiveArgs): Promise<GetBalanceHistoryLiveResult> {

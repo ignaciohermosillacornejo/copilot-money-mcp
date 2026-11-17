@@ -71,10 +71,11 @@ export interface RefreshCacheResult {
 export class RefreshCacheTool {
   /**
    * `balanceHistory` is optional so existing call sites and tests don't
-   * have to wire the tool instance — when omitted, the `balance_history`
-   * scope is a no-op AND `flushed.balance_history` is omitted from the
-   * response (the flag only appears when a real flush happened). The
-   * live server path always passes a real tool.
+   * have to wire the tool instance. Its cache lives on LiveCopilotDatabase
+   * (#870), so the `balance_history` scope clears it either way; the handle
+   * only decides whether `flushed.balance_history` is reported, which makes
+   * that flag a wiring flag rather than "something was flushed". The live
+   * server path always passes a real tool.
    */
   constructor(
     private readonly live: LiveCopilotDatabase,
@@ -235,9 +236,10 @@ export class RefreshCacheTool {
         // A Map<tuple, snapshot> keyed by LiveBalanceHistoryTools and held on
         // LiveCopilotDatabase (so transaction writes can drop it too, #870).
         // The map is cleared through this.live, so a tool built without the
-        // handle still leaves nothing stale. The handle survives only to
-        // decide the flushed flag, which is set when the tool was actually
-        // wired (no-op semantics: "was flushed" not "operation acknowledged").
+        // handle still leaves nothing stale. The handle survives only as a
+        // wiring flag: flushed.balance_history is reported when the tool was
+        // wired, and absent otherwise even though the map was cleared. Unlike
+        // investment_prices below, whose cache really lives on its tool.
         this.live.getBalanceHistoryCache().clear();
         if (this.balanceHistory) flushed.balance_history = true;
         break;
