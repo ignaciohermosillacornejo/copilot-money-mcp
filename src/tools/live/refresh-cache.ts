@@ -136,10 +136,10 @@ export class RefreshCacheTool {
       this.live.getInvestmentBalanceCache().invalidate();
       this.live.getInvestmentLiveBalanceCache().invalidate();
       flushed.investment_balance = true;
-      if (this.balanceHistory) {
-        this.balanceHistory.clearCache();
-        flushed.balance_history = true;
-      }
+      // The map lives on LiveCopilotDatabase (#870), so it is cleared even
+      // without the tool handle; the handle only decides the flag.
+      this.live.getBalanceHistoryCache().clear();
+      if (this.balanceHistory) flushed.balance_history = true;
       if (this.investmentPrices) {
         this.investmentPrices.clearCache();
         flushed.investment_prices = true;
@@ -234,14 +234,12 @@ export class RefreshCacheTool {
       case 'balance_history':
         // A Map<tuple, snapshot> keyed by LiveBalanceHistoryTools and held on
         // LiveCopilotDatabase (so transaction writes can drop it too, #870).
-        // The map is reachable through this.live, but the tool handle stays:
-        // it survives only to decide the flushed flag, which is set when the
-        // tool was actually wired (no-op semantics: "was flushed" not
-        // "operation acknowledged").
-        if (this.balanceHistory) {
-          this.balanceHistory.clearCache();
-          flushed.balance_history = true;
-        }
+        // The map is cleared through this.live, so a tool built without the
+        // handle still leaves nothing stale. The handle survives only to
+        // decide the flushed flag, which is set when the tool was actually
+        // wired (no-op semantics: "was flushed" not "operation acknowledged").
+        this.live.getBalanceHistoryCache().clear();
+        if (this.balanceHistory) flushed.balance_history = true;
         break;
       case 'investment_prices':
         // The cache lives on LiveInvestmentPricesTools (two Maps — intraday

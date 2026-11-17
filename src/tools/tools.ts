@@ -6287,7 +6287,7 @@ export class CopilotMoneyTools {
     } catch (e) {
       // A create that may have landed may have linked the seed row too; the
       // generic helper below has no transaction id, so its month goes here.
-      // mutation-guard: only a possibly-applied create_recurring drops its seed month
+      // mutation-guard: create_recurring drops its seed month only when it may have applied
       if (e instanceof GraphQLError && e.writeMayHaveApplied) {
         // mutation-guard: a possibly-applied create_recurring drops its seed month
         this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);
