@@ -60,10 +60,14 @@ moved cache directory would have kept reporting a clean weekly check while the
 parity gate compared nothing.
 
 The refresh smokes (`budgets`, `categories`, `recurring`, `tags`) split their
-assertions the same way. What the server returned (a non-empty list, the
-budget month window, rollover polarity) prints a drift marker; what this
-process did (cache hits, the warm-call timing bound) throws plainly and lands
-in `incomplete`, because a slow laptop is not an API change.
+assertions the same way. What the server returned (a non-empty category or
+budget list, a row id on every tag and recurring item, the budget month window,
+rollover polarity) prints a drift marker; what this process did (cache hits,
+the warm-call timing bound) throws plainly and lands in `incomplete`, because a
+slow laptop is not an API change. An empty tag or recurring list is neither:
+an account can simply have none, so `tags` and `recurring` print a registered
+SKIP marker (`tags rows` / `recurring rows`) and the run records what it could
+not compare (#913).
 
 `tests/scripts/smoke-composite-verdicts.test.ts` holds every composite member
 to this: a drift marker on the list, a `[smoke] PASS — …` line the summary
