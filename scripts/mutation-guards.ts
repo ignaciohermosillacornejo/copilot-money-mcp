@@ -447,7 +447,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/tools/live-write-coherence.test.ts',
   },
   {
-    name: 'only a possibly-applied create_recurring drops its seed month',
+    name: 'create_recurring drops its seed month only when it may have applied',
     file: 'src/tools/tools.ts',
     invariant:
       'The seed-month drop above is conditional: a create_recurring that cannot have written ' +
@@ -457,10 +457,10 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     mutation: {
       kind: 'replace',
       find:
-        '      // mutation-guard: only a possibly-applied create_recurring drops its seed month\n' +
+        '      // mutation-guard: create_recurring drops its seed month only when it may have applied\n' +
         '      if (e instanceof GraphQLError && e.writeMayHaveApplied) {',
       with:
-        '      // mutation-guard: only a possibly-applied create_recurring drops its seed month\n' +
+        '      // mutation-guard: create_recurring drops its seed month only when it may have applied\n' +
         '      if (e instanceof Error) {',
     },
     expectFailingTests: ["a create_recurring that cannot have written keeps the seed row's month"],

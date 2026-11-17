@@ -1173,7 +1173,11 @@ export class LiveCopilotDatabase {
    * computed from tags (cached rows carry tag ids, and delete_tag drops the
    * months of the rows carrying the deleted one itself). An empty list rather
    * than no list, so a snapshot added later must be classified here or in
-   * SNAPSHOTS_NOT_DROPPED_BY_TAG_WRITES, as for the other families.
+   * SNAPSHOTS_NOT_DROPPED_BY_TAG_WRITES, as for the other families. There is
+   * no invalidateTagDerivedSnapshots() yet: whoever adds the first key here
+   * adds that method too and calls it from the tag writes, or the family test
+   * in tests/tools/live-write-coherence.test.ts fails with no production site
+   * to point at.
    */
   static readonly TAG_DERIVED_SNAPSHOTS = [] as const;
 

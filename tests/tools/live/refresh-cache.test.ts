@@ -64,6 +64,8 @@ function makeMockLive(): {
   const investmentBalance = makeInvalidateCache();
   const investmentLiveBalance = makeInvalidateCache();
   const transactions = { invalidate: mock((_arg: string[] | 'all') => {}) };
+  // The shared balance-history map (#870), seeded so a clear is observable.
+  const balanceHistory = new Map<string, unknown>([['seeded', {}]]);
 
   const live = {
     getAccountsCache: mock(() => accounts),
@@ -81,6 +83,7 @@ function makeMockLive(): {
     getInvestmentBalanceCache: mock(() => investmentBalance),
     getInvestmentLiveBalanceCache: mock(() => investmentLiveBalance),
     getTransactionsWindowCache: mock(() => transactions),
+    getBalanceHistoryCache: mock(() => balanceHistory),
   } as unknown as LiveCopilotDatabase;
 
   return {
@@ -101,6 +104,7 @@ function makeMockLive(): {
       investmentBalance,
       investmentLiveBalance,
       transactions,
+      balanceHistory,
     },
   };
 }
@@ -129,7 +133,7 @@ describe('RefreshCacheTool — scope: all', () => {
     expect(mocks.investmentBalance.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.investmentLiveBalance.invalidate).toHaveBeenCalledTimes(1);
     expect(mocks.transactions.invalidate).toHaveBeenCalledTimes(1);
-    expect(bh.clearCache).toHaveBeenCalledTimes(1);
+    expect(mocks.balanceHistory.size).toBe(0);
     expect(ip.clearCache).toHaveBeenCalledTimes(1);
     expect(result.flushed.accounts).toBe(true);
     expect(result.flushed.categories).toBe(true);
@@ -413,7 +417,7 @@ describe('RefreshCacheTool — scope: balance_history', () => {
 
     const result = await tool.refresh({ scope: 'balance_history' });
 
-    expect(bh.clearCache).toHaveBeenCalledTimes(1);
+    expect(mocks.balanceHistory.size).toBe(0);
     expect(mocks.accounts.invalidate).not.toHaveBeenCalled();
     expect(mocks.categories.invalidate).not.toHaveBeenCalled();
     expect(mocks.holdings.invalidate).not.toHaveBeenCalled();
@@ -423,14 +427,25 @@ describe('RefreshCacheTool — scope: balance_history', () => {
     expect(result.flushed.accounts).toBeUndefined();
   });
 
-  test('no-op when balanceHistory tool is not wired — omits balance_history from flushed', async () => {
-    const { live } = makeMockLive();
+  test('without the balanceHistory tool it still clears the shared map but omits the flag', async () => {
+    const { live, mocks } = makeMockLive();
     const tool = new RefreshCacheTool(live); // no balance-history tool passed
 
     const result = await tool.refresh({ scope: 'balance_history' });
 
-    // Flag only appears when a real flush happened; unwired path returns
-    // an empty flushed map.
+    // The map lives on LiveCopilotDatabase (#870), so it is cleared even
+    // without the handle; the flag only appears when the tool was wired.
+    expect(mocks.balanceHistory.size).toBe(0);
+    expect(result.flushed.balance_history).toBeUndefined();
+  });
+
+  test('scope all without the balanceHistory tool still clears the shared map', async () => {
+    const { live, mocks } = makeMockLive();
+    const tool = new RefreshCacheTool(live);
+
+    const result = await tool.refresh({ scope: 'all' });
+
+    expect(mocks.balanceHistory.size).toBe(0);
     expect(result.flushed.balance_history).toBeUndefined();
   });
 });

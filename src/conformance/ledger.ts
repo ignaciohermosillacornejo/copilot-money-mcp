@@ -742,67 +742,6 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'which costs one request each if the assumption is wrong.',
   },
   {
-    surface: 'Mutation.createRecurring:links-seed-transaction',
-    kind: 'operation',
-    oracle: null,
-    class: 'unverified',
-    evidence:
-      'ASSUMED (#911 review): creating a recurring from a transaction links that transaction ' +
-      'to the new series, as add_transaction_to_recurring does. Not probed. Acted on ' +
-      "conservatively: create_recurring drops the seed row's cached live month and the " +
-      'monthly-spend snapshot (whose total leaves out recurring-linked transactions, #823/#844; ' +
-      'LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS), one request each if wrong.',
-  },
-  {
-    surface: 'Mutation.deleteRecurring:unlinks-transactions',
-    kind: 'operation',
-    oracle: null,
-    class: 'unverified',
-    evidence:
-      "ASSUMED (#911 review): deleting a recurring unlinks the series' transactions, so they " +
-      're-enter non-recurring spend. Not probed. delete_recurring drops the monthly-spend ' +
-      'snapshot (LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS); the cached live months of ' +
-      'the unlinked rows are dropped by a field scan (rows whose recurringId matches).',
-  },
-  {
-    surface: 'Mutation.editRecurring:recategorizes-series',
-    kind: 'operation',
-    oracle: null,
-    class: 'unverified',
-    evidence:
-      "ASSUMED (#911 review): changing a recurring's category may recategorize the series' " +
-      'transactions, as linking one sets its category (Mutation.addTransactionToRecurring:' +
-      'sets-category). Not probed. update_recurring drops the monthly-spend snapshot ' +
-      '(LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS) and, when the category changes, the ' +
-      'cached live months holding a row whose recurringId matches.',
-  },
-  {
-    surface: 'Mutation.deleteCategory:uncategorizes-transactions',
-    kind: 'operation',
-    oracle: null,
-    class: 'unverified',
-    evidence:
-      'ASSUMED (#911 review): deleting a category leaves its transactions uncategorized, which ' +
-      'takes them out of the monthly-spend total (it leaves out uncategorized rows, measured ' +
-      '#844). Not probed. delete_category drops the monthly-spend snapshot ' +
-      '(LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS) and the cached live months holding a ' +
-      'row whose categoryId matches.',
-  },
-  {
-    surface: 'Mutation.deleteCategory:leaves-recurrings-categorized',
-    kind: 'operation',
-    oracle: null,
-    class: 'unverified',
-    evidence:
-      'ASSUMED (#911 review): deleting a category leaves the recurrings that use it with ' +
-      'their categoryId unchanged. DeleteCategory takes no replacement, so the server may ' +
-      'instead null or reassign it. Not probed. The code relies on this being true: ' +
-      'delete_category keeps the recurring (6 h) and upcoming_recurrings (1 h) snapshots ' +
-      '(SNAPSHOTS_NOT_DROPPED_BY_CATEGORY_WRITES), so if it is false those tools serve the ' +
-      'dead id with no category_name until the TTL. The fix then: drop those two snapshots ' +
-      'from delete_category alone.',
-  },
-  {
     surface: 'Mutation.addTransactionToRecurring:sets-category',
     kind: 'operation',
     oracle: null,
@@ -894,6 +833,32 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   operation('deleteCategory', ['delete_category.category_id']),
   responseShape('deleteCategory'),
   appliesSurface('deleteCategory'),
+  {
+    surface: 'Mutation.deleteCategory:uncategorizes-transactions',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'ASSUMED (#911 review): deleting a category leaves its transactions uncategorized, which ' +
+      'takes them out of the monthly-spend total (it leaves out uncategorized rows, measured ' +
+      '#844). Not probed. delete_category drops the monthly-spend snapshot ' +
+      '(LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS) and the cached live months holding a ' +
+      'row whose categoryId matches.',
+  },
+  {
+    surface: 'Mutation.deleteCategory:leaves-recurrings-categorized',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'ASSUMED (#911 review): deleting a category leaves the recurrings that use it with ' +
+      'their categoryId unchanged. DeleteCategory takes no replacement, so the server may ' +
+      'instead null or reassign it. Not probed. The code relies on this being true: ' +
+      'delete_category keeps the recurring (6 h) and upcoming_recurrings (1 h) snapshots ' +
+      '(SNAPSHOTS_NOT_DROPPED_BY_CATEGORY_WRITES), so if it is false those tools serve the ' +
+      'dead id with no category_name until the TTL. The fix then: drop those two snapshots ' +
+      'from delete_category alone.',
+  },
 
   // ----- Budgets ------------------------------------------------------------
   // The single set_budget MCP tool fans out to one of two mutations
@@ -974,6 +939,18 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'forwards a caller-supplied pair verbatim: a wrong pair fails loudly rather than ' +
       'seeding the recurring from a different transaction.',
   },
+  {
+    surface: 'Mutation.createRecurring:links-seed-transaction',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      'ASSUMED (#911 review): creating a recurring from a transaction links that transaction ' +
+      'to the new series, as add_transaction_to_recurring does. Not probed. Acted on ' +
+      "conservatively: create_recurring drops the seed row's cached live month and the " +
+      'monthly-spend snapshot (whose total leaves out recurring-linked transactions, #823/#844; ' +
+      'LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS), one request each if wrong.',
+  },
 
   operation('editRecurring', ['set_recurring_state.recurring_id', 'update_recurring.recurring_id']),
   gatedInputField('EditRecurringInput.name', ['update_recurring.name']),
@@ -990,10 +967,33 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
   gatedInputField('EditRecurringInput.rule.days', ['update_recurring.rule.days']),
   responseShape('editRecurring'),
   appliesSurface('editRecurring'),
+  {
+    surface: 'Mutation.editRecurring:recategorizes-series',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      "ASSUMED (#911 review): changing a recurring's category may recategorize the series' " +
+      'transactions, as linking one sets its category (Mutation.addTransactionToRecurring:' +
+      'sets-category). Not probed. update_recurring drops the monthly-spend snapshot ' +
+      '(LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS) and, when the category changes, the ' +
+      'cached live months holding a row whose recurringId matches.',
+  },
 
   operation('deleteRecurring', ['delete_recurring.recurring_id']),
   responseShape('deleteRecurring'),
   appliesSurface('deleteRecurring'),
+  {
+    surface: 'Mutation.deleteRecurring:unlinks-transactions',
+    kind: 'operation',
+    oracle: null,
+    class: 'unverified',
+    evidence:
+      "ASSUMED (#911 review): deleting a recurring unlinks the series' transactions, so they " +
+      're-enter non-recurring spend. Not probed. delete_recurring drops the monthly-spend ' +
+      'snapshot (LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS); the cached live months of ' +
+      'the unlinked rows are dropped by a field scan (rows whose recurringId matches).',
+  },
 
   // ----- Accounts -----------------------------------------------------------
   // editAccount has a GraphQL wrapper (src/core/graphql/accounts.ts) but no
