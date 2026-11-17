@@ -15,7 +15,9 @@
  * non-empty budget list, the month window) print a drift verdict the
  * scheduled run reports as drift; the cache-hit and timing assertions are
  * about this process, and throw plainly so a slow run reads as "drift NOT
- * checked" rather than as an API change (#819).
+ * checked" rather than as an API change (#819). The month-window trim itself
+ * is local arithmetic (trimAmountsToWindow); what the server controls there
+ * is the month-key format, so a format change is the drift that check catches.
  *
  * Audit C6 (rollover correctness): exercised end-to-end via the categories
  * smoke (`scripts/smoke/categories.ts`) since LiveBudgetsTools projects from

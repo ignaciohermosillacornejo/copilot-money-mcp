@@ -103,6 +103,11 @@ export const SKIP_MARKERS = [
     check: 'recurring rows',
     verdict: 'SKIP',
   },
+  {
+    marker: '[smoke] SKIP — rollover polarity not checked',
+    check: 'rollover polarity',
+    verdict: 'SKIP',
+  },
 ] as const satisfies ReadonlyArray<{ marker: string } & ScheduledSmokeNotChecked>;
 
 /**
