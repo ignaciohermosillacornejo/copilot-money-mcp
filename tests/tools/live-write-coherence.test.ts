@@ -25,7 +25,7 @@
  * WRITE_TOOL_DEFS without a case here fails the first test.
  */
 
-import { describe, test, expect, afterAll } from 'bun:test';
+import { describe, test, expect, afterAll, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -2113,6 +2113,67 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
       expect((await read())._cache_hit).toBe(true);
     }
   );
+
+  /**
+   * Catch-path housekeeping must not mask the write's own error, which
+   * carries the "may have applied" signal (#875/#887). A throw inside the
+   * month scan is logged and the GraphQL error still reaches the caller.
+   */
+  async function rejectionWithFailingHousekeeping(
+    run: () => Promise<unknown>,
+    liveDb: LiveCopilotDatabase,
+    method: 'invalidateLiveMonthsMatching' | 'invalidateLiveTransactionMonths'
+  ): Promise<Error> {
+    const scan = spyOn(liveDb, method).mockImplementation(() => {
+      throw new Error('housekeeping boom');
+    });
+    const log = spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      return await run().then(
+        () => {
+          throw new Error('expected the write to throw');
+        },
+        (err: unknown) => err as Error
+      );
+    } finally {
+      expect(scan).toHaveBeenCalled();
+      scan.mockRestore();
+      log.mockRestore();
+    }
+  }
+
+  test.each(LINKED_ROW_WRITES)(
+    "%s: a throw in the linked-row scan does not mask the write's error (#911 review)",
+    async (toolName, mocks, args, link) => {
+      const op = Object.keys(mocks)[0]!;
+      const field = Object.keys((mocks as Record<string, object>)[op]!)[0]!;
+      const { call, liveDb } = await warmLinked(
+        { [op]: unusablePayloadError(op, field, null) },
+        link
+      );
+      const err = await rejectionWithFailingHousekeeping(
+        () => call(toolName, args),
+        liveDb,
+        'invalidateLiveMonthsMatching'
+      );
+      expect(err.message).not.toContain('housekeeping boom');
+      expect(err.cause).toBeInstanceOf(GraphQLError);
+    }
+  );
+
+  test("create_recurring: a throw in the seed-month drop does not mask the write's error (#911 review)", async () => {
+    const { call, read, liveDb } = setup({
+      CreateRecurring: unusablePayloadError('CreateRecurring', 'createRecurring', null),
+    });
+    await read();
+    const err = await rejectionWithFailingHousekeeping(
+      () => call('create_recurring', WRITE_TABLE.create_recurring!.args),
+      liveDb,
+      'invalidateLiveTransactionMonths'
+    );
+    expect(err.message).not.toContain('housekeeping boom');
+    expect(err.cause).toBeInstanceOf(GraphQLError);
+  });
 
   test('update_recurring without a category keeps the linked rows cached (#911 review)', async () => {
     const { call, read } = await warmLinked(NON_TRANSACTION_WRITES.update_recurring!.mocks, {
