@@ -973,6 +973,24 @@ export class CopilotMoneyTools {
   }
 
   /**
+   * Runs catch-path cache housekeeping so that a throw inside it cannot mask
+   * the write's own error, which the caller rethrows next and which carries
+   * the "may have applied" signal (#875/#887). Same reasoning and same trace
+   * as invalidateAfterFailedWrite (#911 review).
+   */
+  private housekeepAfterThrow(housekeeping: () => void): void {
+    try {
+      housekeeping();
+    } catch (e) {
+      console.error(
+        `[copilot-money-mcp] live-cache invalidation after a failed write threw: ${
+          e instanceof Error ? e.message : String(e)
+        }`
+      );
+    }
+  }
+
+  /**
    * After the same write THREW: drop those months only if it may have
    * applied. A rejection that cannot have written leaves them cached.
    */
@@ -982,7 +1000,7 @@ export class CopilotMoneyTools {
   ): void {
     // mutation-guard: a rejected write keeps its linked-row months
     if (!(e instanceof GraphQLError && e.writeMayHaveApplied)) return;
-    this.dropLinkedRowMonths(predicate);
+    this.housekeepAfterThrow(() => this.dropLinkedRowMonths(predicate));
   }
 
   /** Live rows linked to recurring `id`. */
@@ -6287,11 +6305,13 @@ export class CopilotMoneyTools {
     } catch (e) {
       // A create that may have landed may have linked the seed row too; the
       // generic helper below has no transaction id, so its month goes here.
-      // mutation-guard: create_recurring drops its seed month only when it may have applied
-      if (e instanceof GraphQLError && e.writeMayHaveApplied) {
-        // mutation-guard: a possibly-applied create_recurring drops its seed month
-        this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);
-      }
+      this.housekeepAfterThrow(() => {
+        // mutation-guard: create_recurring drops its seed month only when it may have applied
+        if (e instanceof GraphQLError && e.writeMayHaveApplied) {
+          // mutation-guard: a possibly-applied create_recurring drops its seed month
+          this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);
+        }
+      });
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
