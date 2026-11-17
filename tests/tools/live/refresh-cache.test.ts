@@ -11,13 +11,9 @@ function makeInvalidateCache() {
   return { invalidate: mock(() => {}) };
 }
 
-function makeBalanceHistoryMock(): {
-  tool: LiveBalanceHistoryTools;
-  clearCache: ReturnType<typeof mock>;
-} {
-  const clearCache = mock(() => {});
-  const tool = { clearCache } as unknown as LiveBalanceHistoryTools;
-  return { tool, clearCache };
+/** Presence only: refresh_cache clears the shared map, never the tool. */
+function makeBalanceHistoryMock(): { tool: LiveBalanceHistoryTools } {
+  return { tool: {} as unknown as LiveBalanceHistoryTools };
 }
 
 function makeInvestmentPricesMock(): {
