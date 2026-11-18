@@ -14,7 +14,9 @@
  * description, never the `[smoke]` log lines: those carry real figures. What
  * the server returned (the month window) prints a drift verdict the scheduled
  * run reports as drift. An empty budget list does not: an account with
- * budgeting off has none, so it prints a registered SKIP marker (#913 review);
+ * budgeting off has none, so it prints a registered SKIP marker (#913 review).
+ * That SKIP also covers an amount-encoding change that projects every row
+ * away; read-shape validation in smoke:reads sees that from the other side;
  * the cache-hit and timing assertions are about this process, and throw plainly
  * so a slow run reads as "drift NOT checked" rather than as an API change
  * (#819). The month-window trim itself is local arithmetic
@@ -62,6 +64,18 @@ async function main(): Promise<void> {
 
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  // The format check reads the raw server keys (months_window=0 skips the
+  // local trim), because the trim drops any key monthIndex() cannot parse:
+  // a non-numeric month ("2026-JUN") would otherwise vanish and pass. A cache
+  // hit, so it does not disturb the cold/warm assertions (#913 review). It runs
+  // first so a format change is reported as one, not as an off-anchor month.
+  const full = await tools.getBudgets({ months_window: 0 });
+  const rawKeys = full.budgets.flatMap((budget) => Object.keys(budget.amounts ?? {}));
+  const badFormat = [...new Set(rawKeys.filter((m) => !/^\d{4}-\d{2}$/.test(m)))];
+  log('month keys', { examined: rawKeys.length, badFormat: badFormat.length });
+  if (badFormat.length > 0) {
+    serverDrift(`budget month keys are not YYYY-MM: ${badFormat.join(', ')}`);
+  }
   const currentWindow = await tools.getBudgets({ months_window: 1 });
   const windowKeys = currentWindow.budgets.flatMap((budget) => Object.keys(budget.amounts ?? {}));
   const offAnchor = windowKeys.filter((month) => month !== currentMonth);
@@ -78,18 +92,8 @@ async function main(): Promise<void> {
     );
   }
 
-  // The format check reads the raw server keys (months_window=0 skips the
-  // local trim), because the trim drops any key monthIndex() cannot parse:
-  // a non-numeric month ("2026-JUN") would otherwise vanish and pass. A cache
-  // hit, so it does not disturb the cold/warm assertions (#913 review).
-  const full = await tools.getBudgets({ months_window: 0 });
-  const rawKeys = full.budgets.flatMap((budget) => Object.keys(budget.amounts ?? {}));
-  const badFormat = [...new Set(rawKeys.filter((m) => !/^\d{4}-\d{2}$/.test(m)))];
-  log('month keys', { examined: rawKeys.length, badFormat: badFormat.length });
-  if (badFormat.length > 0) {
-    serverDrift(`budget month keys are not YYYY-MM: ${badFormat.join(', ')}`);
-  }
-  if (cold.count > 0 && (rawKeys.length === 0 || windowKeys.length === 0)) {
+  // windowKeys is a subset of rawKeys, so this also covers no keys at all.
+  if (cold.count > 0 && windowKeys.length === 0) {
     // The same registered marker as an empty list: the window had nothing to
     // anchor, so the month checks compared nothing. Reusing it keeps the
     // reader cap and the context budget where they are.
