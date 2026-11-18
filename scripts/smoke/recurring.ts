@@ -8,15 +8,16 @@
  *   2. Warm call (within TTL) returns _cache_hit=true with sub-50ms latency
  *   3. refresh_cache --scope recurring invalidates and triggers refetch
  *
- * Exits non-zero on any assertion failure. Output is intended to be pasted
- * into the PR description. A row with no id is about the server and prints a
- * drift verdict the scheduled run reports as drift. An empty list is not: an
- * account can simply have no recurring items, so it prints a registered SKIP
- * marker and the run records the comparison as not checked rather than as
- * drift or as a clean pass (#913). The cache-hit and timing assertions are
- * about this process and still run on an empty list (an empty snapshot is
- * cached like any other); they throw plainly so a slow run reads as
- * "drift NOT checked" rather than as an API change (#819).
+ * Exits non-zero on any assertion failure. Paste its verdict lines into a PR
+ * description, never the `[smoke]` log lines: those carry real figures. A row
+ * with no id is about the server and prints a drift verdict the scheduled run
+ * reports as drift. An empty list is not: an account can simply have no
+ * recurring items, so it prints a registered SKIP marker and the run records
+ * the comparison as not checked rather than as drift or as a clean pass (#913).
+ * The cache-hit and timing assertions are about this process and still run on
+ * an empty list (an empty snapshot is cached like any other); they throw
+ * plainly so a slow run reads as "drift NOT checked" rather than as an API
+ * change (#819).
  */
 
 import { setupLiveSmoke } from './_harness.js';

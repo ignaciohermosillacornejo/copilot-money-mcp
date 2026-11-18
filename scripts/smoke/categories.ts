@@ -11,12 +11,13 @@
  *      enabled, at least one category surfaces a non-zero rolloverAmount;
  *      if disabled, all categories return rolloverAmount === 0.
  *
- * Exits non-zero on any assertion failure. Output is intended to be pasted
- * into the PR description. Assertions about what the server returned (a
- * non-empty category list, rollover polarity) print a drift verdict the
- * scheduled run reports as drift; the cache-hit and timing assertions are
- * about this process, and throw plainly so a slow run reads as "drift NOT
- * checked" rather than as an API change (#819).
+ * Exits non-zero on any assertion failure. Paste its verdict lines into a PR
+ * description, never the `[smoke]` log lines: those carry real figures.
+ * Assertions about what the server returned (a non-empty category list,
+ * rollover polarity) print a drift verdict the scheduled run reports as drift;
+ * the cache-hit and timing assertions are about this process, and throw plainly
+ * so a slow run reads as "drift NOT checked" rather than as an API change
+ * (#819).
  */
 
 import { setupLiveSmoke } from './_harness.js';
