@@ -142,6 +142,9 @@ describe('bun run smoke composite verdicts (#818, #819)', () => {
     const REQUIRED: Record<string, RegExp> = {
       'scripts/smoke/recurring.ts': /getRecurring\(\{[^)]*fields:\s*\[[^\]]*'id'/,
       'scripts/smoke/categories.ts': /getCategories\(\{[^)]*fields:\s*\[[^\]]*'budget'/,
+      // The month-key format check must read untrimmed keys: the local trim
+      // drops any key it cannot parse, which is the drift being checked.
+      'scripts/smoke/budgets.ts': /getBudgets\(\{\s*months_window:\s*0\s*\}\)/,
     };
     const missing = Object.entries(REQUIRED).filter(
       ([m, pattern]) => !pattern.test(fs.readFileSync(path.join(ROOT, m), 'utf8'))
