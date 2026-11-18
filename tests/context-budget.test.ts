@@ -105,8 +105,8 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   // members that skipped. The populated worst case (the reader's 7-entry,
   // 32-char ceilings; 4 entries measured 2_173, 6 measured 2_297) measures
   // 2_359, under 2% headroom, so the next raise of
-  // SCHEDULED_SMOKE_NOT_CHECKED_MAX needs a budget bump too. A real file carries one entry or none, and none
-  // adds nothing.
+  // SCHEDULED_SMOKE_NOT_CHECKED_MAX needs a budget bump too. A real file
+  // carries one entry or none, and none adds nothing.
   get_connection_status: 2_400,
   get_categories: 855,
   // 755 -> 1_065, and this one goes UP: the ratchet was measuring a response
