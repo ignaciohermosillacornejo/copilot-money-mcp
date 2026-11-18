@@ -11,9 +11,10 @@
  *   4. months_window=1 anchors to the current month, not future projection rows
  *
  * Exits non-zero on any assertion failure. Output is intended to be pasted
- * into the PR description. Assertions about what the server returned (a
- * non-empty budget list, the month window) print a drift verdict the
- * scheduled run reports as drift; the cache-hit and timing assertions are
+ * into the PR description. What the server returned (the month window)
+ * prints a drift verdict the scheduled run reports as drift. An empty budget
+ * list does not: an account with budgeting off has none, so it prints a
+ * registered SKIP marker (#913 review); the cache-hit and timing assertions are
  * about this process, and throw plainly so a slow run reads as "drift NOT
  * checked" rather than as an API change (#819). The month-window trim itself
  * is local arithmetic (trimAmountsToWindow); what the server controls there
@@ -51,15 +52,25 @@ async function main(): Promise<void> {
   const coldMs = Date.now() - t0;
   log('cold', { rows: cold.count, total: cold.total_budgeted, hit: cold._cache_hit, ms: coldMs });
   if (cold._cache_hit !== false) throw new Error(`expected cold _cache_hit=false`);
-  if (cold.count === 0) serverDrift('expected at least one budget');
+  if (cold.count === 0) {
+    // A SKIP_MARKERS entry in scripts/scheduled-smoke.ts: with budgeting off
+    // every category projects to no budget row, which is a fact about the
+    // account, not the API (the same premise categories' rollover SKIP uses).
+    console.error('[smoke] SKIP — budget rows not checked: the account has no budgets.');
+  }
 
   const now = new Date();
   const currentMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   const currentWindow = await tools.getBudgets({ months_window: 1 });
-  const offAnchor = currentWindow.budgets
-    .flatMap((budget) => Object.keys(budget.amounts ?? {}))
-    .filter((month) => month !== currentMonth);
-  log('months_window=1', { currentMonth, offAnchor: offAnchor.length });
+  const windowKeys = currentWindow.budgets.flatMap((budget) => Object.keys(budget.amounts ?? {}));
+  const offAnchor = windowKeys.filter((month) => month !== currentMonth);
+  // `anchored` is the denominator: with no current-month amount anywhere the
+  // check examines nothing, and the PASS line below must not claim it.
+  log('months_window=1', {
+    currentMonth,
+    anchored: windowKeys.length,
+    offAnchor: offAnchor.length,
+  });
   if (offAnchor.length > 0) {
     serverDrift(
       `months_window=1 returned non-current budget months: ${[...new Set(offAnchor)].join(', ')}`
@@ -83,9 +94,13 @@ async function main(): Promise<void> {
   log('recold', { rows: recold.count, hit: recold._cache_hit, ms: recoldMs });
   if (recold._cache_hit !== false) throw new Error(`expected post-refresh _cache_hit=false`);
 
-  console.error(
-    '[smoke] PASS — budgets refresh smoke: cold, month window, warm and refresh verified.'
-  );
+  if (windowKeys.length > 0) {
+    console.error(
+      '[smoke] PASS — budgets refresh smoke: cold, month window, warm and refresh verified.'
+    );
+  } else {
+    console.error('[smoke] PASS — budgets refresh smoke: cold, warm and refresh verified.');
+  }
 }
 
 if (import.meta.main) {
