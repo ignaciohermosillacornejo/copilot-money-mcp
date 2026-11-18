@@ -50,7 +50,7 @@ function truncateReport(value: string | null): string | null {
  * (tests/scripts/scheduled-smoke.test.ts enforces it), or a run that skipped
  * every member would surface with some of them silently dropped.
  */
-export const SCHEDULED_SMOKE_NOT_CHECKED_MAX = 6;
+export const SCHEDULED_SMOKE_NOT_CHECKED_MAX = 7;
 export const SCHEDULED_SMOKE_CHECK_NAME_MAX_CHARS = 32;
 
 /**

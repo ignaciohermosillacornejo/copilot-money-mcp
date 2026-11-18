@@ -60,14 +60,15 @@ moved cache directory would have kept reporting a clean weekly check while the
 parity gate compared nothing.
 
 The refresh smokes (`budgets`, `categories`, `recurring`, `tags`) split their
-assertions the same way. What the server returned (a non-empty category or
-budget list, a row id on every tag and recurring item, the budget month window,
-rollover polarity) prints a drift marker; what this process did (cache hits,
+assertions the same way. What the server returned (a non-empty category list,
+a row id on every tag and recurring item, the budget month-key format, rollover
+polarity) prints a drift marker; what this process did (cache hits,
 the warm-call timing bound) throws plainly and lands in `incomplete`, because a
-slow laptop is not an API change. An empty tag or recurring list is neither:
-an account can simply have none, so `tags` and `recurring` print a registered
-SKIP marker (`tags rows` / `recurring rows`) and the run records what it could
-not compare (#913). Likewise `categories` prints `rollover polarity` as a SKIP
+slow laptop is not an API change. An empty tag, recurring or budget list is
+neither: an account can simply have none (budgeting off leaves no budget rows),
+so `tags`, `recurring` and `budgets` print a registered SKIP marker
+(`tags rows` / `recurring rows` / `budget rows`) and the run records what it
+could not compare (#913). Likewise `categories` prints `rollover polarity` as a SKIP
 when no category came back with a rollover amount (budgeting off), rather than
 claiming the polarity was verified.
 

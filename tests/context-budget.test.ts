@@ -102,10 +102,10 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   // which adds 13 chars per flagged collection. The populated worst case
   // measures 1_909; this is that plus the usual ~10% headroom.
   // 2_100 -> 2_400 by #819: `scheduled_smoke.not_checked` names the composite
-  // members that skipped. The populated worst case (the reader's 6-entry,
-  // 32-char ceilings; 4 entries measured 2_173) measures 2_297, about 4%
-  // headroom, so the next raise of SCHEDULED_SMOKE_NOT_CHECKED_MAX likely
-  // needs a budget bump too. A real file carries one entry or none, and none
+  // members that skipped. The populated worst case (the reader's 7-entry,
+  // 32-char ceilings; 4 entries measured 2_173, 6 measured 2_297) measures
+  // 2_359, under 2% headroom, so the next raise of
+  // SCHEDULED_SMOKE_NOT_CHECKED_MAX needs a budget bump too. A real file carries one entry or none, and none
   // adds nothing.
   get_connection_status: 2_400,
   get_categories: 855,
