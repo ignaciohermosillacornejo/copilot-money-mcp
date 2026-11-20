@@ -4,7 +4,7 @@ title: Cache-mode get_accounts counted an account Copilot had auto-merged into a
 class: ui-parity
 status: fixed
 detected: user-report # reporter noticed total_liabilities included an old card record the app no longer shows
-fixed_in: not yet
+fixed_in: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/pull/928
 issue: https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/904
 date: 2026-11-19
 ---

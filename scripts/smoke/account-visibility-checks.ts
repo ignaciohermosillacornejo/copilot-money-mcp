@@ -50,8 +50,14 @@ export interface AccountVisibilityParity {
   liveOnlyVisible: number;
   /** Ids only live has, which live hides. */
   liveOnlyHidden: number;
-  /** Cache documents carrying `merged`, compared or not: how much the #904 term was exercised. */
+  /** Cache documents carrying `merged`, compared or not. */
   merged: number;
+  /**
+   * Of those, how many live also returned, so live actually ruled on them.
+   * Only these exercise the #904 term: a merged document live omits agrees by
+   * absence, which says nothing about how live would classify it.
+   */
+  mergedCompared: number;
 }
 
 export function compareAccountVisibility(
@@ -71,10 +77,11 @@ export function compareAccountVisibility(
     liveOnlyVisible: 0,
     liveOnlyHidden: 0,
     merged: 0,
+    mergedCompared: 0,
   };
 
   for (const c of cache) {
-    if (c.merged !== undefined) p.merged++;
+    if (c.merged != null) p.merged++;
     const cacheVisible = isVisibleAccount(c);
     const l = liveById.get(c.account_id);
     if (!l) {
@@ -83,10 +90,11 @@ export function compareAccountVisibility(
       continue;
     }
     p.compared++;
+    if (c.merged != null) p.mergedCompared++;
     const liveVisible = isVisibleAccountNode(l);
     if (!cacheVisible && liveVisible) {
       p.cacheHidesLiveShows++;
-      if (c.merged !== undefined) p.cacheHidesLiveShowsMerged++;
+      if (c.merged != null) p.cacheHidesLiveShowsMerged++;
     } else if (cacheVisible && !liveVisible) {
       p.cacheShowsLiveHides++;
     } else if (!cacheVisible && !liveVisible) {
@@ -126,7 +134,8 @@ export function classifyAccountVisibilityParity(p: AccountVisibilityParity): {
     `(${p.cacheHidesLiveShowsMerged} merged), ${p.cacheShowsLiveHides} cache-shows/live-hides, ` +
     `${p.hiddenAgreed} hidden in both, ${p.cacheOnlyVisible} cache-only visible, ` +
     `${p.cacheOnlyHidden} cache-only hidden, ${p.liveOnlyVisible} live-only visible, ` +
-    `${p.liveOnlyHidden} live-only hidden, ${p.merged} merged in cache`;
+    `${p.liveOnlyHidden} live-only hidden, ${p.merged} merged in cache ` +
+    `(${p.mergedCompared} also in live)`;
 
   if (p.cacheHidesLiveShows > 0 || p.cacheShowsLiveHides > 0) {
     const causes: string[] = [];
@@ -195,6 +204,28 @@ export function classifyAccountVisibilityParity(p: AccountVisibilityParity): {
     detail:
       `${counts} — visibility agrees on every compared account, including ` +
       `${p.hiddenAgreed + p.cacheOnlyHidden} that neither mode shows` +
-      (p.merged === 0 ? ' (no merged account on this cache, so the #904 term is unexercised)' : ''),
+      mergedEvidence(p),
   };
+}
+
+/**
+ * What a passing run says about the #904 `merged` term. The ledger entry
+ * `FirestoreAccount.merged:notVisible` is promoted on this sentence, so it
+ * must not imply that live ruled on a merged account when it did not.
+ */
+function mergedEvidence(p: AccountVisibilityParity): string {
+  const absent = p.merged - p.mergedCompared;
+  if (p.merged === 0) {
+    return ' (no merged account on this cache, so the #904 term is unexercised)';
+  }
+  if (p.mergedCompared === 0) {
+    return (
+      ` (${absent} merged account(s), all absent from live: they agree by absence only, ` +
+      `so live has not confirmed the #904 term)`
+    );
+  }
+  return (
+    ` (${p.mergedCompared} merged account(s) live also hides, confirming the #904 term` +
+    (absent > 0 ? `; ${absent} more absent from live agree by absence only)` : ')')
+  );
 }

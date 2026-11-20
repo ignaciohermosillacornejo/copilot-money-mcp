@@ -201,7 +201,9 @@ export const ACCOUNT_VISIBILITY_FIELDS = ['user_hidden', 'user_deleted', 'merged
  * `user_deleted: true`; the report behind #904 is a merge that does not.
  * The term is the map's PRESENCE, not `source === "auto"`: "auto" is the only
  * value anyone has seen, and a narrower rule would leave every other merge
- * path counted twice. Evidence and its limits:
+ * path counted twice. `== null` rather than `=== undefined`: a null `merged`
+ * is not a merge, matching the decoder (`getMap`) and `smoke:cache`, which
+ * both take only a real map. Evidence and its limits:
  * `FirestoreAccount.merged:notVisible` in `src/conformance/ledger.ts`.
  *
  * `dashboard_active` is deliberately NOT a third term. It reads like one and
@@ -213,9 +215,7 @@ export const ACCOUNT_VISIBILITY_FIELDS = ['user_hidden', 'user_deleted', 'merged
 export function isVisibleAccount(
   account: Pick<Account, (typeof ACCOUNT_VISIBILITY_FIELDS)[number]>
 ): boolean {
-  return (
-    account.user_deleted !== true && account.user_hidden !== true && account.merged === undefined
-  );
+  return account.user_deleted !== true && account.user_hidden !== true && account.merged == null;
 }
 
 /**

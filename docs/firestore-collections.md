@@ -153,8 +153,9 @@ its leaf.
 | `institution_id` | string | Plaid institution ID |
 | `institution_name` | string | Institution display name |
 | `item_id` | string | Parent Plaid item |
-| `user_deleted` | boolean | User has deleted this account, or it was merged into another |
+| `user_deleted` | boolean | Account removed (shown as closed). Some merges set it too (#82), but not all of them: do not read it as "merged" (#904) |
 | `user_hidden` | boolean | User has hidden this account in the UI |
+| `merged` | map | Present when Copilot has merged this account into another, e.g. `{ end_date, source: "auto" }`. The app shows only the account it was merged into, so its presence hides the account (#904). `"auto"` is the only `source` value seen so far |
 | `dashboard_active` | boolean | **Not** a visibility flag despite the name — see below |
 | `holdings` | array | Investment holdings (see **Holdings** below) |
 
@@ -166,11 +167,16 @@ user-editable, so **never key on a name** — `account_id` is the stable
 identifier. A reader who takes `name` for the account's name reaches the
 conclusion that produced #660/#663/#664.
 
-**Visibility:** `user_deleted` and `user_hidden` are ONE rule, not two
-independent flags — an account is visible only when neither is `true`
-(`isVisibleAccount`). #683 shipped because one surface filtered and a sibling
-surface did not. The GraphQL wire form spells the same rule
-`isUserClosed` / `isUserHidden` (`isVisibleAccountNode`).
+**Visibility:** `user_deleted`, `user_hidden` and `merged` are ONE rule, not
+three independent flags. An account is visible only when neither flag is `true`
+and it carries no `merged` map (`isVisibleAccount`; the fields it reads are
+`ACCOUNT_VISIBILITY_FIELDS`). #683 shipped because one surface filtered and a
+sibling surface did not. The GraphQL wire form spells the rule
+`isUserClosed` / `isUserHidden` (`isVisibleAccountNode`). The wire has no
+`merged` counterpart, so live mode cannot apply that term itself. It agrees
+only if the server closes or omits a merged account, which nothing we have
+measured yet confirms. `smoke:account-visibility` compares the two rules per
+account id (`FirestoreAccount.merged:notVisible` in the conformance ledger).
 
 **`dashboard_active` is not part of that rule.** It reads like a third
 visibility flag and [#624](bugs/624-hidden-accounts-not-filtered.md) listed it

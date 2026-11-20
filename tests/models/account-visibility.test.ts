@@ -54,6 +54,11 @@ describe('isVisibleAccount (#683, #904)', () => {
     }
   });
 
+  test('a null merged is not a merge', () => {
+    // Matches the decoder and smoke:cache, which take only a real map.
+    expect(isVisibleAccount({ merged: null } as unknown as VisibilityInput)).toBe(true);
+  });
+
   test('a merged account is hidden even with user_deleted explicitly false (#904)', () => {
     // The report's shape: the merge did not set user_deleted, which is what
     // #82's filter relied on.
