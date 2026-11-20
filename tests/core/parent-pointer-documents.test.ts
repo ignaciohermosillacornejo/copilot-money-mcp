@@ -30,6 +30,12 @@ import type { AllCollectionsResult, CollectionRoute } from '../../src/core/decod
 import { ROUTE_ROWS } from '../../scripts/smoke/cache.js';
 import { createDeepTestDb } from '../helpers/test-db.js';
 import { stripComments } from '../helpers/strip-comments.js';
+import {
+  NO_PROCESSOR,
+  ROUTE_PATHS,
+  ROUTE_SHAPES,
+  type SweptRoute,
+} from '../helpers/route-fixtures.js';
 import { createTestDatabase } from '../../src/core/leveldb-reader.js';
 
 const FIXTURES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'parent-pointer-'));
@@ -97,19 +103,26 @@ describe('no dispatch clause matches a parent-pointer path (#627, #915)', () => 
     expect(text.match(/\/\^[-\w]+\\\/\[\^\/\]\+\$\//g) ?? []).toEqual([]);
   });
 
-  test.each(['users', 'amazon', 'items', 'changes', 'securities', 'subscriptions', 'support'])(
-    'a %s/{id} path routes nowhere',
-    (root) => {
-      expect(routeCollection(root)).not.toBeNull();
-      expect(routeCollection(`${root}/doc_2vLq9XmT4kRz7PwN3cHb`)).toBeNull();
-    }
-  );
-});
+  // Every root segment of every route's real shape, derived from the
+  // route-ratcheted table, so a new route brings its root along. The scan
+  // above only knows one spelling of such a clause; this is the guard.
+  // `investment_prices` is the one exception: that route is ROOT-anchored by
+  // design (`startsWith('investment_prices/')`), and parseInvestmentPriceCollection
+  // rejects `investment_prices/{id}` before any processor runs.
+  const ROOTS = [...new Set(Object.values(ROUTE_SHAPES).map((shape) => shape.split('/')[0]!))]
+    .filter((root) => root !== 'investment_prices')
+    .sort();
 
-/** Routes with no processor, so nothing to sweep: the unread #666 path. */
-const NO_PROCESSOR = ['user_accounts'] as const;
-/** Every route that has a processor. */
-type SweptRoute = Exclude<CollectionRoute, (typeof NO_PROCESSOR)[number]>;
+  test('the root list is not vacuous', () => {
+    expect(ROOTS).toContain('users');
+    expect(ROOTS).toContain('amazon');
+    expect(ROOTS).toContain('items');
+  });
+
+  test.each(ROOTS)('a %s/{id} path routes nowhere', (root) => {
+    expect(routeCollection(`${root}/doc_2vLq9XmT4kRz7PwN3cHb`)).toBeNull();
+  });
+});
 
 describe('no route builds a row from a fieldless document, every route from a populated one (#627, #778, #797, #808)', () => {
   // The behavioural form of the source scan above, over EVERY route the smoke
@@ -118,13 +131,10 @@ describe('no route builds a row from a fieldless document, every route from a po
   // nothing from it; one minimally populated document at the same path must
   // produce exactly one row. `smoke:cache` check 1b fails on the real-cache
   // shape of the first half (rows with no non-empty document behind them);
-  // this catches it with no cache at all. A route with no path here is a type
-  // error under `bun run check` (this file is in tsconfig.tests.json), and also
+  // this catches it with no cache at all. A route with no path in ROUTE_PATHS is a type
+  // error under `bun run check` (tests/helpers/route-fixtures.ts), and also
   // fails the coverage test below, which is what catches it under a bare
   // `bun test`.
-  const I = 'itm_5pQw8ZnRvL3MxK7cHt2J';
-  const A = 'acc_9wKe4RnTpB2XvL7mQd3F';
-  const U = 'usr_3hTq7WmZ2xKv9LpR4cNb';
   // Invariant pinned here (#797): the smoke excludes a route from checks 1 and
   // 2 ONLY for lacking a processor, so its accessor table covers exactly the
   // swept routes, and the coverage test below fails if a processor-bearing
@@ -142,107 +152,7 @@ describe('no route builds a row from a fieldless document, every route from a po
   // processor passes every field through (holdings_history_meta and the
   // app-metadata routes) the field name is arbitrary; elsewhere it is a field
   // the processor reads.
-  const PATHS: Record<
-    SweptRoute,
-    { collection: string; id: string; populated: Record<string, unknown> }
-  > = {
-    holdings_history: {
-      collection: `items/${I}/accounts/${A}/holdings_history/hh_4kWz8nVq/history`,
-      id: '2026-01',
-      populated: { history: { '1767225600000': { price: 100, quantity: 2 } } },
-    },
-    holdings_history_meta: {
-      collection: `items/${I}/accounts/${A}/holdings_history`,
-      id: 'hh_4kWz8nVq',
-      populated: { security_id: 'sec_8nVc2KpX' },
-    },
-    balance_history: {
-      collection: `items/${I}/accounts/${A}/balance_history`,
-      id: '2026-01-15',
-      populated: { current_balance: 100 },
-    },
-    transactions: {
-      collection: `items/${I}/accounts/${A}/transactions`,
-      id: 'txn_2vLq9XmT',
-      // Both required: no non-zero amount or no date is not a transaction.
-      populated: { amount: 100, date: '2026-01-15' },
-    },
-    accounts: {
-      collection: `items/${I}/accounts`,
-      id: A,
-      // Both required: a balance, and a name (or official_name).
-      populated: { current_balance: 100, name: 'Synthetic Checking' },
-    },
-    recurring: {
-      collection: `users/${U}/recurring`,
-      id: 'rec_8kLm3PqX',
-      populated: { name: 'Synthetic Subscription' },
-    },
-    budgets: { collection: `users/${U}/budgets`, id: 'bud_4kWzR8nV', populated: { amount: 100 } },
-    financial_goals: {
-      collection: `users/${U}/financial_goals`,
-      id: 'gol_6rLpX3mQ',
-      populated: { name: 'Synthetic Goal' },
-    },
-    financial_goal_history: {
-      collection: `users/${U}/financial_goals/gol_6rLpX3mQ/financial_goal_history`,
-      id: '2026-01',
-      populated: { current_amount: 100 },
-    },
-    investment_prices: {
-      collection: 'investment_prices/sec_8nVc2KpX/daily',
-      id: '2026-01',
-      populated: { price: 100 },
-    },
-    investment_splits: {
-      collection: 'investment_splits',
-      id: 'spl_3hTq7WmZ',
-      populated: { '2026-01-15': 2 },
-    },
-    items: { collection: 'items', id: I, populated: { institution_name: 'Synthetic Bank' } },
-    tags: { collection: `users/${U}/tags`, id: 'tag_3hTq7WmZ', populated: { name: 'Synthetic' } },
-    categories: {
-      collection: `users/${U}/categories`,
-      id: 'cat_7Kd2mQxZ',
-      populated: { name: 'Synthetic' },
-    },
-    transaction_changes: {
-      collection: 'changes/chg_4kWz/t',
-      id: 'tc_2mXq',
-      populated: { action: 'create' },
-    },
-    account_changes: {
-      collection: 'changes/chg_4kWz/a',
-      id: 'ac_2mXq',
-      populated: { action: 'update' },
-    },
-    changes: {
-      collection: 'changes',
-      id: 'chg_4kWz',
-      populated: { timestamp: '2026-01-15T10:00:00Z' },
-    },
-    securities: {
-      collection: 'securities',
-      id: 'sec_8nVc2KpX',
-      populated: { name: 'Synthetic Fund' },
-    },
-    users: { collection: 'users', id: U, populated: { public_id: 'pub_7Kd2mQxZ' } },
-    amazon_orders: {
-      collection: 'amazon/amz_5pQw/orders',
-      id: 'ord_9wKe',
-      populated: { date: '2026-01-15' },
-    },
-    amazon: { collection: 'amazon', id: 'amz_5pQw', populated: { status: 'connected' } },
-    subscriptions: {
-      collection: 'subscriptions',
-      id: 'sub_6rLp',
-      populated: { provider: 'apple' },
-    },
-    invites: { collection: 'invites', id: 'inv_6rLp', populated: { code: 'SYNTH123' } },
-    user_items: { collection: 'user_items', id: U, populated: { items: { [I]: true } } },
-    feature_tracking: { collection: 'feature_tracking', id: U, populated: { enabled: true } },
-    support: { collection: 'support', id: U, populated: { topic: 'billing' } },
-  };
+  const PATHS = ROUTE_PATHS;
 
   test('the sweep covers every route that has a processor', () => {
     const swept = COLLECTION_ROUTES.filter(

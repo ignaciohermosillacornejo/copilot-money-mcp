@@ -549,7 +549,7 @@ Stores daily and high-frequency price data per security (identified by SHA256 ha
 > have been decoded as Plaid accounts. An unknown subcollection now stays unrouted and shows as
 > undecoded in `scripts/decode-coverage.ts`.
 
-**Measured 2026-10-11:** ~5,100 entries, none with a field, so there are no known fields to
+**Measured 2026-10-11, before #807** (the parser no longer yields these at all): ~5,100 entries, none with a field, so there are no known fields to
 document. Earlier versions of this section described ~6,867 "raw Plaid account documents"
 carrying the `holdings` array with cost basis; that count was presumably of these
 structural entries (not re-measured; later measurements are ~4,250 and ~5,100), and the

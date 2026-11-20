@@ -22,8 +22,11 @@ import {
   routeCollection,
   decodeGoalHistory,
   decodeAllCollections,
+  COLLECTION_ROUTES,
+  type CollectionRoute,
 } from '../../src/core/decoder.js';
 import { createDeepTestDb } from '../helpers/test-db.js';
+import { ROUTE_SHAPES } from '../helpers/route-fixtures.js';
 
 describe('routeCollection', () => {
   test.each([
@@ -90,48 +93,59 @@ describe('routeCollection', () => {
     expect(routeCollection('amazon/amz_7Kd2mQxZ4vLp9WnR3cHb')).toBeNull();
   });
 
-  // Class-level detector for #915 (phantom-row near miss). Each entry is a
-  // collection shape seen on a real cache. A document in an unknown
-  // subcollection beneath any of them must stay unrouted: a clause that claims
-  // it either builds a row Copilot never wrote (the `plaid_accounts` and
-  // `holdings_history_meta` catch-alls did) or reports undecoded data as
-  // decoded (`financial_goal_sentinels` did). `investment_prices` is the one
-  // ROOT-anchored route; its parser rejects anything but `daily`/`hf`, which
-  // the decoder test for that route pins, so it is listed separately.
-  const I = 'itm_5pQw8ZnRvL3MxK7cHt2J';
-  const A = 'acc_9wKe4RnTpB2XvL7mQd3F';
-  const U = 'usr_3hTq7WmZ2xKv9LpR4cNb';
-  const REAL_SHAPES = [
-    'items',
-    `items/${I}/accounts`,
-    `items/${I}/accounts/${A}/balance_history`,
-    `items/${I}/accounts/${A}/transactions`,
-    `items/${I}/accounts/${A}/holdings_history`,
-    `items/${I}/accounts/${A}/holdings_history/hh_4kWz8nVq/history`,
-    `users/${U}/accounts`,
-    `users/${U}/budgets`,
-    `users/${U}/categories`,
-    `users/${U}/financial_goals`,
-    `users/${U}/financial_goals/gol_6rLp/financial_goal_history`,
-    `users/${U}/recurring`,
-    `users/${U}/tags`,
-    'users',
-    'amazon',
-    'amazon/amz_7Kd2/orders',
-    'changes',
-    'changes/chg_4kWz/a',
-    'changes/chg_4kWz/t',
-    'securities',
-    'investment_splits',
-    'subscriptions',
-    'invites',
-    'user_items',
-    'feature_tracking',
-    'support',
-  ];
-  test.each(REAL_SHAPES)('an unknown subcollection under %s is unrouted (#915)', (collection) => {
-    expect(routeCollection(collection)).not.toBeNull();
-    expect(routeCollection(`${collection}/doc_2vLq9XmT/zz_unknown_sub`)).toBeNull();
+  // Class-level detector for #915 (phantom-row near miss). A document in a
+  // subcollection the decoder has never heard of must not be claimed by a
+  // route that merely sits above it: such a clause either builds a row
+  // Copilot never wrote (the `plaid_accounts` and `holdings_history_meta`
+  // catch-alls did) or reports undecoded data as decoded
+  // (`financial_goal_sentinels` did). The shapes come from ROUTE_SHAPES, which
+  // is typed against COLLECTION_ROUTES, so a new route is probed with no edit
+  // here. `investment_prices` is the one ROOT-anchored route; its parser
+  // rejects anything but `daily`/`hf` before the processor runs.
+  const SHAPES = Object.entries(ROUTE_SHAPES).filter(([route]) => route !== 'investment_prices');
+
+  test('every other route has a shape to probe', () => {
+    expect(SHAPES.length).toBe(COLLECTION_ROUTES.length - 1);
+  });
+
+  test.each(SHAPES)('%s: the real shape routes to it', (route, shape) => {
+    expect(routeCollection(shape)).toBe(route as CollectionRoute);
+  });
+
+  test.each(SHAPES)(
+    '%s: an unknown subcollection beneath it is unrouted (#915)',
+    (_route, shape) => {
+      expect(routeCollection(`${shape}/doc_2vLq9XmT/zz_unknown_sub`)).toBeNull();
+    }
+  );
+
+  // One level deeper, ending in the SAME leaf name as the real shape. Routing
+  // is leaf-anchored (collectionMatches), so for a single-segment clause the
+  // leaf decides on its own; what this pins is that nothing ABOVE the leaf's
+  // parent does. The expectation is the leaf's routing under an unrelated
+  // root: a clause naming `parent/{id}/leaf` must not fire when `parent`
+  // appears further up (the `includes()` form of holdings_history, changes/t,
+  // changes/a and amazon/orders did).
+  test.each(SHAPES)(
+    '%s: a deeper subcollection routes by its own leaf only (#915)',
+    (_route, shape) => {
+      const leaf = shape.split('/').pop()!;
+      const deeper = `${shape}/doc_2vLq9XmT/zz_unknown/doc_8nVc2KpX/${leaf}`;
+      expect(routeCollection(deeper)).toBe(routeCollection(`zz_unrelated/doc_4kWz/${leaf}`));
+    }
+  );
+
+  test('a new subcollection whose leaf collides with a known route is claimed by it (documented limit)', () => {
+    // The limit of the detector above, pinned so it is a decision rather than
+    // a surprise. Leaf-anchored routing cannot tell `users/{u}/budgets` from a
+    // hypothetical `items/{i}/accounts/{a}/budgets`, so the second would decode
+    // as budgets. Not a regression from #915 (before it, these took the
+    // `plaid_accounts` catch-all instead). Unrouted is guaranteed only for a
+    // name no route uses.
+    const acct = 'items/itm_5pQw8ZnRvL3MxK7cHt2J/accounts/acc_9wKe4RnTpB2XvL7mQd3F';
+    expect(routeCollection(`${acct}/budgets`)).toBe('budgets');
+    expect(routeCollection(`${acct}/categories`)).toBe('categories');
+    expect(routeCollection(`${acct}/zz_unknown_sub`)).toBeNull();
   });
 
   test('investment_prices is root-anchored, unlike the leaf-matched routes', () => {
