@@ -229,11 +229,10 @@ describe('nested-field sweep (#902)', () => {
     const covered = new Set(
       modelCases.flatMap((m) => m.nodes.map((n) => `${m.name} ${n.path.join('.')}`))
     );
-    // #902 and #659 — the account holding price; #302 — vested_*; the
-    // sibling Plaid-account schema that #302 needed a second PR for.
+    // #902 and #659 — the account holding price; #302 — vested_*. (The
+    // sibling Plaid-account schema #302 needed a second PR for is retired, #915.)
     expect(covered).toContain('account.ts:AccountSchema holdings.0.institution_price');
     expect(covered).toContain('account.ts:AccountSchema holdings.0.vested_value');
-    expect(covered).toContain('plaid-account.ts:PlaidAccountSchema holdings.0.institution_price');
     expect(covered).toContain('holdings-history.ts:HoldingsHistorySchema history.sample.price');
     // The one model whose record KEYS are validated (a date regex).
     expect(

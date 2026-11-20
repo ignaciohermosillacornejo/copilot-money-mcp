@@ -389,7 +389,6 @@ const PINNED: Record<string, readonly string[]> = {
     'holdings_history',
     'holdings_history_meta',
     'balance_history',
-    'plaid_accounts',
     'transactions',
     'accounts',
     'recurring',
@@ -413,7 +412,6 @@ const PINNED: Record<string, readonly string[]> = {
     'user_items',
     'feature_tracking',
     'support',
-    'financial_goal_sentinels',
   ],
   // src/core/graphql/colors.ts
   COLOR_NAMES: [

@@ -80,93 +80,34 @@ describe('fieldless documents never become rows (#627)', () => {
   });
 });
 
-describe('every parent-pointer dispatch clause guards its processor (#627)', () => {
-  // The class-level ratchet. Two routing clauses in routeCollection (users and
-  // amazon; the items one went with #627) deliberately match Firestore's
-  // parent-pointer paths with a `/^name\/[^/]+$/` regex, and the switch in
-  // decodeAllCollections sends each to a processor. Each is only safe because
-  // the processor it calls returns null for a fieldless document — an
-  // invariant that lived nowhere enforceable, which is how `items` shipped
-  // without it. Since #797 every processor carries the guard, and the sweep
-  // below asserts it behaviourally for every route.
-  //
-  // This pins the pairing: add a parent-pointer clause, and the processor it
-  // dispatches to must carry the guard.
-  test('each processor reachable from a parent-pointer clause checks fields.size === 0', () => {
+describe('no dispatch clause matches a parent-pointer path (#627, #915)', () => {
+  // routeCollection once carried `/^name\/[^/]+$/` clauses (items, users,
+  // amazon) written for Firestore's parent-pointer entries. #627 removed the
+  // items one for manufacturing phantom rows. The other two were dead: a
+  // 2-segment collection is a 3-segment document path, which the key parser
+  // rejects since #807, so they could only read as defenses that do nothing
+  // (#915). A source scan ran over them, checking each led to a guarded
+  // processor; with none left that scan would be vacuous, so this pins their
+  // absence instead. Every processor's fieldless guard is pinned behaviourally
+  // by the sweep below.
+  test('the decoder source has no parent-pointer clause', () => {
     const src = fs.readFileSync(path.join(import.meta.dir, '../../src/core/decoder.ts'), 'utf8');
-    // Stripped ONCE and used for EVERY step below (switch bounds, clause regex,
-    // processor lookup, guard match), as decoder-field-completeness.test.ts
-    // does. Stripping only the final window left the discovery steps reading
-    // raw source, so a commented-out `case` or clause could steer the scan to a
-    // guarded processor and pass. stripComments (#691) blanks comments in place,
-    // so offsets into `text` are still offsets into `src`.
+    // Stripped, so the history comments quoting the retired regexes do not count.
     const text = stripComments(src, 'decoder.ts');
-
-    // The routing decision lives in `routeCollection` and the processor call in
-    // the matching `case` of `decodeAllCollections`'s switch (#778), so a clause
-    // is followed in two hops: regex → returned route → that case's body.
-    //
-    // `[-\w]+` not `\w+`: a hyphenated collection name would otherwise not
-    // match the clause at all, and an unmatched clause is an unchecked one.
-    const clause =
-      /\/\^([-\w]+)\\\/\[\^\/\]\+\$\/\.test\(collection\)\)\s*\{?\s*return '([-\w]+)'/g;
-    const checked: string[] = [];
-    const unguarded: string[] = [];
-    const unresolved: string[] = [];
-
-    // Cases are looked up only inside decodeAllCollections's dispatch switch,
-    // so a route string appearing earlier in the file cannot be mistaken for it.
-    const switchStart = text.indexOf('switch (route) {');
-    expect(switchStart).toBeGreaterThan(-1);
-    // An unmatched end would make slice(start, -1) quietly re-widen the scope.
-    const dispatchEnd = text.indexOf('\n    }\n  }\n', switchStart);
-    expect(dispatchEnd).toBeGreaterThan(switchStart);
-    const dispatch = text.slice(switchStart, dispatchEnd);
-
-    let m: RegExpExecArray | null;
-    while ((m = clause.exec(text)) !== null) {
-      const collectionName = m[1] ?? '?';
-      const route = m[2] ?? '?';
-      const caseIdx = dispatch.search(new RegExp(`case '${route}':\\s*\\{`));
-      const body = caseIdx === -1 ? '' : dispatch.slice(caseIdx, caseIdx + 400);
-      const call = /\b(process\w+)\(/.exec(body);
-      if (!call) {
-        // A clause whose processor we could not identify is NOT a pass. The
-        // body window is capped, so a long comment or nested logic before the
-        // call would land here — and skipping silently is exactly the failure
-        // this ratchet exists to prevent, one level up.
-        unresolved.push(collectionName);
-        continue;
-      }
-      const processor = call[1]!;
-      checked.push(processor);
-
-      // Pull the processor's own body and look for the guard.
-      const declIdx = text.indexOf(`function ${processor}(`);
-      expect(declIdx).toBeGreaterThan(-1);
-      const decl = text.slice(declIdx, declIdx + 900);
-      // The literal is the contract with the two guard sites this reaches
-      // (processUserProfile, processAmazonIntegration), which say so; the other
-      // processors' guards are pinned behaviourally by the sweep below.
-      // Hoisting it into a helper means updating this pattern to match, NOT
-      // loosening it: a scan that accepts anything is a vacuous scan.
-      //
-      // `decl` comes from the stripped text and the pattern requires the `if (`:
-      // both guard sites carry a comment quoting the literal, so matching raw
-      // source would pass on the comment alone with the guard gone.
-      if (!/if \(fields\.size === 0\)/.test(decl)) unguarded.push(processor);
-    }
-
-    // Vacuity guard: if the clause pattern stops matching (a refactor, a
-    // rename), this test would silently pass while checking nothing.
-    expect(checked.length).toBeGreaterThanOrEqual(2);
-    expect(unresolved).toEqual([]);
-    expect(unguarded).toEqual([]);
+    expect(text.match(/\/\^[-\w]+\\\/\[\^\/\]\+\$\//g) ?? []).toEqual([]);
   });
+
+  test.each(['users', 'amazon', 'items', 'changes', 'securities', 'subscriptions', 'support'])(
+    'a %s/{id} path routes nowhere',
+    (root) => {
+      expect(routeCollection(root)).not.toBeNull();
+      expect(routeCollection(`${root}/doc_2vLq9XmT4kRz7PwN3cHb`)).toBeNull();
+    }
+  );
 });
 
-/** Routes with no processor, so nothing to sweep: sentinels, and the unread #666 path. */
-const NO_PROCESSOR = ['financial_goal_sentinels', 'user_accounts'] as const;
+/** Routes with no processor, so nothing to sweep: the unread #666 path. */
+const NO_PROCESSOR = ['user_accounts'] as const;
 /** Every route that has a processor. */
 type SweptRoute = Exclude<CollectionRoute, (typeof NO_PROCESSOR)[number]>;
 
@@ -188,8 +129,8 @@ describe('no route builds a row from a fieldless document, every route from a po
   // 2 ONLY for lacking a processor, so its accessor table covers exactly the
   // swept routes, and the coverage test below fails if a processor-bearing
   // route is ever excluded. If one must be excluded for another reason (as
-  // plaid_accounts was before #797), restore an explicit accessor for it here
-  // rather than dropping it from the sweep.
+  // the since-retired plaid_accounts route was before #797), restore an
+  // explicit accessor for it here rather than dropping it from the sweep.
   const ROWS: Record<SweptRoute, (all: AllCollectionsResult) => number> = ROUTE_ROWS;
   // `populated` is the other side of each case (#808): the smallest field set
   // the route's processor turns into a row. Fieldless-yields-nothing alone
@@ -219,15 +160,6 @@ describe('no route builds a row from a fieldless document, every route from a po
       collection: `items/${I}/accounts/${A}/balance_history`,
       id: '2026-01-15',
       populated: { current_balance: 100 },
-    },
-    // `items/{i}/accounts/{a}` + id is an odd (collection) path the key parser
-    // rejects (#807), so the doc sits one subcollection lower, the only shape
-    // the route still accepts. Whether the route is reachable on a real cache
-    // at all is #915.
-    plaid_accounts: {
-      collection: `items/${I}/accounts/${A}/details`,
-      id: 'pa_7Kd2mQxZ',
-      populated: { name: 'Synthetic Checking' },
     },
     transactions: {
       collection: `items/${I}/accounts/${A}/transactions`,

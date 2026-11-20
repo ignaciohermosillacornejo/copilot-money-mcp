@@ -18,6 +18,7 @@ import {
   decodeCategories,
   getDecodeTimeoutMs,
   __resetDecodeTimeoutWarning,
+  routeCollection,
 } from '../../src/core/decoder.js';
 import {
   iterateDocuments,
@@ -1831,54 +1832,32 @@ describe('decoder coverage', () => {
       });
     });
 
-    test('decodes plaid accounts via decodeAllCollections', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-db');
-      // A document path has an even segment count, and the key parser rejects an
-      // odd one (#807), so the doc sits one subcollection below the account (route reachability: #915). No
-      // real cache has been seen to hold a document at a path this route accepts:
-      // the 5-segment shape it was written for came from `remote_document_read_time`
-      // index keys misparsed as documents.
+    test('a populated document in an unknown subcollection under an account decodes to nothing (#915)', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'unknown-account-sub-db');
+      // A `plaid_accounts` route used to claim every subcollection under an
+      // account that its denylist did not name, and built a Plaid account row
+      // from it: a new Copilot subcollection would have surfaced as phantom
+      // accounts. Fields are account-shaped on purpose, so a catch-all that
+      // decodes them as anything shows up as a row below.
       await createDeepTestDb(dbPath, [
         {
-          collection: 'items/item1/accounts/pacc1/details',
-          id: 'data',
+          collection: 'items/itm_5pQw8ZnRvL3MxK7cHt2J/accounts/acc_9wKe4RnTpB2XvL7mQd3F/details',
+          id: 'dtl_3hTq7WmZ2xKv9LpR4cNb',
           fields: {
-            account_id: 'acc_plaid_1',
-            name: 'Plaid Checking',
-            official_name: 'CHECKING ACCT',
-            mask: '1234',
-            account_type: 'depository',
-            subtype: 'checking',
-            iso_currency_code: 'USD',
+            account_id: 'acc_9wKe4RnTpB2XvL7mQd3F',
+            name: 'Synthetic Checking',
             current_balance: 5000,
-            available_balance: 4800,
-            limit: null,
-            holdings: [
-              {
-                security_id: 'sec1',
-                quantity: 10,
-                cost_basis: 1500,
-              },
-            ],
+            holdings: [{ security_id: 'sec1', quantity: 10, cost_basis: 1500 }],
           },
         },
       ]);
 
       const result = await decodeAllCollections(dbPath);
 
-      expect(result.plaidAccounts.length).toBe(1);
-      expect(result.plaidAccounts[0]?.plaid_account_id).toBe('data');
-      expect(result.plaidAccounts[0]?.item_id).toBe('item1');
-      expect(result.plaidAccounts[0]?.name).toBe('Plaid Checking');
-      expect(result.plaidAccounts[0]?.official_name).toBe('CHECKING ACCT');
-      expect(result.plaidAccounts[0]?.mask).toBe('1234');
-      expect(result.plaidAccounts[0]?.account_type).toBe('depository');
-      expect(result.plaidAccounts[0]?.subtype).toBe('checking');
-      expect(result.plaidAccounts[0]?.iso_currency_code).toBe('USD');
-      expect(result.plaidAccounts[0]?.current_balance).toBe(5000);
-      expect(result.plaidAccounts[0]?.available_balance).toBe(4800);
-      expect(result.plaidAccounts[0]?.limit).toBeNull();
-      expect(result.plaidAccounts[0]?.holdings).toHaveLength(1);
+      const rows = Object.entries(result).filter(
+        ([, value]) => Array.isArray(value) && value.length > 0
+      );
+      expect(rows).toEqual([]);
     });
 
     test('decodes tags via decodeAllCollections', async () => {
@@ -2437,8 +2416,8 @@ describe('decoder coverage', () => {
       // `remote_document_read_time` index entries misparsed as documents, which the
       // key parser now rejects on table name and parity (#807). So the doc below
       // never reaches the router any more; the test now pins that a key of that
-      // shape is dropped without disturbing the goal history beside it. Whether
-      // the `financial_goal_sentinels` route is reachable at all is #915.
+      // shape is dropped without disturbing the goal history beside it. The
+      // `financial_goal_sentinels` route it once reached is retired (#915).
       await createDeepTestDb(dbPath, [
         // Odd-segment "sentinel": rejected by the key parser
         {
@@ -2470,6 +2449,26 @@ describe('decoder coverage', () => {
       // The history still decodes.
       expect(result.goalHistory.length).toBe(1);
       expect(result.goalHistory[0]?.goal_id).toBe('goal1');
+    });
+
+    test('a document in an unknown subcollection under a goal is unrouted, not a sentinel (#915)', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'unknown-goal-sub-db');
+      // The 6-segment shape the retired `financial_goal_sentinels` route could
+      // still reach after #807. It counted such a document as decoded while
+      // dropping it; unrouted, it shows as undecoded in decode-coverage instead.
+      const collection =
+        'users/usr_3hTq7WmZ2xKv9LpR4cNb/financial_goals/gol_6rLpX3mQw9KzT2vN8cHb/milestones';
+      await createDeepTestDb(dbPath, [
+        { collection, id: 'mls_2vLq9XmT4kRz7PwN3cHb', fields: { name: 'Synthetic', amount: 100 } },
+      ]);
+
+      const yielded: string[] = [];
+      for await (const doc of iterateDocuments(dbPath)) yielded.push(doc.collection);
+      expect(yielded).toEqual([collection]);
+      expect(routeCollection(collection)).toBeNull();
+      const result = await decodeAllCollections(dbPath);
+      expect(result.goals).toEqual([]);
+      expect(result.goalHistory).toEqual([]);
     });
 
     test('decodes goal with savings map', async () => {
@@ -3597,90 +3596,6 @@ describe('decoder coverage', () => {
     });
   });
 
-  describe('plaid account extended fields', () => {
-    test('extracts all new plaid account fields', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-full-db');
-      // Even-segment path one subcollection below the account; see the note on
-      // 'decodes plaid accounts via decodeAllCollections' (#807).
-      await createDeepTestDb(dbPath, [
-        {
-          collection: 'items/item2/accounts/pacc2/details',
-          id: 'data',
-          fields: {
-            account_id: 'acc_plaid_2',
-            name: 'Investment Account',
-            item_id: 'item2',
-            historical_update: true,
-            institution_id: 'ins_123',
-            institution_name: 'Big Bank',
-            investments_performance_enabled: true,
-            holdings_initialized: true,
-            latest_balance_update: { __type: 'timestamp', seconds: 1710460800, nanos: 0 },
-            original_current_balance: 10000,
-            original_subtype: '401k',
-            original_type: 'investment',
-            provider_deleted: false,
-            savings_active: true,
-            color: '#FF5733',
-            logo: 'base64logo',
-            logo_content_type: 'image/png',
-            dashboard_active: true,
-            live_balance_backend_disabled: false,
-            live_balance_user_disabled: false,
-            nickname: 'My 401k',
-            verification_status: null,
-            user_hidden: false,
-            user_deleted: false,
-            _origin: 'plaid',
-            id: 'plaid_id_1',
-            user_id: 'user123',
-            is_manual: false,
-            custom_color: '#AABBCC',
-            metadata: { source: 'plaid_v2' },
-            group_id: 'grp1',
-            group_leader: true,
-            merged: { old_id: 'pacc_old' },
-          },
-        },
-      ]);
-
-      const result = await decodeAllCollections(dbPath);
-      expect(result.plaidAccounts.length).toBe(1);
-      const pa = result.plaidAccounts[0]!;
-      expect(pa.historical_update).toBe(true);
-      expect(pa.institution_id).toBe('ins_123');
-      expect(pa.institution_name).toBe('Big Bank');
-      expect(pa.investments_performance_enabled).toBe(true);
-      expect(pa.holdings_initialized).toBe(true);
-      expect(pa.latest_balance_update).toBe('2024-03-15');
-      expect(pa.original_current_balance).toBe(10000);
-      expect(pa.original_subtype).toBe('401k');
-      expect(pa.original_type).toBe('investment');
-      expect(pa.provider_deleted).toBe(false);
-      expect(pa.savings_active).toBe(true);
-      expect(pa.color).toBe('#FF5733');
-      expect(pa.logo).toBe('base64logo');
-      expect(pa.logo_content_type).toBe('image/png');
-      expect(pa.dashboard_active).toBe(true);
-      expect(pa.live_balance_backend_disabled).toBe(false);
-      expect(pa.live_balance_user_disabled).toBe(false);
-      expect(pa.nickname).toBe('My 401k');
-      expect(pa.verification_status).toBeNull();
-      expect(pa.user_hidden).toBe(false);
-      expect(pa.user_deleted).toBe(false);
-      expect(pa._origin).toBe('plaid');
-      expect(pa.id).toBe('plaid_id_1');
-      expect(pa.user_id).toBe('user123');
-      expect(pa.is_manual).toBe(false);
-      expect(pa.custom_color).toBe('#AABBCC');
-      expect(pa.metadata).toEqual({ source: 'plaid_v2' });
-      expect(pa.group_id).toBe('grp1');
-      expect(pa.group_leader).toBe(true);
-      expect(pa.merged).toEqual({ old_id: 'pacc_old' });
-      expect(pa.item_id).toBe('item2');
-    });
-  });
-
   describe('balance history _origin field', () => {
     test('extracts _origin from balance history documents', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'bh-origin-db');
@@ -3898,36 +3813,6 @@ describe('decoder coverage', () => {
       const goals = await decodeGoals(dbPath);
       expect(goals.length).toBe(1);
       expect(goals[0]?.goal_id).toBe('goal-valid');
-    });
-  });
-
-  describe('processPlaidAccount field coverage', () => {
-    test('plaid account with numeric limit and string verification_status', async () => {
-      const dbPath = path.join(FIXTURES_DIR, 'plaid-acc-fields-db');
-      // A document path has an even segment count, and the key parser rejects an
-      // odd one (#807), so the doc sits one subcollection below the account (route reachability: #915). No
-      // real cache has been seen to hold a document at a path this route accepts:
-      // the 5-segment shape it was written for came from `remote_document_read_time`
-      // index keys misparsed as documents.
-      await createDeepTestDb(dbPath, [
-        {
-          collection: 'items/item1/accounts/pacc1/details',
-          id: 'data',
-          fields: {
-            name: 'Chase Credit',
-            type: 'credit',
-            subtype: 'credit card',
-            current_balance: 1500.0,
-            limit: 5000,
-            verification_status: 'automatically_verified',
-          },
-        },
-      ]);
-
-      const result = await decodeAllCollections(dbPath);
-      expect(result.plaidAccounts.length).toBe(1);
-      expect(result.plaidAccounts[0]?.limit).toBe(5000);
-      expect(result.plaidAccounts[0]?.verification_status).toBe('automatically_verified');
     });
   });
 });

@@ -1022,7 +1022,6 @@ describe('every decoder route is compared or excluded with a reason (#778)', () 
         'holdings_history',
         'holdings_history_meta',
         'balance_history',
-        'plaid_accounts',
         'transactions',
         'accounts',
         'recurring',

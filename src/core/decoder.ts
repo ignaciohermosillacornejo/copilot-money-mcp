@@ -35,7 +35,6 @@ import {
 import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-split.js';
 import { Item, ItemSchema, IGNORED_ITEM_FIELDS } from '../models/item.js';
 import { Category, CategorySchema } from '../models/category.js';
-import { PlaidAccount, PlaidAccountSchema } from '../models/plaid-account.js';
 import { BalanceHistory, BalanceHistorySchema } from '../models/balance-history.js';
 import {
   HoldingsHistoryMeta,
@@ -805,7 +804,6 @@ export interface AllCollectionsResult {
   investmentSplits: InvestmentSplit[];
   items: Item[];
   categories: Category[];
-  plaidAccounts: PlaidAccount[];
   balanceHistory: BalanceHistory[];
   holdingsHistoryMeta: HoldingsHistoryMeta[];
   holdingsHistory: HoldingsHistory[];
@@ -2002,155 +2000,6 @@ function processCategory(fields: Map<string, FirestoreValue>, docId: string): Ca
 }
 
 /**
- * Internal helper to process a plaid account document (items/{id}/accounts/{id}).
- */
-function processPlaidAccount(
-  fields: Map<string, FirestoreValue>,
-  docId: string,
-  collection: string
-): PlaidAccount | null {
-  // A fieldless document is a Firestore parent pointer or a deleted-document
-  // tombstone (#278), not data: building a row from one manufactures a record
-  // that does not exist (#627, #797). The behaviour is pinned by the per-route
-  // sweep in tests/core/parent-pointer-documents.test.ts.
-  if (fields.size === 0) return null;
-
-  const data: Record<string, unknown> = {
-    plaid_account_id: docId,
-  };
-
-  // Extract item_id from collection path: items/{item_id}/accounts/{doc_id}
-  const parts = collection.split('/');
-  const itemsIdx = parts.indexOf('items');
-  if (itemsIdx >= 0 && itemsIdx + 1 < parts.length) {
-    data.item_id = parts[itemsIdx + 1];
-  }
-
-  const stringFields = [
-    'account_id',
-    'name',
-    'official_name',
-    'mask',
-    'account_type',
-    'subtype',
-    'iso_currency_code',
-    'institution_id',
-    'institution_name',
-    'original_subtype',
-    'original_type',
-    'color',
-    'logo',
-    'logo_content_type',
-    'nickname',
-    '_origin',
-    'id',
-    'user_id',
-    'custom_color',
-    'group_id',
-    'item_id',
-  ];
-  for (const field of stringFields) {
-    const value = getString(fields, field);
-    if (value !== undefined) data[field] = value;
-  }
-
-  const numberFields = ['current_balance', 'available_balance', 'original_current_balance'];
-  for (const field of numberFields) {
-    const value = getNumber(fields, field);
-    if (value !== undefined) data[field] = value;
-  }
-
-  // Handle limit with null check
-  const limitVal = getNumber(fields, 'limit');
-  if (limitVal !== undefined) {
-    data.limit = limitVal;
-  } else {
-    const limitField = fields.get('limit');
-    if (limitField && limitField.type === 'null') {
-      data.limit = null;
-    }
-  }
-
-  const booleanFields = [
-    'historical_update',
-    'investments_performance_enabled',
-    'holdings_initialized',
-    'provider_deleted',
-    'savings_active',
-    'dashboard_active',
-    'live_balance_backend_disabled',
-    'live_balance_user_disabled',
-    'user_hidden',
-    'user_deleted',
-    'is_manual',
-    'group_leader',
-  ];
-  for (const field of booleanFields) {
-    const value = getBoolean(fields, field);
-    if (value !== undefined) data[field] = value;
-  }
-
-  // Timestamp fields
-  const latestBalanceUpdate = getDateString(fields, 'latest_balance_update');
-  if (latestBalanceUpdate) data.latest_balance_update = latestBalanceUpdate;
-
-  // Verification status (string or null)
-  const vs = getString(fields, 'verification_status');
-  if (vs !== undefined) {
-    data.verification_status = vs;
-  } else {
-    const vsField = fields.get('verification_status');
-    if (vsField && vsField.type === 'null') {
-      data.verification_status = null;
-    }
-  }
-
-  // Map fields
-  const mapFieldNames = ['metadata', 'merged'];
-  for (const field of mapFieldNames) {
-    const mapValue = getMap(fields, field);
-    if (mapValue) data[field] = toPlainObject(mapValue);
-  }
-
-  // Extract holdings array
-  const holdingsField = fields.get('holdings');
-  if (holdingsField && holdingsField.type === 'array') {
-    const holdings: Record<string, unknown>[] = [];
-    for (const item of holdingsField.value) {
-      if (item.type === 'map') {
-        holdings.push(toPlainObject(item.value));
-      }
-    }
-    if (holdings.length > 0) {
-      data.holdings = holdings;
-    }
-  }
-
-  warnUnreadFields(
-    fields,
-    {
-      consumed: [
-        'verification_status',
-        'latest_balance_update',
-        'holdings',
-        ...stringFields,
-        ...numberFields,
-        'limit',
-        ...booleanFields,
-        ...mapFieldNames,
-      ],
-      ignored: [],
-    },
-    { collection: 'plaid_accounts', docId }
-  );
-
-  return validateOrWarn(PlaidAccountSchema, data, {
-    collection: 'plaid_accounts',
-    docId,
-  });
-}
-
-/**
  * Internal helper to process a tag document.
  * Path: users/{user_id}/tags/{tag_id}
  */
@@ -2626,11 +2475,10 @@ function processUserProfile(
   fields: Map<string, FirestoreValue>,
   docId: string
 ): UserProfile | null {
-  // Skip sentinel/parent-pointer docs that have no meaningful data.
-  // The literal `if (fields.size === 0)` is pinned: this processor sits behind a
-  // parent-pointer dispatch clause, and the clause scan in
-  // tests/core/parent-pointer-documents.test.ts greps for exactly this text.
-  // Hoisting it into a helper means updating that pattern, not loosening it.
+  // A fieldless document is a Firestore parent pointer or a deleted-document
+  // tombstone (#278), not data: building a row from one manufactures a record
+  // that does not exist (#627, #797). The behaviour is pinned by the per-route
+  // sweep in tests/core/parent-pointer-documents.test.ts.
   if (fields.size === 0) return null;
 
   const data: Record<string, unknown> = { user_id: docId };
@@ -2756,10 +2604,8 @@ function processAmazonIntegration(
   // Fieldless documents are Firestore parent pointers, not integrations.
   // Without this the function seeds `{ amazon_id: docId }` and would emit a
   // stub for every pointer its dispatch clause matches — the #627 shape.
-  // The literal `if (fields.size === 0)` is pinned: this processor sits behind a
-  // parent-pointer dispatch clause, and the clause scan in
-  // tests/core/parent-pointer-documents.test.ts greps for exactly this text.
-  // Hoisting it into a helper means updating that pattern, not loosening it.
+  // The behaviour is pinned by the per-route sweep in
+  // tests/core/parent-pointer-documents.test.ts.
   if (fields.size === 0) {
     return null;
   }
@@ -3082,18 +2928,15 @@ export function collectionMatches(collection: string, target: string): boolean {
 /**
  * Every collection `decodeAllCollections` dispatches on (#778).
  *
- * Two routes have no processor. `financial_goal_sentinels` are the empty
- * parent documents anchoring `financial_goal_history`, matched so coverage
- * reports do not count them as undecoded. `user_accounts` is known and
- * deliberately unread (#666); it is routed so the `accounts` leaf clause can
- * never claim its documents.
+ * One route has no processor: `user_accounts` is known and deliberately
+ * unread (#666); it is routed so the `accounts` leaf clause can never claim
+ * its documents.
  */
 export const COLLECTION_ROUTES = [
   'user_accounts',
   'holdings_history',
   'holdings_history_meta',
   'balance_history',
-  'plaid_accounts',
   'transactions',
   'accounts',
   'recurring',
@@ -3117,7 +2960,6 @@ export const COLLECTION_ROUTES = [
   'user_items',
   'feature_tracking',
   'support',
-  'financial_goal_sentinels',
 ] as const;
 
 export type CollectionRoute = (typeof COLLECTION_ROUTES)[number];
@@ -3129,7 +2971,7 @@ export type CollectionRoute = (typeof COLLECTION_ROUTES)[number];
  * The ORDER is the routing: a leaf name alone is ambiguous, so the first
  * matching clause wins. `users/<uid>/accounts` must be tested before the leaf
  * `accounts` clause, and the account subcollections (`balance_history`,
- * `holdings_history`, Plaid account docs) before `transactions` and `accounts`.
+ * `holdings_history`) before `transactions` and `accounts`.
  * Most clauses are LEAF-anchored via {@link collectionMatches};
  * `investment_prices` is the ROOT-anchored exception.
  *
@@ -3146,23 +2988,21 @@ export function routeCollection(collection: string): CollectionRoute | null {
   if (collection.includes('/holdings_history/') && collection.endsWith('/history')) {
     return 'holdings_history';
   }
-  if (collection.includes('/holdings_history') && !collection.endsWith('/history')) {
-    return 'holdings_history_meta';
-  }
+  // END-anchored, like every clause that names a subcollection: an
+  // `includes()` test here also claimed any unknown subcollection beneath a
+  // holdings_history document and built a meta row from it (#915).
+  if (collection.endsWith('/holdings_history')) return 'holdings_history_meta';
   if (collection.endsWith('/balance_history')) return 'balance_history';
-  if (
-    // Plaid account docs: items/{id}/accounts/{account_id}
-    // Exclude known subcollections — update this list when adding new ones:
-    //   /balance_history, /transactions, /holdings_history
-    collection.includes('items/') &&
-    collection.includes('/accounts/') &&
-    !collection.endsWith('/accounts') &&
-    !collection.endsWith('/balance_history') &&
-    !collection.endsWith('/transactions') &&
-    !collection.includes('/holdings_history')
-  ) {
-    return 'plaid_accounts';
-  }
+  // No route for `items/{id}/accounts/{id}/<anything else>` (#915). A
+  // `plaid_accounts` clause used to claim every subcollection under an account
+  // that a denylist (balance_history, transactions, holdings_history) did not
+  // name, and decoded it as a Plaid account. The real Plaid account documents
+  // live in `items/{id}/accounts` and take the `accounts` route; the shape the
+  // clause was written for came from `remote_document_read_time` keys misparsed
+  // as documents, which #807 fixed. Measured after #807: zero documents took
+  // it. So a new Copilot subcollection under an account stays unrouted (and
+  // shows as undecoded in scripts/decode-coverage.ts) instead of becoming a
+  // phantom Plaid account row.
   if (collectionMatches(collection, 'transactions')) return 'transactions';
   if (collectionMatches(collection, 'accounts')) return 'accounts';
   if (collectionMatches(collection, 'recurring')) return 'recurring';
@@ -3191,24 +3031,27 @@ export function routeCollection(collection: string): CollectionRoute | null {
   if (collection.endsWith('/a') && collection.includes('changes/')) return 'account_changes';
   if (collectionMatches(collection, 'changes')) return 'changes';
   if (collectionMatches(collection, 'securities')) return 'securities';
-  // Match both top-level users and users/{user_id} parent-pointer sentinel docs.
-  if (collectionMatches(collection, 'users') || /^users\/[^/]+$/.test(collection)) return 'users';
+  // Only the `users` collection itself. A `/^users\/[^/]+$/` alternative used to
+  // match "users/{user_id} parent-pointer sentinel docs": a 2-segment
+  // collection, which is a 3-segment document path the key parser now always
+  // rejects (#807, #915). The same holds for the `amazon/{id}` alternative below.
+  if (collectionMatches(collection, 'users')) return 'users';
   if (collectionMatches(collection, 'orders') && collection.includes('amazon/')) {
     return 'amazon_orders';
   }
-  if (collection === 'amazon' || /^amazon\/[^/]+$/.test(collection)) return 'amazon';
+  if (collection === 'amazon') return 'amazon';
   if (collectionMatches(collection, 'subscriptions')) return 'subscriptions';
   if (collectionMatches(collection, 'invites')) return 'invites';
   if (collectionMatches(collection, 'user_items')) return 'user_items';
   if (collectionMatches(collection, 'feature_tracking')) return 'feature_tracking';
   if (collectionMatches(collection, 'support')) return 'support';
-  if (collection.includes('/financial_goals/') && !collection.endsWith('/financial_goal_history')) {
-    // Sentinel/parent docs at users/{uid}/financial_goals/{goal_id} exist because
-    // financial_goal_history is a subcollection underneath them. These documents are
-    // typically empty (no fields) — their presence just anchors the subcollection path.
-    // We match them here so they don't appear as "undecoded" in coverage reports.
-    return 'financial_goal_sentinels';
-  }
+  // No `financial_goal_sentinels` route (#915). It matched any `/financial_goals/`
+  // path not ending in `/financial_goal_history`, to keep the "sentinel" parent
+  // documents at users/{uid}/financial_goals/{goal_id} out of coverage reports.
+  // Those documents are in `users/{uid}/financial_goals` and take the
+  // `financial_goals` route; the sentinel shape was a misparsed read-time key
+  // (#807). After #807 the clause could only claim an unknown subcollection under
+  // a goal and report it as decoded. Measured after #807: zero documents took it.
   return null;
 }
 
@@ -3237,7 +3080,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   const rawInvestmentSplits: InvestmentSplit[] = [];
   const rawItems: Item[] = [];
   const rawCategories: Category[] = [];
-  const rawPlaidAccounts: PlaidAccount[] = [];
   const rawBalanceHistory: BalanceHistory[] = [];
   const rawHoldingsHistoryMeta: HoldingsHistoryMeta[] = [];
   const rawHoldingsHistory: HoldingsHistory[] = [];
@@ -3278,11 +3120,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
       case 'balance_history': {
         const bh = processBalanceHistory(fields, documentId, collection);
         if (bh) rawBalanceHistory.push(bh);
-        break;
-      }
-      case 'plaid_accounts': {
-        const plaidAccount = processPlaidAccount(fields, documentId, collection);
-        if (plaidAccount) rawPlaidAccounts.push(plaidAccount);
         break;
       }
       case 'transactions': {
@@ -3407,10 +3244,8 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
       }
       // `user_accounts` is known and deliberately unread (#666); it is routed,
       // not unrouted, so the `accounts` leaf clause can never claim it.
-      // Sentinels are routed so coverage reports count them as decoded, but
-      // carry nothing to decode; an unrouted collection is skipped.
+      // An unrouted collection is skipped.
       case 'user_accounts':
-      case 'financial_goal_sentinels':
       case null:
         break;
       default: {
@@ -3510,16 +3345,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     const nameB = b.name || '';
     return nameA.localeCompare(nameB);
   });
-
-  // Plaid accounts: dedupe by plaid_account_id
-  const plaidAccSeen = new Set<string>();
-  const plaidAccounts: PlaidAccount[] = [];
-  for (const acc of rawPlaidAccounts) {
-    if (!plaidAccSeen.has(acc.plaid_account_id)) {
-      plaidAccSeen.add(acc.plaid_account_id);
-      plaidAccounts.push(acc);
-    }
-  }
 
   // Balance history: dedupe by balance_id, sort by account then date desc
   const bhSeen = new Set<string>();
@@ -3705,7 +3530,6 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
     investmentSplits,
     items,
     categories,
-    plaidAccounts,
     balanceHistory,
     holdingsHistoryMeta,
     holdingsHistory,
