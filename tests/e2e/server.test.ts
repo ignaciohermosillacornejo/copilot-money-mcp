@@ -817,7 +817,7 @@ describe('handleCallTool — write tools', () => {
       tag_ids: [],
     });
     expect(result.isError).toBeUndefined();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the payload shape varies by tool; this file is on the no-unsafe-* ratchet list.
     const data = parseToolResult(result) as any;
     expect(data.success).toBe(true);
     expect(data.transaction_id).toBe('txn1');

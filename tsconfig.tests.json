@@ -94,6 +94,7 @@
     //   tests/helpers/ts-files.ts <- tests/core/auth/candidate-ordering.test.ts,
     //     tests/eslint-unsafe-ratchet.test.ts,
     //     tests/exported-constants.test.ts,
+    //     tests/helpers/eslint-ratchet-report.ts,
     //     tests/helpers/strip-comments.ts,
     //     tests/helpers/ts-files.test.ts,
     //     tests/no-ambient-database-discovery.test.ts,
