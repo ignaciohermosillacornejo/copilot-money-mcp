@@ -24,6 +24,16 @@
  * WHAT IT DOES NOT CATCH: a specifier computed at runtime (`import(path)`),
  * and a template literal with substitutions. Neither occurs in a form `tsc`
  * would reject the same way, which is the property this exists to protect.
+ *
+ * THE MIRROR CASE (#919): a relative specifier with NO extension
+ * (`'../src/utils/categories'`). bun resolves it too, but NodeNext does not
+ * (TS2835), so every symbol it imports is error-typed — effectively `any` —
+ * and reading an undeclared field off it compiles in silence. Six test files
+ * were written that way. The type-aware lint's no-unsafe-* rules see the
+ * result, but they are switched off for the files on eslint.config.js's
+ * ratchet list, so the same sweep covers this half too, file-count
+ * independent. A relative specifier must end in `.js`, `.mjs`, `.cjs` or
+ * `.json`; one ending in a TypeScript extension is the case above.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -35,15 +45,17 @@ import { scriptKindFor, tsFilesUnder } from './helpers/ts-files.js';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TREES = ['src', 'scripts', 'tests'] as const;
 const TS_EXTENSION = /\.(?:ts|tsx|mts|cts)$/;
+const RUNTIME_EXTENSION = /\.(?:js|mjs|cjs|json)$/;
 
 interface Offender {
   file: string;
   line: number;
   specifier: string;
+  kind: 'ts-extension' | 'no-extension';
 }
 
-/** Every relative, TS-extension module specifier in `source`. */
-function tsExtensionSpecifiers(fileName: string, source: string): Offender[] {
+/** Every relative module specifier in `source` that NodeNext cannot take as written. */
+function badRelativeSpecifiers(fileName: string, source: string): Offender[] {
   const sf = ts.createSourceFile(
     fileName,
     source,
@@ -55,10 +67,15 @@ function tsExtensionSpecifiers(fileName: string, source: string): Offender[] {
   const check = (node: ts.Node | undefined): void => {
     if (node === undefined || !ts.isStringLiteralLike(node)) return;
     const spec = node.text;
-    if ((spec.startsWith('./') || spec.startsWith('../')) && TS_EXTENSION.test(spec)) {
-      const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
-      found.push({ file: fileName, line: line + 1, specifier: spec });
-    }
+    if (!spec.startsWith('./') && !spec.startsWith('../')) return;
+    const kind = TS_EXTENSION.test(spec)
+      ? 'ts-extension'
+      : RUNTIME_EXTENSION.test(spec)
+        ? undefined
+        : 'no-extension';
+    if (kind === undefined) return;
+    const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+    found.push({ file: fileName, line: line + 1, specifier: spec, kind });
   };
   const visit = (node: ts.Node): void => {
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
@@ -81,7 +98,7 @@ function tsExtensionSpecifiers(fileName: string, source: string): Offender[] {
   return found;
 }
 
-describe('no relative import specifier ends in a TypeScript extension', () => {
+describe('every relative import specifier carries a runtime extension', () => {
   test('the detector recognises every specifier shape it claims to', () => {
     // Guards the sweep below against passing vacuously: each shape named in
     // the docblock must be found, and the non-specifiers must not be.
@@ -98,13 +115,39 @@ describe('no relative import specifier ends in a TypeScript extension', () => {
       "const h = new URL('../h.ts', import.meta.url);",
       "Bun.spawn(['bun', 'run', './i.ts']);",
     ].join('\n');
-    expect(tsExtensionSpecifiers('specimen.ts', specimen).map((o) => o.specifier)).toEqual([
+    expect(badRelativeSpecifiers('specimen.ts', specimen).map((o) => o.specifier)).toEqual([
       './a.ts',
       '../b.tsx',
       './c.mts',
       '../d.cts',
       './e.ts',
       './j.ts',
+    ]);
+  });
+
+  test('the detector flags an extensionless relative specifier in every shape (#919)', () => {
+    const specimen = [
+      "import a from './a';",
+      "import type { B } from '../dir/b';",
+      "export { c } from './c';",
+      "const d = await import('../d');",
+      "type E = import('./e').X;",
+      "import f from './f.config';",
+      // Allowed: a runtime extension, or not relative.
+      "import g from './g.js';",
+      "import h from '../h.json';",
+      "import i from 'node:path';",
+      "import j from 'some-package/sub';",
+    ].join('\n');
+    expect(
+      badRelativeSpecifiers('specimen.ts', specimen).map((o) => `${o.kind} ${o.specifier}`)
+    ).toEqual([
+      'no-extension ./a',
+      'no-extension ../dir/b',
+      'no-extension ./c',
+      'no-extension ../d',
+      'no-extension ./e',
+      'no-extension ./f.config',
     ]);
   });
 
@@ -117,16 +160,17 @@ describe('no relative import specifier ends in a TypeScript extension', () => {
         // Local, untracked scratch — excluded from tsconfig.scripts.json too.
         if (rel.startsWith(join('scripts', 'local'))) continue;
         scanned += 1;
-        offenders.push(...tsExtensionSpecifiers(rel, readFileSync(abs, 'utf8')));
+        offenders.push(...badRelativeSpecifiers(rel, readFileSync(abs, 'utf8')));
       }
     }
     // A walk that found nothing would pass for the wrong reason.
     expect(scanned).toBeGreaterThan(100);
     expect(
-      offenders.map((o) => `${o.file}:${String(o.line)} imports '${o.specifier}'`),
+      offenders.map((o) => `${o.file}:${String(o.line)} imports '${o.specifier}' (${o.kind})`),
       `Import with a .js specifier instead. bun runs a .ts specifier, but tsc rejects it ` +
         `(TS5097), so a file importing that way can never join a typechecked program and ` +
-        `is checked by nothing — the #789 instance.`
+        `is checked by nothing — the #789 instance. bun also runs an extensionless one, but ` +
+        `NodeNext cannot resolve it (TS2835), so everything it imports is typed \`any\` — #919.`
     ).toEqual([]);
   });
 });

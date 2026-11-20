@@ -28,7 +28,7 @@ import {
 import { MAX_INTERRUPT_ATTEMPTS } from '../../src/core/fs-retry.js';
 import { CopilotMoneyServer } from '../../src/server.js';
 import { createTestDatabase } from '../../src/core/leveldb-reader.js';
-import { textOf } from '../helpers/tool-result.js';
+import { firstText, textOf } from '../helpers/tool-result.js';
 
 const FIRESTORE =
   'Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT';
@@ -287,7 +287,7 @@ describe('a retryable discovery failure is looked at again, not served from memo
     expect(first).toContain('EINTR');
     // The interrupt has cleared. Retrying — what the message said to do — works.
     const second = await server.handleCallTool('get_accounts', {});
-    expect(textOf(second)).not.toContain('Database not available');
+    expect(firstText(second)).not.toContain('Database not available');
   });
 
   test('getDbPath() re-looks too, so reading the path first cannot miss a cleared interrupt', async () => {

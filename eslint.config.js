@@ -134,7 +134,11 @@ export default tseslint.config(
   // import flowing on as `any`); those were fixed in every file, these
   // included. Moving these fixtures onto `_injectDataForTesting` and typed
   // casts is follow-up work. Shrink only: a file leaves this list once it is
-  // clean, and a new file never joins it.
+  // clean, and a new file never joins it. Both halves, plus a per-file hit
+  // baseline that may only fall, are asserted by
+  // tests/eslint-unsafe-ratchet.test.ts. The silent extensionless-import
+  // door stays shut in these files too: tests/no-ts-extension-imports.test.ts
+  // sweeps every relative specifier, so it does not depend on this list.
   {
     files: [
       'tests/core/database.test.ts',

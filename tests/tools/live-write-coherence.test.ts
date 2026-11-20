@@ -63,6 +63,12 @@ import type {
 import { createMockGraphQLClient, type MockResponsesByOp } from '../helpers/mock-graphql.js';
 import type { Transaction } from '../../src/models/index.js';
 
+/**
+ * A seeded local row: field names checked against Transaction, with
+ * category_id widened to the null a live row carries for "uncategorized".
+ */
+type LocalRow = Omit<Partial<Transaction>, 'category_id'> & { category_id?: string | null };
+
 // ── Firestore-shaped opaque ids (never id-equals-name fixtures) ─────────────
 
 const ACCOUNT_ID = 'kQ7vN2xR9pL4mW8tY3zB';
@@ -280,7 +286,7 @@ function setup(mutationMocks: MockResponsesByOp) {
       // The decoder's type-derived flags (#864 review).
       ...(n.type === 'INTERNAL_TRANSFER' ? { internal_transfer: true } : {}),
       ...(n.type === 'INCOME' ? { income: true } : {}),
-    })) as Transaction[],
+    })) satisfies LocalRow[] as Transaction[],
   });
   // Persisted routing index in a per-run temp dir — never the user's home.
   const metaStore = new TransactionMetaStore({

@@ -133,7 +133,6 @@ function setup(
   });
   const db = new CopilotDatabase('/fake');
   db._injectDataForTesting({ transactions: [] });
-  db._markLoadedForTesting();
   const liveDb = new LiveCopilotDatabase(client, db, {
     metaStore: new TransactionMetaStore({
       baseDir: mkdtempSync(join(META_DIR, 'store-')),
