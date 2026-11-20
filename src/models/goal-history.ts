@@ -66,8 +66,10 @@ export const GoalHistorySchema = z
     current_amount: z.number().optional(), // Amount saved as of end of month
     target_amount: z.number().optional(), // Target at time of snapshot
 
-    // Daily snapshots (nested object with date keys)
-    daily_data: z.record(z.string(), DailySnapshotSchema).optional(),
+    // Daily snapshots keyed by day. The KEY is what consumers sort and compare
+    // (latest snapshot, current_amount), so it is the calendar-day gate: an
+    // impossible key is an invalid_key that removes the whole entry (#920).
+    daily_data: z.record(calendarDateField(), DailySnapshotSchema).optional(),
 
     // Contributions/transactions for this month
     contributions: z.array(GoalContributionSchema).optional(),

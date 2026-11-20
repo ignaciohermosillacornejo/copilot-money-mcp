@@ -216,15 +216,21 @@ describe('a probably-landed entity write drops its live snapshot (#887)', () => 
       });
       const log = spyOn(console, 'error').mockImplementation(() => {});
       let boomCalls: number;
+      let traced: string[];
       try {
         await expect(call(tools)).rejects.toThrow(/PROBABLY landed/);
       } finally {
         boomCalls = boom.mock.calls.length;
+        traced = log.mock.calls.map((c) => String(c[0]));
         boom.mockRestore();
         log.mockRestore();
       }
       expect(boomCalls).toBeGreaterThan(0);
       expect(derivedWarm(live)).toEqual(warmExcept(DERIVED_BY_SCOPE[scope]));
+      // The other half of the contract: the swallowed failure is traced, by step.
+      const boomTrace = traced.filter((m) => m.includes('housekeeping boom'));
+      expect(boomTrace).toHaveLength(1);
+      expect(boomTrace[0]).toContain(`threw (${scope} snapshot)`);
     }
   );
 
