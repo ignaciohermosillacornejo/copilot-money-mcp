@@ -18,29 +18,26 @@
  *    scripts/mutation-guards.ts), not one inclusion.
  *  - NO SIDE DOOR: `calculateConfigForFile` cannot see an inline directive,
  *    so a file could switch the rules off line by line without joining the
- *    list. Every inline directive that turns off a no-unsafe-* rule (by name,
- *    or by naming no rule at all) must be line-scoped, carry a `-- reason`,
- *    and the total may not grow past INLINE_DISABLE_BASELINE.
+ *    list. Every inline disable directive that turns off one of the five
+ *    UNSAFE_RULES (by name, or by naming no rule at all) must be line-scoped,
+ *    carry a `-- reason`, and the total may not grow past
+ *    INLINE_DISABLE_BASELINE. An inline config comment that sets one of them
+ *    is refused outright. The hit counts themselves are taken with inline
+ *    config off, so no comment can deflate a baseline.
  *  - A fatal message (parse error, file outside the lint program) fails as
- *    itself, rather than scoring zero hits and reading as "clean".
+ *    itself, rather than scoring zero hits and reading as "clean", and a test
+ *    file that no ESLint config matches (an ignored file) fails as unchecked.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ESLint, type Linter } from 'eslint';
 import ts from 'typescript';
 import { tsFilesUnder } from './helpers/ts-files.js';
+import { UNSAFE_RULES, type RatchetReport } from './helpers/eslint-ratchet-report.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-
-const UNSAFE_RULES = [
-  '@typescript-eslint/no-unsafe-argument',
-  '@typescript-eslint/no-unsafe-assignment',
-  '@typescript-eslint/no-unsafe-call',
-  '@typescript-eslint/no-unsafe-member-access',
-  '@typescript-eslint/no-unsafe-return',
-] as const;
+const REPORT_SCRIPT = join(REPO_ROOT, 'tests', 'helpers', 'eslint-ratchet-report.ts');
 
 /** no-unsafe-* hits per ratchet file when the rules are on. Only ever lowered. */
 const BASELINE: Record<string, number> = {
@@ -70,6 +67,12 @@ const INLINE_DISABLE_BASELINE = 3;
 // Built, not written, so this file's own source holds no directive for the
 // sweep below to find.
 const DIRECTIVE = new RegExp('^\\s*eslint-' + 'disable(-next-line|-line)?(?=\\s|$)(.*)$', 's');
+// `/* eslint rule: "off" */`: an inline config comment, not a disable directive.
+const CONFIG_COMMENT = new RegExp('^\\s*eslint' + '\\s+(.*)$', 's');
+
+/** True when a rule name in a comment is one of the five ratcheted rules. */
+const isRatchetedRule = (name: string): boolean =>
+  UNSAFE_RULES.some((rule) => rule === name || rule.endsWith(`/${name}`));
 
 interface InlineDisable {
   where: string;
@@ -92,16 +95,30 @@ export function unsafeDisables(fileName: string, source: string): InlineDisable[
       }
     }
   };
+  // getChildren, not forEachChild: tokens count too, so a comment sitting
+  // just before a closing `}` is read as that brace's leading trivia.
   const visit = (node: ts.Node): void => {
     collect(ts.getLeadingCommentRanges(source, node.getFullStart()));
     collect(ts.getTrailingCommentRanges(source, node.getEnd()));
-    ts.forEachChild(node, visit);
+    for (const child of node.getChildren(sf)) visit(child);
   };
   visit(sf);
   collect(ts.getLeadingCommentRanges(source, sf.endOfFileToken.getFullStart()));
   for (const c of comments.sort((a, b) => a.pos - b.pos)) {
     const raw = source.slice(c.pos, c.end);
     const body = c.kind === ts.SyntaxKind.SingleLineCommentTrivia ? raw.slice(2) : raw.slice(2, -2);
+    const lineNo = sf.getLineAndCharacterOfPosition(c.pos).line + 1;
+    const config = CONFIG_COMMENT.exec(body);
+    if (config) {
+      const named = (config[1] ?? '').split(',').map((part) => part.split(':')[0]?.trim() ?? '');
+      if (named.some(isRatchetedRule)) {
+        found.push({
+          where: `${fileName}:${String(lineNo)}`,
+          problem: 'inline config comment sets a ratcheted rule',
+        });
+      }
+      continue;
+    }
     const m = DIRECTIVE.exec(body);
     if (!m) continue;
     const [rulesPart = '', reason] = (m[2] ?? '').split(/\s--\s/, 2);
@@ -109,9 +126,8 @@ export function unsafeDisables(fileName: string, source: string): InlineDisable[
       .split(',')
       .map((r) => r.trim())
       .filter(Boolean);
-    const hitsUnsafe = rules.length === 0 || rules.some((r) => r.includes('no-unsafe-'));
+    const hitsUnsafe = rules.length === 0 || rules.some(isRatchetedRule);
     if (!hitsUnsafe) continue;
-    const lineNo = sf.getLineAndCharacterOfPosition(c.pos).line + 1;
     const problem =
       m[1] === undefined
         ? 'not line-scoped (use -next-line)'
@@ -125,23 +141,23 @@ export function unsafeDisables(fileName: string, source: string): InlineDisable[
   return found;
 }
 
-const isOff = (entry: Linter.RuleEntry | undefined): boolean => {
-  const level = Array.isArray(entry) ? entry[0] : entry;
-  return level === 0 || level === 'off';
-};
-
 describe('eslint no-unsafe-* ratchet over tests/ (#919)', () => {
-  test('only BASELINE files may switch the rules off, each still has hits, none has grown', async () => {
-    const config = new ESLint({ cwd: REPO_ROOT });
-    const relaxed: string[] = [];
-    const files = tsFilesUnder(join(REPO_ROOT, 'tests')).map((abs) => relative(REPO_ROOT, abs));
-    for (const file of files) {
-      const computed = (await config.calculateConfigForFile(file)) as Linter.Config | undefined;
-      const offRules = UNSAFE_RULES.filter((rule) => isOff(computed?.rules?.[rule]));
-      if (offRules.length > 0) relaxed.push(file);
-    }
+  test('only BASELINE files may switch the rules off, each still has hits, none has grown', () => {
+    // A child process, not this one: see tests/helpers/eslint-ratchet-report.ts.
+    const proc = Bun.spawnSync([process.execPath, REPORT_SCRIPT], {
+      cwd: REPO_ROOT,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    expect(proc.exitCode, proc.stderr.toString()).toBe(0);
+    const report = JSON.parse(proc.stdout.toString()) as RatchetReport;
+    const { relaxed } = report;
     // A walk that found nothing would pass for the wrong reason.
-    expect(files.length).toBeGreaterThan(100);
+    expect(report.scanned).toBeGreaterThan(100);
+    expect(
+      report.unmatched,
+      'No ESLint config matches these test files: an ignored file is not clean, it is unchecked.'
+    ).toEqual([]);
 
     expect(
       relaxed.filter((file) => !(file in BASELINE)),
@@ -153,38 +169,24 @@ describe('eslint no-unsafe-* ratchet over tests/ (#919)', () => {
       'Stale ratchet baseline: these files no longer switch no-unsafe-* off. Delete the rows.'
     ).toEqual([]);
 
-    const strict = new ESLint({
-      cwd: REPO_ROOT,
-      overrideConfig: {
-        files: ['tests/**/*.ts'],
-        rules: Object.fromEntries(UNSAFE_RULES.map((rule) => [rule, 'error'])),
-      },
-    });
-    const results = await strict.lintFiles(relaxed);
-    const fatal = results.flatMap((r) =>
-      r.messages
-        .filter((m) => m.fatal)
-        .map((m) => `${relative(REPO_ROOT, r.filePath)}:${String(m.line)} ${m.message}`)
-    );
     expect(
-      fatal,
+      report.files.flatMap((f) => f.fatal.map((m) => `${f.file}:${m}`)),
       'ESLint could not lint these files, so their hit counts mean nothing. Fix the error.'
     ).toEqual([]);
-    const report = results.map((r) => {
-      const file = relative(REPO_ROOT, r.filePath);
-      const hits = r.messages.filter((m) =>
-        (UNSAFE_RULES as readonly string[]).includes(m.ruleId ?? '')
-      ).length;
-      return { file, hits, baseline: BASELINE[file] ?? 0 };
-    });
-    expect(report.length).toBe(relaxed.length);
+    expect(report.files.length).toBe(relaxed.length);
 
     expect(
-      report.filter((r) => r.hits === 0).map((r) => r.file),
+      report.files.filter((f) => f.hits.length === 0).map((f) => f.file),
       'Clean: remove these from the ratchet list in eslint.config.js and from BASELINE.'
     ).toEqual([]);
     expect(
-      report.filter((r) => r.hits > r.baseline).map((r) => `${r.file}: ${r.hits} > ${r.baseline}`),
+      report.files
+        .filter((f) => f.hits.length > (BASELINE[f.file] ?? 0))
+        .map(
+          (f) =>
+            `${f.file}: ${String(f.hits.length)} > ${String(BASELINE[f.file] ?? 0)}\n    ` +
+            f.hits.join('\n    ')
+        ),
       'New no-unsafe-* hits in a ratchet file. Fix them; the baseline is only ever lowered.'
     ).toEqual([]);
   }, 180_000);
@@ -199,12 +201,23 @@ describe('eslint no-unsafe-* ratchet over tests/ (#919)', () => {
       `// ${d}-line`,
       `// ${d}-next-line @typescript-eslint/no-explicit-any -- not an unsafe rule`,
       `const s = '// ${d}-next-line ${rule}';`,
+      // A no-unsafe-* rule outside the five: not this ratchet's business.
+      `// ${d}-next-line @typescript-eslint/no-unsafe-enum-comparison -- other rule`,
+      // The last trivia in a block, before its closing brace.
+      `describe('x', () => {`,
+      `  test('a', () => {});`,
+      `  /* ${d} ${rule} -- tail of block */`,
+      `});`,
+      // An inline config comment, not a disable directive.
+      `/* eslint ${rule}: "off" */`,
     ].join('\n');
     expect(unsafeDisables('specimen.ts', specimen)).toEqual([
       { where: 'specimen.ts:1', problem: undefined },
       { where: 'specimen.ts:2', problem: 'no `-- reason`' },
       { where: 'specimen.ts:3', problem: 'not line-scoped (use -next-line)' },
       { where: 'specimen.ts:4', problem: 'names no rule, so it disables every rule' },
+      { where: 'specimen.ts:10', problem: 'not line-scoped (use -next-line)' },
+      { where: 'specimen.ts:12', problem: 'inline config comment sets a ratcheted rule' },
     ]);
   });
 
