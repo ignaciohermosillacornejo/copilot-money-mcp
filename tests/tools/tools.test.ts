@@ -1107,7 +1107,10 @@ describe('CopilotMoneyTools', () => {
     };
 
     test('excludes an auto-merged account that is not user_deleted from rows and totals (#904)', async () => {
-      (db as any)._accounts = [...mockAccountsWithHidden, autoMergedCard];
+      (db as unknown as { _accounts: Account[] })._accounts = [
+        ...mockAccountsWithHidden,
+        autoMergedCard,
+      ];
 
       const result = await tools.getAccounts();
 
@@ -1118,7 +1121,10 @@ describe('CopilotMoneyTools', () => {
     });
 
     test('include_hidden: true returns the merged account, flagged, and counts it (#904)', async () => {
-      (db as any)._accounts = [...mockAccountsWithHidden, autoMergedCard];
+      (db as unknown as { _accounts: Account[] })._accounts = [
+        ...mockAccountsWithHidden,
+        autoMergedCard,
+      ];
 
       const result = await tools.getAccounts({ include_hidden: true });
       const merged = result.accounts.find((a) => a.account_id === autoMergedCard.account_id);
@@ -3347,7 +3353,10 @@ describe('getHoldings', () => {
         },
       ],
     };
-    (db as any)._accounts = [...mockAccountsWithHoldings, mergedBrokerage];
+    (db as unknown as { _accounts: Account[] })._accounts = [
+      ...mockAccountsWithHoldings,
+      mergedBrokerage,
+    ];
 
     const hidden = await tools.getHoldings({});
     expect(hidden.holdings.map((h) => h.account_id)).not.toContain(mergedBrokerage.account_id);
