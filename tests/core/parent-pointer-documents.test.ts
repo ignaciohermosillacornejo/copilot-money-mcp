@@ -106,12 +106,9 @@ describe('no dispatch clause matches a parent-pointer path (#627, #915)', () => 
   // Every root segment of every route's real shape, derived from the
   // route-ratcheted table, so a new route brings its root along. The scan
   // above only knows one spelling of such a clause; this is the guard.
-  // `investment_prices` is the one exception: that route is ROOT-anchored by
-  // design (`startsWith('investment_prices/')`), and parseInvestmentPriceCollection
-  // rejects `investment_prices/{id}` before any processor runs.
-  const ROOTS = [...new Set(Object.values(ROUTE_SHAPES).map((shape) => shape.split('/')[0]!))]
-    .filter((root) => root !== 'investment_prices')
-    .sort();
+  const ROOTS = [
+    ...new Set(Object.values(ROUTE_SHAPES).map((shape) => shape.split('/')[0]!)),
+  ].sort();
 
   test('the root list is not vacuous', () => {
     expect(ROOTS).toContain('users');

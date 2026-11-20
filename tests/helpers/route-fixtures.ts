@@ -14,11 +14,18 @@
  */
 
 import type { CollectionRoute } from '../../src/core/decoder.js';
+import { ROUTES_NOT_COMPARED } from '../../scripts/smoke/cache.js';
 
-/** Routes with no processor, so nothing to sweep: the unread #666 path. */
-export const NO_PROCESSOR = ['user_accounts'] as const;
+/**
+ * Routes with no processor, so nothing to sweep. Taken from the smoke's own
+ * exclusion list rather than restated: the smoke excludes a route ONLY for
+ * lacking a processor (#797), so the two are the same set by construction.
+ */
+export const NO_PROCESSOR = Object.keys(
+  ROUTES_NOT_COMPARED
+) as (keyof typeof ROUTES_NOT_COMPARED)[];
 /** Every route that has a processor. */
-export type SweptRoute = Exclude<CollectionRoute, (typeof NO_PROCESSOR)[number]>;
+export type SweptRoute = Exclude<CollectionRoute, keyof typeof ROUTES_NOT_COMPARED>;
 
 const I = 'itm_5pQw8ZnRvL3MxK7cHt2J';
 const A = 'acc_9wKe4RnTpB2XvL7mQd3F';
