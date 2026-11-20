@@ -1583,17 +1583,19 @@ export class CopilotDatabase {
    * (It used to be memoized in CopilotMoneyTools, where only
    * refresh_database dropped it, #909 review.)
    *
+   * Returns a copy, like getUserCategories() and getTags(), so a caller that
+   * mutates the result cannot change what the next read sees.
+   *
    * @returns Set of excluded category IDs
    */
   async getExcludedCategoryIds(): Promise<Set<string>> {
-    if (this._excludedCategoryIds !== null) {
-      return this._excludedCategoryIds;
+    if (this._excludedCategoryIds === null) {
+      const userCategories = await this.loadUserCategories();
+      this._excludedCategoryIds = new Set(
+        userCategories.filter((cat) => cat.excluded === true).map((cat) => cat.category_id)
+      );
     }
-    const userCategories = await this.loadUserCategories();
-    this._excludedCategoryIds = new Set(
-      userCategories.filter((cat) => cat.excluded === true).map((cat) => cat.category_id)
-    );
-    return this._excludedCategoryIds;
+    return new Set(this._excludedCategoryIds);
   }
 
   /**

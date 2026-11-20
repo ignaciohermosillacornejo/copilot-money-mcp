@@ -1008,9 +1008,11 @@ export function isIncomeCategory(categoryId: string | undefined): boolean {
 /**
  * Check if a category ID is a known Plaid category.
  *
- * This is useful for filtering out orphaned references to deleted user categories.
- * If a category_id doesn't resolve to either a user category or a known Plaid category,
- * it's likely a deleted/orphaned category reference.
+ * Plaid taxonomy only: a user category id is not "known" here. To ask whether
+ * a category id has a name at all (user category or Plaid), use
+ * lookupKnownCategoryName() with the user name map, as
+ * CopilotMoneyTools.knownCategoryNamer() does; get_budgets' orphan filter
+ * asks that namer, not this function (#909).
  *
  * @param categoryId - The category ID to check
  * @returns true if the category is a known Plaid category
