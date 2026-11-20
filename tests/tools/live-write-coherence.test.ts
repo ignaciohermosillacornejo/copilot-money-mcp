@@ -1285,6 +1285,38 @@ describe('a transaction write that throws leaves the next read to the server (#8
       expect(fetches()).toBe(2 + (c.expectedWriteFetches ?? 0));
     }
   );
+
+  test.each(Object.keys(MUTATION_OP))(
+    '%s: a throw in the month drop still drops the derived snapshots (#911 review)',
+    async (toolName) => {
+      // invalidateAfterFailedWrite's drops are independent, so each is
+      // guarded on its own: the first throwing must not skip the last.
+      const { call, read, liveDb } = setup({
+        [MUTATION_OP[toolName]!]: new Error('synthetic transport timeout'),
+      });
+      await read();
+      const months = spyOn(liveDb, 'invalidateLiveTransactionMonths').mockImplementation(() => {
+        throw new Error('housekeeping boom');
+      });
+      const derived = spyOn(liveDb, 'invalidateTransactionDerivedSnapshots');
+      const log = spyOn(console, 'error').mockImplementation(() => {});
+      let derivedCalls: number;
+      let monthCalls: number;
+      try {
+        await expect(call(toolName, CASES[toolName]!.args)).rejects.toThrow(
+          /synthetic transport timeout/
+        );
+      } finally {
+        monthCalls = months.mock.calls.length;
+        derivedCalls = derived.mock.calls.length;
+        months.mockRestore();
+        derived.mockRestore();
+        log.mockRestore();
+      }
+      expect(monthCalls).toBeGreaterThan(0);
+      expect(derivedCalls).toBeGreaterThan(0);
+    }
+  );
 });
 
 // ── Transaction writes drop the transaction-derived snapshots (#825) ───────
@@ -2140,25 +2172,29 @@ describe('every write drops the snapshots its family derives (#868, #870)', () =
       throw new Error('housekeeping boom');
     });
     const log = spyOn(console, 'error').mockImplementation(() => {});
+    let err: Error | undefined;
+    let scanned: number;
+    let traced: string[];
     try {
-      return await run().then(
-        () => {
-          throw new Error('expected the write to throw');
-        },
-        (err: unknown) => err as Error
-      );
+      await run();
+    } catch (e) {
+      err = e as Error;
     } finally {
       // Restore first, so a failed assertion cannot leave console.error muted.
-      const scanned = scan.mock.calls.length;
-      const traced = log.mock.calls.map((c) => String(c[0]));
+      scanned = scan.mock.calls.length;
+      traced = log.mock.calls.map((c) => String(c[0]));
       scan.mockRestore();
       log.mockRestore();
-      expect(scanned).toBeGreaterThan(0);
-      // The trace is half the wrapper's contract: a swallowed failure is logged.
-      expect(
-        traced.some((m) => m.includes('live-cache invalidation after a failed write threw'))
-      ).toBe(true);
     }
+    // Asserted after the finally, so a write that unexpectedly resolves
+    // reports that, rather than a housekeeping assertion standing in for it.
+    if (err === undefined) throw new Error('expected the write to throw');
+    expect(scanned).toBeGreaterThan(0);
+    // The trace is half the wrapper's contract: a swallowed failure is logged.
+    expect(
+      traced.some((m) => m.includes('live-cache invalidation after a failed write threw'))
+    ).toBe(true);
+    return err;
   }
 
   test.each(LINKED_ROW_WRITES)(

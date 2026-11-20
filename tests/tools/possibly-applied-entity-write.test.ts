@@ -10,7 +10,7 @@
  * TTL. A failure that says nothing landed leaves the snapshot alone.
  */
 
-import { describe, test, expect, afterAll } from 'bun:test';
+import { describe, test, expect, afterAll, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -200,6 +200,30 @@ describe('a probably-landed entity write drops its live snapshot (#887)', () => 
       const { tools, live } = await setup(op, ambiguous);
       await expect(call(tools)).rejects.toThrow(/may or may not have applied/);
       expect(cacheFor(live, scope).peek()).toBeUndefined();
+      expect(derivedWarm(live)).toEqual(warmExcept(DERIVED_BY_SCOPE[scope]));
+    }
+  );
+
+  test.each(CASES)(
+    '%s: a throw in the snapshot drop still drops the derived snapshots (#911 review)',
+    async (_n, op, scope, call) => {
+      // The entity snapshot's drop and the derived drops are separate steps,
+      // each guarded on its own: the first throwing must not skip the rest,
+      // nor mask the write's own error.
+      const { tools, live } = await setup(op, unusablePayloadError(op, 'data', null));
+      const boom = spyOn(cacheFor(live, scope), 'invalidate').mockImplementation(() => {
+        throw new Error('housekeeping boom');
+      });
+      const log = spyOn(console, 'error').mockImplementation(() => {});
+      let boomCalls: number;
+      try {
+        await expect(call(tools)).rejects.toThrow(/PROBABLY landed/);
+      } finally {
+        boomCalls = boom.mock.calls.length;
+        boom.mockRestore();
+        log.mockRestore();
+      }
+      expect(boomCalls).toBeGreaterThan(0);
       expect(derivedWarm(live)).toEqual(warmExcept(DERIVED_BY_SCOPE[scope]));
     }
   );
