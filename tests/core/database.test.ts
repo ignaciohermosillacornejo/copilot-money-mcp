@@ -556,7 +556,9 @@ describe('CopilotDatabase', () => {
     });
 
     test('returns a copy: mutating the result does not change the next read', async () => {
-      (db as any)._userCategories = [{ category_id: 'Ex1qK5aD3gJ8cX4hY6eC', excluded: true }];
+      db._injectDataForTesting({
+        userCategories: [{ category_id: 'Ex1qK5aD3gJ8cX4hY6eC', excluded: true }],
+      });
       const first = await db.getExcludedCategoryIds();
       first.add('Ex9qK5aD3gJ8cX4hY6eC');
       first.delete('Ex1qK5aD3gJ8cX4hY6eC');
