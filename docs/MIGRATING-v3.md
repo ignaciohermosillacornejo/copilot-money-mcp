@@ -103,7 +103,7 @@ still available by name.
 |---|---|
 | `get_transactions` | `transaction_id`, `date`, `amount`, `name`, `category_name`, `account_id`, `item_id`, `pending`, `excluded`, `internal_transfer` |
 | `get_transactions_live` | `transaction_id`, `date`, `amount`, `name`, `category_name`, `account_id`, `item_id`, `pending`, `excluded`, `internal_transfer` |
-| `get_accounts` | `account_id`, `name`, `account_type`, `subtype`, `current_balance`, `institution_name`, `iso_currency_code`, `item_id`, `user_hidden`, `user_deleted` |
+| `get_accounts` | `account_id`, `name`, `account_type`, `subtype`, `current_balance`, `institution_name`, `iso_currency_code`, `item_id`, `user_hidden`, `user_deleted`, `merged` |
 | `get_accounts_live` | `id`, `name`, `type`, `subType`, `balance`, `institutionId`, `itemId`, `isUserHidden`, `isUserClosed` |
 | `get_categories_live` | `id`, `parentId`, `name`, `colorName`, `isExcluded`, `budget_amount` |
 | `get_recurring_transactions` | `merchant`, `normalized_merchant`, `occurrences`, `average_amount`, `total_amount`, `frequency`, `confidence`, `category_name`, `last_date`, `next_expected_date` |
