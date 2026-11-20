@@ -58,7 +58,7 @@ import {
 import { Security, SecuritySchema } from '../models/security.js';
 import { UserProfile, UserProfileSchema } from '../models/user-profile.js';
 import { Tag, TagSchema } from '../models/tag.js';
-import { parseTimeoutMs } from '../utils/timeout.js';
+import { MAX_TIMEOUT_MS, parseTimeoutMs } from '../utils/timeout.js';
 import {
   AmazonIntegration,
   AmazonIntegrationSchema,
@@ -3728,6 +3728,9 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
  * Get the decode timeout in milliseconds from environment or default.
  * Can be set via DECODE_TIMEOUT_MS environment variable or --timeout CLI flag.
  */
+const DEFAULT_DECODE_TIMEOUT_MS = 90_000;
+let warnedUnusableDecodeTimeout = false;
+
 export function getDecodeTimeoutMs(): number {
   const envValue = process.env.DECODE_TIMEOUT_MS;
   if (envValue !== undefined) {
@@ -3737,8 +3740,21 @@ export function getDecodeTimeoutMs(): number {
     if (ms !== undefined) {
       return ms;
     }
+    // Say so once, so a typo is not a silent 90 s. The value itself is not
+    // echoed: an env var can hold anything, and the rule is enough to fix it.
+    if (!warnedUnusableDecodeTimeout) {
+      warnedUnusableDecodeTimeout = true;
+      console.error(
+        `[decoder] DECODE_TIMEOUT_MS is set but is not a positive integer number of milliseconds (at most ${MAX_TIMEOUT_MS}); using the default ${DEFAULT_DECODE_TIMEOUT_MS} ms`
+      );
+    }
   }
-  return 90_000; // 90 seconds default
+  return DEFAULT_DECODE_TIMEOUT_MS;
+}
+
+/** Test hook: let the once-per-process DECODE_TIMEOUT_MS warning fire again. */
+export function __resetDecodeTimeoutWarning(): void {
+  warnedUnusableDecodeTimeout = false;
 }
 
 /**

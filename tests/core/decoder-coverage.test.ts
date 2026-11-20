@@ -17,6 +17,7 @@ import {
   decodeGoals,
   decodeCategories,
   getDecodeTimeoutMs,
+  __resetDecodeTimeoutWarning,
 } from '../../src/core/decoder.js';
 import {
   iterateDocuments,
@@ -2696,6 +2697,66 @@ describe('decoder coverage', () => {
         process.env.DECODE_TIMEOUT_MS = original;
       } else {
         delete process.env.DECODE_TIMEOUT_MS;
+      }
+    });
+
+    test('honours a value with surrounding whitespace', () => {
+      const original = process.env.DECODE_TIMEOUT_MS;
+      process.env.DECODE_TIMEOUT_MS = ' 30000\n';
+
+      expect(getDecodeTimeoutMs()).toBe(30000);
+
+      if (original !== undefined) {
+        process.env.DECODE_TIMEOUT_MS = original;
+      } else {
+        delete process.env.DECODE_TIMEOUT_MS;
+      }
+    });
+
+    test('says once, without echoing the value, that a set-but-unusable value fell back', () => {
+      const original = process.env.DECODE_TIMEOUT_MS;
+      const errorSpy = spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        __resetDecodeTimeoutWarning();
+        process.env.DECODE_TIMEOUT_MS = 'sentinel-not-a-timeout';
+
+        expect(getDecodeTimeoutMs()).toBe(90_000);
+        expect(getDecodeTimeoutMs()).toBe(90_000);
+
+        const lines = errorSpy.mock.calls.map((args) => args.map(String).join(' '));
+        const warnings = lines.filter((line) => line.includes('DECODE_TIMEOUT_MS'));
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain('90000');
+        expect(lines.join('\n')).not.toContain('sentinel-not-a-timeout');
+      } finally {
+        errorSpy.mockRestore();
+        __resetDecodeTimeoutWarning();
+        if (original !== undefined) {
+          process.env.DECODE_TIMEOUT_MS = original;
+        } else {
+          delete process.env.DECODE_TIMEOUT_MS;
+        }
+      }
+    });
+
+    test('prints nothing when the env var is unset or usable', () => {
+      const original = process.env.DECODE_TIMEOUT_MS;
+      const errorSpy = spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        __resetDecodeTimeoutWarning();
+        delete process.env.DECODE_TIMEOUT_MS;
+        getDecodeTimeoutMs();
+        process.env.DECODE_TIMEOUT_MS = '30000';
+        getDecodeTimeoutMs();
+
+        expect(errorSpy).not.toHaveBeenCalled();
+      } finally {
+        errorSpy.mockRestore();
+        if (original !== undefined) {
+          process.env.DECODE_TIMEOUT_MS = original;
+        } else {
+          delete process.env.DECODE_TIMEOUT_MS;
+        }
       }
     });
   });
