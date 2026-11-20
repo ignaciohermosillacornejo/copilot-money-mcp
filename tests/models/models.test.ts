@@ -7,6 +7,7 @@ import { preferredAccountName } from '../../src/models/account.js';
 import {
   getTransactionDisplayName,
   withDisplayName as withTransactionDisplayName,
+  TransactionSchema,
   type Transaction,
 } from '../../src/models/transaction.js';
 
@@ -106,6 +107,26 @@ describe('Account model helpers', () => {
       // does not know.
       expect(preferredAccountName(base)).toBeUndefined();
     });
+  });
+});
+
+describe('TransactionSchema date (#920)', () => {
+  const row = (date: string) => ({ transaction_id: 'Tq4mZ8xK2pL6vN1rB7cW', amount: 100, date });
+
+  test.each(['2025-01-31', '2024-02-29', '2025-12-01'])('accepts the calendar day %s', (date) => {
+    expect(TransactionSchema.safeParse(row(date)).success).toBe(true);
+  });
+
+  // Well-formed but no such day: the same rule the live row schema applies.
+  test.each(['2025-02-30', '2025-02-29', '2025-04-31', '2025-13-01', '2025-00-10'])(
+    'rejects %s, which matches the pattern but names no day',
+    (date) => {
+      expect(TransactionSchema.safeParse(row(date)).success).toBe(false);
+    }
+  );
+
+  test('still rejects a value outside the pattern', () => {
+    expect(TransactionSchema.safeParse(row('2025-1-05')).success).toBe(false);
   });
 });
 
