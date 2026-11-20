@@ -36,6 +36,7 @@ const MARKER_OF: Record<string, (typeof DRIFT_VERDICT_MARKERS)[number]> = {
     '[smoke] FAIL — synthesized-field absence drift detected',
   'scripts/smoke/reads.ts': '[smoke] FAIL — read-surface drift detected',
   'scripts/smoke/account-names.ts': '[smoke] FAIL — account-name parity drift detected',
+  'scripts/smoke/account-visibility.ts': '[smoke] FAIL — account-visibility parity drift detected',
   'scripts/smoke/budgets.ts': '[smoke] FAIL — budgets server drift detected',
   'scripts/smoke/categories.ts': '[smoke] FAIL — categories server drift detected',
   'scripts/smoke/recurring.ts': '[smoke] FAIL — recurring server drift detected',

@@ -59,11 +59,11 @@ export const getAccountsTool = defineTool({
       'total_assets, and total_liabilities. Optionally filter by account type ' +
       '(checking, savings, credit, investment). Checks both account_type ' +
       'and subtype fields for better filtering (e.g., finds checking accounts ' +
-      "even when account_type is 'depository'). By default, hidden accounts are excluded. " +
+      "even when account_type is 'depository'). By default, hidden/closed/merged accounts are excluded. " +
       '`name` is your Copilot nickname when set, else the provider label — it is ' +
       'user-editable, so key on account_id, never on name. ' +
       'Default rows are terse: account_id, name, account_type, subtype, current_balance, ' +
-      'institution_name, iso_currency_code, item_id, plus user_hidden / user_deleted when set ' +
+      'institution_name, iso_currency_code, item_id, plus user_hidden / user_deleted / merged when set ' +
       '(the flags include_hidden controls). That drops the other ~35 document fields. PARTIAL ' +
       'list of what goes, not exhaustive: the embedded `holdings` array (get_holdings covers ' +
       'it), institution `logo` images plus their `logo_content_type` (base64-encoded, several KB ' +
@@ -87,7 +87,7 @@ export const getAccountsTool = defineTool({
         },
         include_hidden: {
           type: 'boolean',
-          description: 'Include hidden accounts (default: false)',
+          description: 'Include hidden/closed/merged accounts (default: false)',
           default: false,
         },
         fields: ACCOUNT_FIELDS_PARAM_SCHEMA,

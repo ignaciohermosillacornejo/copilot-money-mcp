@@ -98,4 +98,22 @@ describe('smoke scripts tell "could not read" from "no cache"', () => {
     expect(findNotChecked(stderr)).toEqual([{ check: 'account-name parity', verdict: 'SKIP' }]);
     expect(status).toBe(0);
   }, 90_000);
+
+  test('smoke:account-visibility fails on an unreadable cache instead of SKIP (#904)', () => {
+    makeUnreadable();
+    const { status, stderr } = run('scripts/smoke/account-visibility.ts');
+    expect(stderr).toContain('FAIL — account-visibility parity could not read the local cache');
+    expect(stderr).toContain('EACCES');
+    expect(stderr).not.toContain('SKIP');
+    expect(DRIFT_VERDICT_MARKERS.some((m) => stderr.includes(m))).toBe(false);
+    expect(status).toBe(1);
+  }, 90_000);
+
+  test('smoke:account-visibility still SKIPs for a home with no cache (#904)', () => {
+    const { status, stderr } = run('scripts/smoke/account-visibility.ts');
+    expect(findNotChecked(stderr)).toEqual([
+      { check: 'account-visibility parity', verdict: 'SKIP' },
+    ]);
+    expect(status).toBe(0);
+  }, 90_000);
 });

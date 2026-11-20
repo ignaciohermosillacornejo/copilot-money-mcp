@@ -597,7 +597,12 @@ export function readAccountVisibilityRow(
   };
   return {
     dashboardActive: bool('dashboard_active'),
-    invisible: bool('user_hidden') === true || bool('user_deleted') === true,
+    // `merged` (#904) counts by presence of the map, exactly as the decoder
+    // reads it (`getMap`): any other wire type decodes to no `merged` at all.
+    invisible:
+      bool('user_hidden') === true ||
+      bool('user_deleted') === true ||
+      fields.get('merged')?.type === 'map',
   };
 }
 

@@ -48,8 +48,8 @@ machines and one that slept through its run. See
 ### A pass can still leave a member unchecked
 
 A member can exit 0 without having compared anything: `smoke:account-names`
-SKIPs when there is no local cache, and WARNs when the data cannot tell its
-two sources apart; `smoke:reads` skips individual operations when there is no
+and `smoke:account-visibility` SKIP when there is no local cache, and WARN when
+the data cannot tell their two sources apart; `smoke:reads` skips individual operations when there is no
 row to key them off. None of that is drift, so none of it raises an alarm, but none of it is
 a passing check either. Such a member prints a line from `SKIP_MARKERS`; the
 run is still `pass`, its summary leads with `NOT checked: account-name parity

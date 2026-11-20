@@ -57,6 +57,7 @@ export const DRIFT_VERDICT_MARKERS = [
   '[smoke] FAIL — synthesized-field absence drift detected',
   '[smoke] FAIL — read-surface drift detected',
   '[smoke] FAIL — account-name parity drift detected',
+  '[smoke] FAIL — account-visibility parity drift detected',
   // The refresh smokes' server-controlled assertions (a non-empty category
   // list, a row id on every tag and recurring item, the budget month-key
   // format, rollover polarity). An empty tag, recurring or budget list is a
@@ -86,6 +87,16 @@ export const SKIP_MARKERS = [
   {
     marker: '[smoke] WARN — account-name parity inconclusive',
     check: 'account-name parity',
+    verdict: 'WARN',
+  },
+  {
+    marker: '[smoke] SKIP — account-visibility parity not checked',
+    check: 'account-visibility parity',
+    verdict: 'SKIP',
+  },
+  {
+    marker: '[smoke] WARN — account-visibility parity inconclusive',
+    check: 'account-visibility parity',
     verdict: 'WARN',
   },
   {
