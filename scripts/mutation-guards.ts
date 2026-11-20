@@ -675,6 +675,34 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/core/cacheable-row-read-sweep.test.ts',
   },
   {
+    name: "a cached transaction's date is a calendar day",
+    file: 'src/models/transaction.ts',
+    invariant:
+      'Cache-mode month-range reads compare dates as strings, so a decoded 2025-02-30 row is ' +
+      'invisible to every read of the month it claims, a silent short read. The Transaction ' +
+      'model must require a real calendar day, as the live row schema does, so such a row is ' +
+      'a counted schema drop that decode_health reports (#917, #920).',
+    mutation: {
+      kind: 'replace',
+      find:
+        "    // mutation-guard: a cached transaction's date is a calendar day\n" +
+        '    date: z\n' +
+        '      .string()\n' +
+        "      .regex(/^\\d{4}-\\d{2}-\\d{2}$/, 'Date must be in YYYY-MM-DD format')\n" +
+        "      .refine(isCalendarDate, 'Date must be a day that exists on the calendar'),",
+      with:
+        "    // mutation-guard: a cached transaction's date is a calendar day\n" +
+        '    date: z\n' +
+        '      .string()\n' +
+        "      .regex(/^\\d{4}-\\d{2}-\\d{2}$/, 'Date must be in YYYY-MM-DD format')\n" +
+        // Back to the pattern-only check (#920), keeping isCalendarDate
+        // referenced so the mutated file stays type-valid.
+        "      .refine((d) => d.length > 0 || isCalendarDate(d), 'Date must be a day that exists on the calendar'),",
+    },
+    expectFailingTests: ['counts a well-formed but impossible date as dropped'],
+    expectFails: 'tests/core/decode-stats.test.ts',
+  },
+  {
     name: 'a row filed outside the one month the request named is never cached',
     file: 'src/core/live-database.ts',
     invariant:

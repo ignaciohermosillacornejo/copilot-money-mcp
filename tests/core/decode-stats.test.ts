@@ -47,6 +47,20 @@ const MALFORMED_TXN = {
   },
 };
 
+// Well-formed but no such day: passes the YYYY-MM-DD pattern, fails the
+// calendar refinement (#920), so it is a counted drop like MALFORMED_TXN
+// rather than a row no month-range read would ever return.
+const IMPOSSIBLE_DATE_TXN = {
+  collection: 'transactions',
+  id: 'txn_feb30',
+  fields: {
+    transaction_id: 'txn_feb30',
+    amount: 250,
+    date: '2025-02-30',
+    name: 'Synthetic Impossible Date',
+  },
+};
+
 const ITEM_DOC = {
   collection: 'items',
   id: 'item_1',
@@ -100,6 +114,26 @@ describe('decodeAllCollections decodeStats', () => {
       repaired: 0,
       unread_field_warnings: 0,
     });
+  });
+
+  test('counts a well-formed but impossible date as dropped, naming the rule (#920)', async () => {
+    const dbPath = path.join(FIXTURES_DIR, 'impossible-date-db');
+    await createTestDb(dbPath, [VALID_TXN, IMPOSSIBLE_DATE_TXN]);
+
+    const result = await decodeAllCollections(dbPath);
+
+    expect(result.transactions.map((t) => t.transaction_id)).toEqual(['txn_good']);
+    expect(result.decodeStats.transactions).toEqual({
+      decoded: 1,
+      dropped: 1,
+      repaired: 0,
+      unread_field_warnings: 0,
+    });
+    // The schema-drop warning names the field and the rule, so the stderr
+    // trace decode_health points at says why the row went.
+    const warned = warnSpy.mock.calls.map((c) => c.map(String).join(' ')).join('\n');
+    expect(warned).toContain('date');
+    expect(warned).toContain('Date must be a day that exists on the calendar');
   });
 
   test('reports zero drops for a clean database', async () => {
