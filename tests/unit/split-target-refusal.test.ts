@@ -159,9 +159,7 @@ const MUTATIONS: MockResponsesByOp = {
 function setup(overrides: MockResponsesByOp = {}) {
   const client = createMockGraphQLClient({ ...MUTATIONS, ...overrides });
   const db = new CopilotDatabase('/fake');
-  db._injectDataForTesting({ transactions: [] });
-  db._injectDataForTesting({ userCategories: [] });
-  db._markLoadedForTesting();
+  db._injectDataForTesting({ transactions: [], userCategories: [] });
   const liveDb = new LiveCopilotDatabase(client, db, {
     metaStore: new TransactionMetaStore({
       baseDir: mkdtempSync(join(META_DIR, 'store-')),
@@ -452,9 +450,8 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
     db._injectDataForTesting({
       transactions: [
         { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
-      ] as Transaction[],
+      ] satisfies Partial<Transaction>[] as Transaction[],
     });
-    db._markLoadedForTesting();
     const tools = new CopilotMoneyTools(db, client);
     await tools.updateTransaction({ transaction_id: PLAIN_ID, ...routing, amount: 30 });
     expect(client._calls.filter((c) => c.op === 'EditTransaction')).toHaveLength(1);
@@ -465,17 +462,16 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
     // the per-array split index (one rebuild per id).
     const client = createMockGraphQLClient(MUTATIONS);
     const db = new CopilotDatabase('/fake');
+    // Load-bearing: _injectDataForTesting marks the cache loaded and fresh,
+    // which makes the split check take the readable branch, the one that used
+    // to copy. Seeded any other way, the decode fails on '/fake', the check
+    // takes the peek-only branch, and the test would pass on the unfixed code.
     db._injectDataForTesting({
       transactions: [
         { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
         { transaction_id: CHILD_1, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 10 },
-      ] as Transaction[],
+      ] satisfies Partial<Transaction>[] as Transaction[],
     });
-    // Load-bearing: a loaded, fresh cache makes the split check take the
-    // readable branch, the one that used to copy. Without this marker the
-    // decode fails on '/fake', the check takes the peek-only branch, and the
-    // test would pass on the unfixed code too.
-    db._markLoadedForTesting();
     const copies = spyOn(db, 'getAllTransactions');
     const tools = new CopilotMoneyTools(db, client);
     await tools.updateTransactions({
@@ -493,9 +489,8 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
     db._injectDataForTesting({
       transactions: [
         { transaction_id: CHILD_1, parent_transaction_id: PARENT_ID, amount: 60 },
-      ] as Transaction[],
+      ] satisfies Partial<Transaction>[] as Transaction[],
     });
-    db._markLoadedForTesting();
     const tools = new CopilotMoneyTools(db, client);
     await expect(
       tools.updateTransaction({ transaction_id: PARENT_ID, ...routing, amount: 150 })
@@ -562,16 +557,13 @@ describe('the local split index stays current (#836)', () => {
       transactions: [
         { transaction_id: CHILD_2, amount: 40 },
         { transaction_id: CHILD_2, parent_transaction_id: PARENT_ID, amount: 40 },
-      ] as Transaction[],
-    });
-    // split_transaction validates its children's categories first (#846).
-    db._injectDataForTesting({
+      ] satisfies Partial<Transaction>[] as Transaction[],
+      // split_transaction validates its children's categories first (#846).
       userCategories: [
         { category_id: CAT_A, name: 'A' },
         { category_id: CAT_B, name: 'B' },
       ],
     });
-    db._markLoadedForTesting();
     const tools = new CopilotMoneyTools(db, client);
     await expect(
       tools.splitTransaction({

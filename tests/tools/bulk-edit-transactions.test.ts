@@ -332,7 +332,10 @@ describe('bulk_edit_transactions optimistic cache patch', () => {
   test('patches confirmed rows with category and reviewed', async () => {
     const { tools, db } = makeTools(['a', 'b']);
     const patched: Array<[string, Partial<Transaction>]> = [];
-    db.patchCachedTransaction = (id, patch) => patched.push([id, patch]) > 0;
+    db.patchCachedTransaction = (id, patch) => {
+      patched.push([id, patch]);
+      return true;
+    };
 
     await tools.bulkEditTransactions({
       transaction_ids: ['a', 'b'],
@@ -347,7 +350,10 @@ describe('bulk_edit_transactions optimistic cache patch', () => {
   test('INCOME mirrors the server-side category clear', async () => {
     const { tools, db } = makeTools(['a']);
     const patched: Array<[string, Partial<Transaction>]> = [];
-    db.patchCachedTransaction = (id, patch) => patched.push([id, patch]) > 0;
+    db.patchCachedTransaction = (id, patch) => {
+      patched.push([id, patch]);
+      return true;
+    };
 
     await tools.bulkEditTransactions({ transaction_ids: ['a'], type: 'INCOME' });
 
@@ -361,7 +367,10 @@ describe('bulk_edit_transactions optimistic cache patch', () => {
     // guessing at the union.
     const { tools, db } = makeTools(['a']);
     const patched: Array<[string, Partial<Transaction>]> = [];
-    db.patchCachedTransaction = (id, patch) => patched.push([id, patch]) > 0;
+    db.patchCachedTransaction = (id, patch) => {
+      patched.push([id, patch]);
+      return true;
+    };
 
     await tools.bulkEditTransactions({ transaction_ids: ['a'], add_tag_ids: ['tag1'] });
 

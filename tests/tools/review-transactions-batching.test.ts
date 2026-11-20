@@ -214,7 +214,10 @@ describe('review_transactions surfaces server-side partial application', () => {
   test('only server-confirmed rows are patched into the cache', async () => {
     const db = makeMockDb(['txn-1', 'txn-2']);
     const patched: string[] = [];
-    db.patchCachedTransaction = (id) => patched.push(id) > 0;
+    db.patchCachedTransaction = (id) => {
+      patched.push(id);
+      return true;
+    };
     const client = echoClient();
     const tools = new CopilotMoneyTools(db, client);
 
