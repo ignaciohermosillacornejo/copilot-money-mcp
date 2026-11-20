@@ -147,6 +147,11 @@ export const AccountSchema = z
 
     // Complex objects
     metadata: z.record(z.string(), z.unknown()).optional(),
+    // Set when Copilot has merged this account into another one, e.g.
+    // `{ end_date, source: "auto" }` on an older card record whose
+    // successor shares its provider identifier (#904). Its presence is a
+    // visibility marker — see isVisibleAccount below. Kept opaque: the only
+    // property this code relies on is that the map is there.
     merged: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough();
@@ -174,7 +179,29 @@ export type Account = z.infer<typeof AccountSchema>;
  */
 
 /**
- * Cache-document form: `user_deleted` (merged/removed) or `user_hidden`.
+ * The cache-document fields {@link isVisibleAccount} reads, in one list so a
+ * consumer that must carry them cannot drift from the rule. `get_accounts`'
+ * default field preset spreads it: a caller who passes `include_hidden: true`
+ * gets back exactly the rows these fields discriminate, and a row projected
+ * without the field that hid it is shape-identical to a visible one (#904).
+ * `tests/models/account-visibility.test.ts` requires each field here to hide
+ * an otherwise-plain account on its own, and the rule to read nothing else.
+ */
+export const ACCOUNT_VISIBILITY_FIELDS = ['user_hidden', 'user_deleted', 'merged'] as const;
+
+/**
+ * Cache-document form: `user_deleted` (removed), `user_hidden`, or `merged`.
+ *
+ * `merged` (#904): Copilot marks an account it merged into another one with a
+ * `merged` map, e.g. `{ end_date, source: "auto" }`, and the app then shows
+ * only the account it was merged into. The merged record keeps its frozen
+ * balance, so counting it puts that balance into `total_liabilities` /
+ * `total_assets` a second time. #82 hid the merge that also set
+ * `user_deleted: true`; the report behind #904 is a merge that does not.
+ * The term is the map's PRESENCE, not `source === "auto"`: "auto" is the only
+ * value anyone has seen, and a narrower rule would leave every other merge
+ * path counted twice. Evidence and its limits:
+ * `FirestoreAccount.merged:notVisible` in `src/conformance/ledger.ts`.
  *
  * `dashboard_active` is deliberately NOT a third term. It reads like one and
  * #624 named it one; the measurement recorded on its declaration above shows
@@ -182,8 +209,12 @@ export type Account = z.infer<typeof AccountSchema>;
  * the server as neither hidden nor closed. Adding it here would hide every
  * investment account (#666).
  */
-export function isVisibleAccount(account: Pick<Account, 'user_deleted' | 'user_hidden'>): boolean {
-  return account.user_deleted !== true && account.user_hidden !== true;
+export function isVisibleAccount(
+  account: Pick<Account, (typeof ACCOUNT_VISIBILITY_FIELDS)[number]>
+): boolean {
+  return (
+    account.user_deleted !== true && account.user_hidden !== true && account.merged === undefined
+  );
 }
 
 /**

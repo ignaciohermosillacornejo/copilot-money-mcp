@@ -1218,6 +1218,43 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       '`get_accounts` would list accounts the app hides — #624 again, in the mode where it ' +
       'was already found once.',
   },
+  {
+    surface: 'FirestoreAccount.merged:notVisible',
+    kind: 'response-shape',
+    oracle: 'smoke:account-visibility',
+    class: 'unverified',
+    evidence:
+      '#904: a cache account document carrying a `merged` map is treated as NOT VISIBLE, and ' +
+      '`isVisibleAccount` hides it from cache-mode `get_accounts` (rows and totals) and ' +
+      '`get_holdings` whatever `user_deleted` says. THE ASSUMPTION is that the Copilot app ' +
+      'shows only the account a merged record was merged INTO. ' +
+      'SOURCE: a user report (#902, split out as #904) of an older card record carrying ' +
+      '`merged: { end_date, source: "auto" }` with no `user_deleted`, whose frozen balance ' +
+      'cache mode counted in total_liabilities while the app showed only the successor. ' +
+      'Earlier, #82 (2026-01) saw an auto-merged account on the maintainer cache carrying ' +
+      '`user_deleted: true`, so at least one merge path sets that flag and one, per the ' +
+      'report, does not. ' +
+      'MEASURED 2026-11-19 (counts only), and why that does NOT verify it: the maintainer ' +
+      'cache holds 22 account documents (all under items/*/accounts, distinct ids), NONE ' +
+      'with `merged`, none with `user_deleted: true`, and no document in any collection ' +
+      'carries a `merged` field. The live Accounts query returned the same 22 ids, and ' +
+      'cache and live agreed on visibility for every one (20 visible, 2 hidden in both). So ' +
+      'the live comparison ran and found parity, but it exercised no merged account: open ' +
+      'questions 1-3 of #904 (does a merge always set user_deleted; what live returns for a ' +
+      'merged account; which `source` values exist) are unanswered by our own data. ' +
+      'WHY PRESENCE AND NOT `source === "auto"`: "auto" is the only value seen, and a ' +
+      'narrower rule would count every other merge path twice; the map names a state of ' +
+      'the account (merged, with an end date), not how it got there. WHAT WOULD MAKE IT ' +
+      'WRONG: Copilot writing `merged` on the SURVIVING account too, which would hide a real ' +
+      'one. Nothing seen suggests that, and the report puts the map on the old record. ' +
+      'ORACLE: `smoke:account-visibility` (in the `bun run smoke` composite) compares ' +
+      '`isVisibleAccount` against live `isUserHidden`/`isUserClosed` per account id on every ' +
+      'run, counts merged documents, and FAILs naming this premise if a merged account the ' +
+      'cache hides is listed open by live. Its PASS line says when no merged document was ' +
+      'present, which is every run so far. TO VERIFY: one run of that smoke on a cache that ' +
+      'holds a merged account, checked against the app; then this becomes verified-once, ' +
+      'and gated once a merged account stays in a cache the weekly check reads.',
+  },
   gatedQueryResponseShape('accounts'),
   // Singular Account: generated document exists but has no hand-written
   // wrapper; the read smoke probes the document directly.

@@ -27,6 +27,7 @@ import type { GetTopMoversLiveEntry } from './live/top-movers.js';
 import type { CategoryLiveRow } from './live/categories.js';
 import type { GetRecurringLiveRow } from './live/recurring.js';
 import type { GetAccountsLiveRow } from './live/accounts.js';
+import { ACCOUNT_VISIBILITY_FIELDS } from '../models/account.js';
 
 /**
  * The default field set for transaction rows: the v3 baseline that
@@ -284,7 +285,7 @@ export const RECURRING_CACHE_FIELDS_PARAM_SCHEMA = {
  * rows the flags discriminate. Projecting the flags away left the opt-in
  * caller with hidden/closed/merged rows shape-identical to live ones, with
  * `total_balance` counting them and nothing on the row to tell them apart.
- * Cost is near zero: all three are optional on the cache document, so an
+ * Cost is near zero: every one is optional on the cache document, so an
  * ordinary active row still projects without them.
  *
  * Cut from the cache row: the embedded `holdings` array (~20%, and
@@ -305,8 +306,9 @@ export const DEFAULT_ACCOUNT_FIELDS = [
   'institution_name',
   'iso_currency_code',
   'item_id',
-  'user_hidden',
-  'user_deleted',
+  // The fields isVisibleAccount reads, from its own list so they cannot drift
+  // apart: `merged` joined in #904 and arrived here with it.
+  ...ACCOUNT_VISIBILITY_FIELDS,
 ] as const;
 
 export const DEFAULT_ACCOUNT_LIVE_FIELDS = [

@@ -1092,6 +1092,43 @@ describe('CopilotMoneyTools', () => {
 
       expect(result.accounts.map((a) => a.account_id)).toEqual(['acc_visible']);
     });
+
+    // #904: Copilot can auto-merge an older record into its successor and mark
+    // the old one with `merged: { end_date, source: "auto" }` WITHOUT setting
+    // user_deleted. The app then shows only the successor; the old record's
+    // frozen balance must not reach the totals.
+    const autoMergedCard: Account = {
+      account_id: 'k3VqP9xLm2TzR8wNc4Hb',
+      current_balance: 700.0,
+      name: 'Card (old record)',
+      account_type: 'credit',
+      user_deleted: false,
+      merged: { end_date: '2024-03-01', source: 'auto' },
+    };
+
+    test('excludes an auto-merged account that is not user_deleted from rows and totals (#904)', async () => {
+      (db as any)._accounts = [...mockAccountsWithHidden, autoMergedCard];
+
+      const result = await tools.getAccounts();
+
+      expect(result.accounts.map((a) => a.account_id)).toEqual(['acc_visible']);
+      expect(result.total_liabilities).toBe(0);
+      expect(result.total_assets).toBe(1000.0);
+      expect(result.total_balance).toBe(1000.0);
+    });
+
+    test('include_hidden: true returns the merged account, flagged, and counts it (#904)', async () => {
+      (db as any)._accounts = [...mockAccountsWithHidden, autoMergedCard];
+
+      const result = await tools.getAccounts({ include_hidden: true });
+      const merged = result.accounts.find((a) => a.account_id === autoMergedCard.account_id);
+
+      // The row must say why default mode hid it, or it is shape-identical to
+      // a live account while total_liabilities counts it.
+      expect(merged?.merged).toEqual({ end_date: '2024-03-01', source: 'auto' });
+      expect(result.total_liabilities).toBe(700.0);
+      expect(result.total_balance).toBe(6000.0 - 700.0);
+    });
   });
 
   describe('getTransactions with filtering defaults', () => {
@@ -3284,6 +3321,41 @@ describe('getHoldings', () => {
     expect(accountIds.has('inv_hidden')).toBe(false);
     // The visible fixture is unchanged, so the count must not have moved.
     expect(result.total_count).toBe(4);
+  });
+
+  test('excludes holdings on an auto-merged account that is not user_deleted (#904)', async () => {
+    // The issue noted get_holdings "already" left merged accounts out, which
+    // held only because the reported account (a card) has no positions. A
+    // merged brokerage that still carries holdings is the case that would
+    // double-count; it must follow the same rule as get_accounts.
+    const mergedBrokerage = {
+      account_id: 'Wd7nB2qXk9LpT4vRz8Mc',
+      current_balance: 50000,
+      name: 'Brokerage (merged record)',
+      account_type: 'investment',
+      user_deleted: false,
+      merged: { end_date: '2024-03-01', source: 'auto' },
+      holdings: [
+        {
+          security_id: 'sec_aapl',
+          account_id: 'Wd7nB2qXk9LpT4vRz8Mc',
+          cost_basis: 15000,
+          institution_price: 190.0,
+          institution_value: 19000,
+          quantity: 100,
+          iso_currency_code: 'USD',
+        },
+      ],
+    };
+    (db as any)._accounts = [...mockAccountsWithHoldings, mergedBrokerage];
+
+    const hidden = await tools.getHoldings({});
+    expect(hidden.holdings.map((h) => h.account_id)).not.toContain(mergedBrokerage.account_id);
+    expect(hidden.total_count).toBe(4);
+
+    const all = await tools.getHoldings({ include_hidden: true });
+    expect(all.holdings.map((h) => h.account_id)).toContain(mergedBrokerage.account_id);
+    expect(all.total_count).toBe(5);
   });
 
   test('include_hidden: true brings them back, matching get_accounts (#683)', async () => {

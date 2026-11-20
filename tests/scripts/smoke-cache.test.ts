@@ -955,28 +955,39 @@ describe('readAccountVisibilityRow agrees with isVisibleAccount (for now)', () =
   // `isVisibleAccount` ever starts consulting `dashboard_active`, the rows
   // where it is `false` stop agreeing and this fails — which is the moment to
   // re-read the comment on the field and re-run the probe.
+  //
+  // `merged` (#904) is the third term the rule grew; it is enumerated here so
+  // the pin covers it rather than holding only on rows that never carry it.
   const combos = [false, true].flatMap((hidden) =>
     [false, true].flatMap((deleted) =>
-      [false, true].map((dashboardActive) => ({ hidden, deleted, dashboardActive }))
+      [false, true].flatMap((merged) =>
+        [false, true].map((dashboardActive) => ({ hidden, deleted, merged, dashboardActive }))
+      )
     )
   );
 
   test.each(combos)(
-    'hidden=$hidden deleted=$deleted dashboard_active=$dashboardActive',
-    ({ hidden, deleted, dashboardActive }) => {
-      const row = readAccountVisibilityRow(
-        new Map([
-          ['user_hidden', flag(hidden)],
-          ['user_deleted', flag(deleted)],
-          ['dashboard_active', flag(dashboardActive)],
-        ])
-      );
+    'hidden=$hidden deleted=$deleted merged=$merged dashboard_active=$dashboardActive',
+    ({ hidden, deleted, merged, dashboardActive }) => {
+      const raw = new Map<string, FirestoreValue>([
+        ['user_hidden', flag(hidden)],
+        ['user_deleted', flag(deleted)],
+        ['dashboard_active', flag(dashboardActive)],
+      ]);
+      if (merged) {
+        raw.set('merged', {
+          type: 'map',
+          value: new Map<string, FirestoreValue>([['source', { type: 'string', value: 'auto' }]]),
+        });
+      }
+      const row = readAccountVisibilityRow(raw);
       const account: Account = {
         account_id: 'acc_7Kd2mQxZ1vBnR4pLcS9t',
         current_balance: 100,
         user_hidden: hidden,
         user_deleted: deleted,
         dashboard_active: dashboardActive,
+        ...(merged ? { merged: { source: 'auto' } } : {}),
       };
 
       expect(row.invisible).toBe(!isVisibleAccount(account));

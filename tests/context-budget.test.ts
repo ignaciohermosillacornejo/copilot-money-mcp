@@ -107,7 +107,11 @@ const RESPONSE_BUDGETS: Record<string, number> = {
   // 2_359, under 2% headroom, so the next raise of
   // SCHEDULED_SMOKE_NOT_CHECKED_MAX needs a budget bump too. A real file
   // carries one entry or none, and none adds nothing.
-  get_connection_status: 2_400,
+  // 2_400 -> 2_750 by #904: `smoke:account-visibility` joined the composite
+  // with a SKIP and a WARN marker, so SCHEDULED_SMOKE_NOT_CHECKED_MAX went
+  // 7 -> 9 as the note above said it would. The populated worst case measures
+  // 2_483; this is that plus ~10% headroom.
+  get_connection_status: 2_750,
   get_categories: 855,
   // 755 -> 1_065, and this one goes UP: the ratchet was measuring a response
   // whose pattern-detected `recurring` array was always EMPTY, so the #606

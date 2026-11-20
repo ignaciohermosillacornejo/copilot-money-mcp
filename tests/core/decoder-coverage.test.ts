@@ -2938,7 +2938,7 @@ describe('decoder coverage', () => {
               },
             ],
             metadata: { source: 'plaid', last_sync: 'yesterday' },
-            merged: { from_account: 'old-acc-1' },
+            merged: { end_date: '2024-03-01', source: 'auto' },
           },
         },
       ]);
@@ -2999,7 +2999,7 @@ describe('decoder coverage', () => {
 
       // Complex objects
       expect(acc.metadata).toEqual({ source: 'plaid', last_sync: 'yesterday' });
-      expect(acc.merged).toEqual({ from_account: 'old-acc-1' });
+      expect(acc.merged).toEqual({ end_date: '2024-03-01', source: 'auto' });
     });
 
     test('creation_timestamp decodes to a date, and stays absent when unwritten (#718)', async () => {
