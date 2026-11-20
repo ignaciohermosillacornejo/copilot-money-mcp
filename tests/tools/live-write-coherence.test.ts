@@ -62,12 +62,13 @@ import type {
 } from '../../src/core/graphql/transactions.js';
 import { createMockGraphQLClient, type MockResponsesByOp } from '../helpers/mock-graphql.js';
 import type { Transaction } from '../../src/models/index.js';
+import type { TxFixture } from '../helpers/fixtures.js';
 
 /**
  * A seeded local row: field names checked against Transaction, with
  * category_id widened to the null a live row carries for "uncategorized".
  */
-type LocalRow = Omit<Partial<Transaction>, 'category_id'> & { category_id?: string | null };
+type LocalRow = Omit<TxFixture, 'category_id'> & { category_id?: string | null };
 
 // ── Firestore-shaped opaque ids (never id-equals-name fixtures) ─────────────
 
@@ -273,7 +274,9 @@ function setup(mutationMocks: MockResponsesByOp) {
   // The local (LevelDB-model) cache holds the same rows, so a partial batch can
   // be checked against both caches.
   db._injectDataForTesting({
-    transactions: SEED.map((n) => ({
+    // The return annotation, not a `satisfies` on the mapped array, is what
+    // runs the excess-property check on each row literal.
+    transactions: SEED.map((n): LocalRow => ({
       transaction_id: n.id,
       account_id: n.accountId,
       item_id: n.itemId,
@@ -286,7 +289,7 @@ function setup(mutationMocks: MockResponsesByOp) {
       // The decoder's type-derived flags (#864 review).
       ...(n.type === 'INTERNAL_TRANSFER' ? { internal_transfer: true } : {}),
       ...(n.type === 'INCOME' ? { income: true } : {}),
-    })) satisfies LocalRow[] as Transaction[],
+    })) as Transaction[],
   });
   // Persisted routing index in a per-run temp dir — never the user's home.
   const metaStore = new TransactionMetaStore({
