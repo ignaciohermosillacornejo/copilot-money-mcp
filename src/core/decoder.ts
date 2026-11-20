@@ -2975,7 +2975,8 @@ export type CollectionRoute = (typeof COLLECTION_ROUTES)[number];
  * `accounts` clause, and the account subcollections (`balance_history`,
  * `holdings_history`) before `transactions` and `accounts`.
  * Most clauses are LEAF-anchored via {@link collectionMatches};
- * `investment_prices` is the ROOT-anchored exception.
+ * `investment_prices` is the ROOT-anchored exception, matched only in the
+ * shapes {@link parseInvestmentPriceCollection} accepts.
  *
  * Exported so tools asking "where would the decoder put this document?" call
  * this instead of keeping a copy. Two copies drifted before it existed:
@@ -3013,9 +3014,11 @@ export function routeCollection(collection: string): CollectionRoute | null {
   if (collectionMatches(collection, 'budgets')) return 'budgets';
   if (collectionMatches(collection, 'financial_goals')) return 'financial_goals';
   if (collection.endsWith('/financial_goal_history')) return 'financial_goal_history';
-  if (collection === 'investment_prices' || collection.startsWith('investment_prices/')) {
-    return 'investment_prices';
-  }
+  // Exactly the shapes the route's own parser accepts (`investment_prices/{id}/
+  // daily|hf`). A `startsWith('investment_prices/')` prefix also claimed the bare
+  // parent and any unknown subcollection, which the dispatch then dropped while
+  // coverage counted them as decoded: the financial_goal_sentinels half of #915.
+  if (parseInvestmentPriceCollection(collection)) return 'investment_prices';
   if (collectionMatches(collection, 'investment_splits')) return 'investment_splits';
   // Only the real `items` collection. A previous version also matched
   // `items/{item_id}` — Firestore's fieldless parent-pointer entries —

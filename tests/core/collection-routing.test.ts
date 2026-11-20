@@ -100,12 +100,11 @@ describe('routeCollection', () => {
   // catch-alls did) or reports undecoded data as decoded
   // (`financial_goal_sentinels` did). The shapes come from ROUTE_SHAPES, which
   // is typed against COLLECTION_ROUTES, so a new route is probed with no edit
-  // here. `investment_prices` is the one ROOT-anchored route; its parser
-  // rejects anything but `daily`/`hf` before the processor runs.
-  const SHAPES = Object.entries(ROUTE_SHAPES).filter(([route]) => route !== 'investment_prices');
+  // here.
+  const SHAPES = Object.entries(ROUTE_SHAPES);
 
-  test('every other route has a shape to probe', () => {
-    expect(SHAPES.length).toBe(COLLECTION_ROUTES.length - 1);
+  test('every route has a shape to probe', () => {
+    expect(SHAPES.length).toBe(COLLECTION_ROUTES.length);
   });
 
   test.each(SHAPES)('%s: the real shape routes to it', (route, shape) => {
@@ -148,11 +147,16 @@ describe('routeCollection', () => {
     expect(routeCollection(`${acct}/zz_unknown_sub`)).toBeNull();
   });
 
-  test('investment_prices is root-anchored, unlike the leaf-matched routes', () => {
-    // The decoder genuinely uses a prefix here; a leaf match would miss every
-    // nested price document.
-    expect(routeCollection('investment_prices')).toBe('investment_prices');
+  test('investment_prices is root-anchored and takes only the shapes its parser accepts (#915)', () => {
+    const sec = 'investment_prices/sec_8nVc2KpX5tLm3QwR7zHd';
+    expect(routeCollection(`${sec}/daily`)).toBe('investment_prices');
+    expect(routeCollection(`${sec}/hf`)).toBe('investment_prices');
+    // Not a leaf match: nested elsewhere it is nothing.
     expect(routeCollection('users/usr_3hTq7WmZ2xKv9LpR4cNb/investment_prices')).toBeNull();
+    // The bare parent and an unknown subcollection hold nothing the dispatch
+    // decodes, so routing them would only count dropped documents as decoded.
+    expect(routeCollection('investment_prices')).toBeNull();
+    expect(routeCollection(`${sec}/zz_unknown_sub`)).toBeNull();
   });
 
   test('an unknown collection is unrouted', () => {
