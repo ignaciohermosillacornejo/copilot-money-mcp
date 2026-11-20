@@ -191,21 +191,35 @@ export function classifyAccountVisibilityParity(p: AccountVisibilityParity): {
         `stale cache: reopen Copilot to sync it and re-run`,
     };
   }
-  if (p.hiddenAgreed === 0 && p.cacheOnlyHidden === 0) {
+  // Only a hidden account live actually RETURNED exercises the two hiding
+  // rules. One live omitted (cacheOnlyHidden) agrees by absence: live never
+  // classified it, so it cannot stand in for that evidence (#928 review).
+  if (p.hiddenAgreed === 0) {
     return {
       status: 'WARN',
       detail:
-        `${counts} — every account is visible in both modes, so this run cannot tell whether ` +
-        `the two rules hide the same accounts. Parity holds; the hiding rules are unexercised`,
+        `${counts} — no account live returned is hidden in both modes, so this run cannot ` +
+        `tell whether the two rules hide the same accounts. Parity holds; the hiding rules ` +
+        `are unexercised` +
+        absentHidden(p),
     };
   }
   return {
     status: 'PASS',
     detail:
       `${counts} — visibility agrees on every compared account, including ` +
-      `${p.hiddenAgreed + p.cacheOnlyHidden} that neither mode shows` +
+      `${p.hiddenAgreed} that both modes hide` +
+      absentHidden(p) +
       mergedEvidence(p),
   };
+}
+
+/** The weaker sentence for hidden cache accounts live never returned. */
+function absentHidden(p: AccountVisibilityParity): string {
+  return p.cacheOnlyHidden > 0
+    ? `; ${p.cacheOnlyHidden} more the cache hides are absent from live, which agrees by ` +
+        `absence only`
+    : '';
 }
 
 /**
