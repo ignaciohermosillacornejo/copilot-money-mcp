@@ -3231,6 +3231,33 @@ describe('decoder coverage', () => {
       expect(gh.daily_data!['2024-01-20']?.amount).toBe(5500);
     });
 
+    test('an impossible daily_data day is removed and never becomes current_amount (#920)', async () => {
+      const dbPath = path.join(FIXTURES_DIR, 'goal-history-impossible-day-db');
+      await createTestDatabase(dbPath, [
+        {
+          collection: 'financial_goals/goal1/financial_goal_history',
+          id: '2025-02',
+          fields: {
+            goal_id: 'goal1',
+            daily_data: {
+              '2025-02-20': { balance: 5000 },
+              // Sorts after every real February day.
+              '2025-02-30': { balance: 9000 },
+            },
+          },
+        },
+      ]);
+
+      const result = await decodeAllCollections(dbPath);
+
+      expect(result.goalHistory.length).toBe(1);
+      const gh = result.goalHistory[0]!;
+      expect(gh.current_amount).toBe(5000);
+      expect(Object.keys(gh.daily_data ?? {})).toEqual(['2025-02-20']);
+      // Removed by the schema as a counted repair, not skipped silently.
+      expect(result.decodeStats.goal_history?.repaired ?? 0).toBeGreaterThan(0);
+    });
+
     test('goal history with current_amount takes precedence over daily_data', async () => {
       const dbPath = path.join(FIXTURES_DIR, 'goal-history-explicit-db');
       await createTestDatabase(dbPath, [

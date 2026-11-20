@@ -1672,8 +1672,11 @@ function processGoalHistory(
         const balance = getNumber(value.value, 'balance') ?? getNumber(value.value, 'amount');
         if (balance !== undefined) {
           dailyData[date] = { amount: balance, date };
-          // Track the latest date to get current_amount
-          if (date > latestDate) {
+          // Track the latest date to get current_amount. Only a calendar day
+          // counts (#920): this runs before validation, and an impossible key
+          // is left in daily_data so the schema removes it as a counted repair
+          // rather than this loop dropping it silently.
+          if (isCalendarDate(date) && date > latestDate) {
             latestDate = date;
             latestBalance = balance;
           }
