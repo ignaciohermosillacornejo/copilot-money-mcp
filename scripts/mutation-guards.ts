@@ -422,7 +422,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'remove',
       find: wholeLines(
         '      // mutation-guard: a failed transaction write drops its live months',
-        '      this.liveDb?.invalidateLiveTransactionMonths(ids);'
+        '      () => this.liveDb?.invalidateLiveTransactionMonths(ids),'
       ),
     },
     expectFailingTests: ['the mutation throws, and the cached month is refetched'],
@@ -495,7 +495,25 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'remove',
       find: wholeLines(
         '        // mutation-guard: a possibly-applied recurring write drops its derived snapshots',
-        '        live.invalidateRecurringDerivedSnapshots();'
+        '        () => live.invalidateRecurringDerivedSnapshots(),'
+      ),
+    },
+    expectFailingTests: ['a writeApplied error drops the snapshot'],
+    expectFails: 'tests/tools/possibly-applied-entity-write.test.ts',
+  },
+  {
+    name: 'a possibly-applied category write drops its derived snapshots',
+    file: 'src/tools/tools.ts',
+    invariant:
+      'A category or budget write that may have applied must drop the snapshots computed ' +
+      'from categories (LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS), not only the ' +
+      'category list, or get_monthly_spend_live serves pre-write figures until its TTL ' +
+      '(#887, #911 review). Same shape as the recurring row above.',
+    mutation: {
+      kind: 'remove',
+      find: wholeLines(
+        '        // mutation-guard: a possibly-applied category write drops its derived snapshots',
+        '        () => live.invalidateCategoryDerivedSnapshots(),'
       ),
     },
     expectFailingTests: ['a writeApplied error drops the snapshot'],

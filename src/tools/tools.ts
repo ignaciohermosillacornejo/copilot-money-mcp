@@ -885,17 +885,16 @@ export class CopilotMoneyTools {
    * tell the two apart without guessing, so it accepts the cost.
    */
   private invalidateAfterFailedWrite(ids: readonly string[], months: readonly string[] = []): void {
-    try {
+    // Three independent drops, each guarded on its own: a throw from one must
+    // not cost the others (#911 review).
+    this.housekeepAfterThrow(
       // mutation-guard: a failed transaction write drops its live months
-      this.liveDb?.invalidateLiveTransactionMonths(ids);
-      if (months.length > 0) this.liveDb?.invalidateLiveMonthKeys(months);
-      this.liveDb?.invalidateTransactionDerivedSnapshots();
-    } catch (e) {
-      // Never let cache housekeeping mask the write's own error, which the
-      // caller rethrows next and is the one that matters; but leave a trace,
-      // since a failure here is the stale-cache bug this exists to prevent.
-      CopilotMoneyTools.traceHousekeepingFailure(e);
-    }
+      () => this.liveDb?.invalidateLiveTransactionMonths(ids),
+      () => {
+        if (months.length > 0) this.liveDb?.invalidateLiveMonthKeys(months);
+      },
+      () => this.liveDb?.invalidateTransactionDerivedSnapshots()
+    );
   }
 
   /** The one trace for catch-path housekeeping that threw. */
@@ -923,22 +922,25 @@ export class CopilotMoneyTools {
     if (!(e instanceof GraphQLError) || !e.writeMayHaveApplied || !this.liveDb) return;
     const live = this.liveDb;
     // A Record, so a new scope is a type error here rather than a silent miss.
-    const drop: Record<typeof scope, () => void> = {
+    // Each drop is its own step, so a throw from the entity snapshot's drop
+    // does not cost the derived snapshots theirs (#911 review).
+    const drop: Record<typeof scope, ReadonlyArray<() => void>> = {
       // Every category write, create included: a create holds no rows, so
       // dropping monthly_spend after one costs a refetch and nothing else.
-      categories: () => {
-        live.getCategoriesCache().invalidate();
-        live.invalidateCategoryDerivedSnapshots();
-      },
-      tags: () => live.getTagsCache().invalidate(),
-      recurring: () => {
-        live.getRecurringCache().invalidate();
+      categories: [
+        () => live.getCategoriesCache().invalidate(),
+        // mutation-guard: a possibly-applied category write drops its derived snapshots
+        () => live.invalidateCategoryDerivedSnapshots(),
+      ],
+      tags: [() => live.getTagsCache().invalidate()],
+      recurring: [
+        () => live.getRecurringCache().invalidate(),
         // mutation-guard: a possibly-applied recurring write drops its derived snapshots
-        live.invalidateRecurringDerivedSnapshots();
-      },
+        () => live.invalidateRecurringDerivedSnapshots(),
+      ],
     };
     // Runs in a catch, one line above the rethrow: it must not mask it.
-    this.housekeepAfterThrow(drop[scope]);
+    this.housekeepAfterThrow(...drop[scope]);
   }
 
   /**
@@ -982,16 +984,23 @@ export class CopilotMoneyTools {
   /**
    * Runs catch-path cache housekeeping so that a throw inside it cannot mask
    * the write's own error, which the caller rethrows next and which carries
-   * the "may have applied" signal (#875/#887). Same reasoning and same trace
-   * as invalidateAfterFailedWrite (#911 review). The success-path drops are
-   * left unwrapped on purpose, like the existing success-path write-throughs:
-   * there a throw surfaces a cache bug instead of hiding it behind a success.
+   * the "may have applied" signal (#875/#887). Never let it mask that error,
+   * but leave a trace, since a failure here is the stale-cache bug the
+   * housekeeping exists to prevent.
+   *
+   * Each step is guarded on its own: pass independent drops as separate
+   * steps, so a throw from one still runs the rest (#911 review). The
+   * success-path drops are left unwrapped on purpose, like the existing
+   * success-path write-throughs: there a throw surfaces a cache bug instead
+   * of hiding it behind a success.
    */
-  private housekeepAfterThrow(housekeeping: () => void): void {
-    try {
-      housekeeping();
-    } catch (e) {
-      CopilotMoneyTools.traceHousekeepingFailure(e);
+  private housekeepAfterThrow(...steps: ReadonlyArray<() => void>): void {
+    for (const step of steps) {
+      try {
+        step();
+      } catch (e) {
+        CopilotMoneyTools.traceHousekeepingFailure(e);
+      }
     }
   }
 
