@@ -22,7 +22,6 @@ import {
   iterateDocuments,
   createTestDatabase,
   cleanupAllTempDatabases,
-  LevelDBReader,
 } from '../../src/core/leveldb-reader.js';
 import type { FirestoreValue } from '../../src/core/protobuf-parser.js';
 import { createDeepTestDb } from '../helpers/test-db.js';

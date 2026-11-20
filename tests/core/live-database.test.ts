@@ -10,7 +10,6 @@ import type {
 } from '../../src/core/graphql/queries/transactions.js';
 import type { CreatedTransaction } from '../../src/core/graphql/transactions.js';
 import { SnapshotCache, TransactionWindowCache } from '../../src/core/cache/index.js';
-import type { Tag } from '../../src/models/index.js';
 import type { CategoryNode } from '../../src/core/graphql/queries/categories.js';
 import type { RecurringNode } from '../../src/core/graphql/queries/recurrings.js';
 import type { UserNode } from '../../src/core/graphql/queries/user.js';
@@ -781,11 +780,14 @@ describe('LiveCopilotDatabase.upsertLiveTransaction', () => {
     'a drifted non-string id (%p) is never indexed or persisted as a routing mapping (#917 review)',
     (id) => {
       const live = mkLive();
-      const flush = spyOn((live as any).metaStore, 'flush');
+      const flush = spyOn(
+        (live as unknown as { metaStore: TransactionMetaStore }).metaStore,
+        'flush'
+      );
       captureWarnings(() => {
         live.upsertLiveTransaction(mutationRow({ id: id as unknown as string }));
       });
-      expect((live as any).txnMetaIndex.size).toBe(0);
+      expect((live as unknown as { txnMetaIndex: Map<string, unknown> }).txnMetaIndex.size).toBe(0);
       expect(flush).not.toHaveBeenCalled();
     }
   );
@@ -1532,11 +1534,14 @@ describe('transaction meta index', () => {
       { mutate: mock(), query: mock() } as unknown as GraphQLClient,
       {} as CopilotDatabase
     );
-    const buffer = spyOn((live as any).metaStore, 'buffer');
+    const buffer = spyOn(
+      (live as unknown as { metaStore: TransactionMetaStore }).metaStore,
+      'buffer'
+    );
     for (const id of [42, {}, ['x']]) {
       live.indexTransactionMeta(id as unknown as string, { accountId: 'acct-B', itemId: 'item-B' });
     }
-    expect((live as any).txnMetaIndex.size).toBe(0);
+    expect((live as unknown as { txnMetaIndex: Map<string, unknown> }).txnMetaIndex.size).toBe(0);
     expect(buffer).not.toHaveBeenCalled();
   });
 
@@ -1832,7 +1837,9 @@ describe('transaction meta index', () => {
     } finally {
       try {
         chmodSync(roDir, 0o755);
-      } catch {}
+      } catch {
+        // best-effort: the rmSync below is forced either way
+      }
       rmSync(tmpBase, { recursive: true, force: true });
     }
   });

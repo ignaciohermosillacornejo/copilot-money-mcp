@@ -29,7 +29,7 @@ function isToolEntry(v: unknown): v is ToolEntry {
   );
 }
 
-const toolsWithTimeFrame = Object.entries(liveRegistry)
+const toolsWithTimeFrame = Object.entries(liveRegistry as Record<string, unknown>)
   .filter((e): e is [string, ToolEntry] => isToolEntry(e[1]))
   .filter(([, t]) => t.schema.inputSchema.properties?.time_frame?.enum);
 

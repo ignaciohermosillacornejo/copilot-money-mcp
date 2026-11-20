@@ -10,7 +10,7 @@ async function withMockedDate<T>(dateString: string, run: () => Promise<T>): Pro
 
   // @ts-expect-error - Mocking global Date in a narrow test scope.
   globalThis.Date = class extends originalDate {
-    constructor(...args: any[]) {
+    constructor(...args: unknown[]) {
       if (args.length === 0) {
         super(fixedDate.getTime());
       } else {

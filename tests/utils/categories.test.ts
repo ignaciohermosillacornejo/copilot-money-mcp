@@ -7,7 +7,7 @@ import {
   CATEGORY_NAMES,
   TRANSFER_CATEGORIES,
   INCOME_CATEGORIES,
-} from '../../src/utils/categories';
+} from '../../src/utils/categories.js';
 
 describe('categories.ts coverage tests', () => {
   describe('getCategoryName - lowercase matching (line 925)', () => {

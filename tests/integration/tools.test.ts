@@ -511,14 +511,14 @@ describe('CopilotMoneyTools Integration', () => {
     test('transaction responses are JSON serializable', async () => {
       const result = await tools.getTransactions({ limit: 5 });
       const json = JSON.stringify(result);
-      const parsed = JSON.parse(json);
+      const parsed = JSON.parse(json) as typeof result;
       expect(parsed.count).toBe(result.count);
     });
 
     test('account responses are JSON serializable', async () => {
       const result = await tools.getAccounts();
       const json = JSON.stringify(result);
-      const parsed = JSON.parse(json);
+      const parsed = JSON.parse(json) as typeof result;
       expect(parsed.count).toBe(result.count);
     });
   });
@@ -640,7 +640,7 @@ describe('CopilotMoneyTools Integration', () => {
     test('response is JSON serializable', async () => {
       const result = await tools.getConnectionStatus();
       const json = JSON.stringify(result);
-      const parsed = JSON.parse(json);
+      const parsed = JSON.parse(json) as typeof result;
       expect(parsed.summary.total).toBe(result.summary.total);
     });
   });

@@ -51,7 +51,8 @@ const echoClient = () => createMockGraphQLClient({ BulkEditTransactions: echoBul
 
 function makeMockDb(txnIds: string[]): CopilotDatabase {
   const db = new CopilotDatabase('/nonexistent');
-  (db as any)._allCollectionsLoaded = true;
+  // Loaded but with no load time, deliberately: only the flag, as before.
+  (db as unknown as { _allCollectionsLoaded: boolean })._allCollectionsLoaded = true;
   const transactions = txnIds.map((id) => ({
     transaction_id: id,
     item_id: 'item1',
@@ -61,8 +62,8 @@ function makeMockDb(txnIds: string[]): CopilotDatabase {
     name: `Txn ${id}`,
     user_reviewed: false,
   }));
-  (db as any).getAllTransactions = async () => transactions;
-  (db as any).clearCache = () => {};
+  db.getAllTransactions = async () => transactions;
+  db.clearCache = () => ({ cleared: false, message: '' });
   return db;
 }
 
@@ -213,7 +214,7 @@ describe('review_transactions surfaces server-side partial application', () => {
   test('only server-confirmed rows are patched into the cache', async () => {
     const db = makeMockDb(['txn-1', 'txn-2']);
     const patched: string[] = [];
-    (db as any).patchCachedTransaction = (id: string) => patched.push(id);
+    db.patchCachedTransaction = (id) => patched.push(id) > 0;
     const client = echoClient();
     const tools = new CopilotMoneyTools(db, client);
 

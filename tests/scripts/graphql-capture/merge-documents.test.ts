@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { mergeDocuments } from '../../../scripts/graphql-capture/merge-documents';
+import { mergeDocuments } from '../../../scripts/graphql-capture/merge-documents.js';
 
 let dir: string;
 
@@ -40,7 +40,9 @@ describe('mergeDocuments', () => {
     await mergeDocuments(jsonlPath, docsPath);
 
     const out = (await Bun.file(jsonlPath).text()).trim();
-    const body = JSON.parse(JSON.parse(out).requestBody);
+    const body = JSON.parse((JSON.parse(out) as { requestBody: string }).requestBody) as {
+      query: string;
+    };
     expect(body.query).toBe(verbatim);
   });
 
@@ -57,7 +59,9 @@ describe('mergeDocuments', () => {
     await mergeDocuments(jsonlPath, docsPath);
 
     const out = (await Bun.file(jsonlPath).text()).trim();
-    const body = JSON.parse(JSON.parse(out).requestBody);
+    const body = JSON.parse((JSON.parse(out) as { requestBody: string }).requestBody) as {
+      query: string;
+    };
     expect(body.query).toBe(alreadyVerbatim);
   });
 
@@ -71,7 +75,9 @@ describe('mergeDocuments', () => {
     await mergeDocuments(jsonlPath, docsPath);
 
     const out = (await Bun.file(jsonlPath).text()).trim();
-    const body = JSON.parse(JSON.parse(out).requestBody);
+    const body = JSON.parse((JSON.parse(out) as { requestBody: string }).requestBody) as {
+      query: string;
+    };
     expect(body.query).toBe(inferred);
   });
 });

@@ -43,6 +43,7 @@ import {
   type MockResponsesByOp,
 } from '../helpers/mock-graphql.js';
 import { monthsCovered } from '../../src/utils/date.js';
+import type { Transaction } from '../../src/models/index.js';
 
 // Firestore-shaped opaque ids.
 const ACCOUNT_ID = 'Wd4fG7hJ0kL3zX6cV9bN';
@@ -157,10 +158,9 @@ const MUTATIONS: MockResponsesByOp = {
  */
 function setup(overrides: MockResponsesByOp = {}) {
   const client = createMockGraphQLClient({ ...MUTATIONS, ...overrides });
-  const db = new CopilotDatabase('/nonexistent');
-  (db as any).dbPath = '/fake';
-  (db as any)._transactions = [];
-  (db as any)._userCategories = [];
+  const db = new CopilotDatabase('/fake');
+  db._injectDataForTesting({ transactions: [] });
+  db._injectDataForTesting({ userCategories: [] });
   db._markLoadedForTesting();
   const liveDb = new LiveCopilotDatabase(client, db, {
     metaStore: new TransactionMetaStore({
@@ -448,11 +448,12 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
   // live layer there is no window at all, and an ordinary row must still write.
   test('an amount edit without a live layer still writes', async () => {
     const client = createMockGraphQLClient(MUTATIONS);
-    const db = new CopilotDatabase('/nonexistent');
-    (db as any).dbPath = '/fake';
-    (db as any)._transactions = [
-      { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
-    ];
+    const db = new CopilotDatabase('/fake');
+    db._injectDataForTesting({
+      transactions: [
+        { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
+      ] as Transaction[],
+    });
     db._markLoadedForTesting();
     const tools = new CopilotMoneyTools(db, client);
     await tools.updateTransaction({ transaction_id: PLAIN_ID, ...routing, amount: 30 });
@@ -463,12 +464,13 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
     // getAllTransactions copies the array, so calling it per id would defeat
     // the per-array split index (one rebuild per id).
     const client = createMockGraphQLClient(MUTATIONS);
-    const db = new CopilotDatabase('/nonexistent');
-    (db as any).dbPath = '/fake';
-    (db as any)._transactions = [
-      { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
-      { transaction_id: CHILD_1, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 10 },
-    ];
+    const db = new CopilotDatabase('/fake');
+    db._injectDataForTesting({
+      transactions: [
+        { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
+        { transaction_id: CHILD_1, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 10 },
+      ] as Transaction[],
+    });
     // Load-bearing: a loaded, fresh cache makes the split check take the
     // readable branch, the one that used to copy. Without this marker the
     // decode fails on '/fake', the check takes the peek-only branch, and the
@@ -487,11 +489,12 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
 
   test('a cache-only split parent (local children) is still refused', async () => {
     const client = createMockGraphQLClient(MUTATIONS);
-    const db = new CopilotDatabase('/nonexistent');
-    (db as any).dbPath = '/fake';
-    (db as any)._transactions = [
-      { transaction_id: CHILD_1, parent_transaction_id: PARENT_ID, amount: 60 },
-    ];
+    const db = new CopilotDatabase('/fake');
+    db._injectDataForTesting({
+      transactions: [
+        { transaction_id: CHILD_1, parent_transaction_id: PARENT_ID, amount: 60 },
+      ] as Transaction[],
+    });
     db._markLoadedForTesting();
     const tools = new CopilotMoneyTools(db, client);
     await expect(
@@ -554,17 +557,20 @@ describe('the local split index stays current (#836)', () => {
     // Two local rows for one id, the first without a parent: the parent named
     // by the second still makes the id a split child (cache-only mode).
     const client = createMockGraphQLClient(MUTATIONS);
-    const db = new CopilotDatabase('/nonexistent');
-    (db as any).dbPath = '/fake';
-    (db as any)._transactions = [
-      { transaction_id: CHILD_2, amount: 40 },
-      { transaction_id: CHILD_2, parent_transaction_id: PARENT_ID, amount: 40 },
-    ];
+    const db = new CopilotDatabase('/fake');
+    db._injectDataForTesting({
+      transactions: [
+        { transaction_id: CHILD_2, amount: 40 },
+        { transaction_id: CHILD_2, parent_transaction_id: PARENT_ID, amount: 40 },
+      ] as Transaction[],
+    });
     // split_transaction validates its children's categories first (#846).
-    (db as any)._userCategories = [
-      { category_id: CAT_A, name: 'A' },
-      { category_id: CAT_B, name: 'B' },
-    ];
+    db._injectDataForTesting({
+      userCategories: [
+        { category_id: CAT_A, name: 'A' },
+        { category_id: CAT_B, name: 'B' },
+      ],
+    });
     db._markLoadedForTesting();
     const tools = new CopilotMoneyTools(db, client);
     await expect(

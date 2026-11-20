@@ -3,7 +3,7 @@ import {
   groupByOperation,
   renderOperationMarkdown,
   inferVariableSchema,
-} from '../../../scripts/graphql-capture/generate-docs';
+} from '../../../scripts/graphql-capture/generate-docs.js';
 
 const entry = (
   op: string,

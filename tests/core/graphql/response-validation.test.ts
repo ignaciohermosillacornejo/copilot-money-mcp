@@ -11,7 +11,7 @@
  * - new/unknown server fields pass through silently (loose schemas).
  */
 
-import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
 import {
   MUTATION_RESPONSE_SCHEMAS,
   validateMutationResponse,
@@ -138,7 +138,7 @@ const VALID_RESPONSES: Record<string, unknown> = {
 };
 
 describe('validateMutationResponse', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   beforeEach(() => {
     __resetResponseDriftState();

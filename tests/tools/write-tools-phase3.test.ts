@@ -15,14 +15,13 @@ describe('updateTag', () => {
   let mockDb: CopilotDatabase;
 
   beforeEach(() => {
-    mockDb = new CopilotDatabase('/nonexistent');
-    (mockDb as any).dbPath = '/fake';
-    (mockDb as any)._allCollectionsLoaded = true;
-    (mockDb as any)._cacheLoadedAt = Date.now();
-    (mockDb as any)._tags = [
-      { tag_id: 'vacation', name: 'Vacation' },
-      { tag_id: 'business', name: 'Business' },
-    ];
+    mockDb = new CopilotDatabase('/fake');
+    mockDb._injectDataForTesting({
+      tags: [
+        { tag_id: 'vacation', name: 'Vacation' },
+        { tag_id: 'business', name: 'Business' },
+      ],
+    });
   });
 
   test('dispatches EditTag with name', async () => {
@@ -89,21 +88,20 @@ describe('createRecurring', () => {
   let mockDb: CopilotDatabase;
 
   beforeEach(() => {
-    mockDb = new CopilotDatabase('/nonexistent');
-    (mockDb as any).dbPath = '/fake';
-    (mockDb as any)._allCollectionsLoaded = true;
-    (mockDb as any)._cacheLoadedAt = Date.now();
-    (mockDb as any)._recurring = [];
-    (mockDb as any)._transactions = [
-      {
-        transaction_id: 'txn-abc',
-        amount: 15.99,
-        date: '2024-06-15',
-        name: 'Netflix',
-        account_id: 'acc-1',
-        item_id: 'item-1',
-      },
-    ];
+    mockDb = new CopilotDatabase('/fake');
+    mockDb._injectDataForTesting({
+      recurring: [],
+      transactions: [
+        {
+          transaction_id: 'txn-abc',
+          amount: 15.99,
+          date: '2024-06-15',
+          name: 'Netflix',
+          account_id: 'acc-1',
+          item_id: 'item-1',
+        },
+      ],
+    });
   });
 
   test('dispatches CreateRecurring with transaction/frequency shape', async () => {
@@ -187,7 +185,9 @@ describe('createRecurring', () => {
     expect(result.frequency).toBe('ANNUALLY');
     expect(client._calls).toHaveLength(1);
     expect(client._calls[0].op).toBe('CreateRecurring');
-    expect((client._calls[0].variables as any).input.frequency).toBe('ANNUALLY');
+    expect((client._calls[0].variables as { input: { frequency: string } }).input.frequency).toBe(
+      'ANNUALLY'
+    );
   });
 
   test('throws when transaction is not found in local cache', async () => {
@@ -204,9 +204,11 @@ describe('createRecurring', () => {
     // txn-orphan lacks account_id/item_id and there is no liveDb, so
     // resolution finds nothing — the old "missing account_id or item_id"
     // message is retired in favor of the resolver's not-found contract.
-    (mockDb as any)._transactions = [
-      { transaction_id: 'txn-orphan', amount: 10, date: '2024-01-01', name: 'Orphan' },
-    ];
+    mockDb._injectDataForTesting({
+      transactions: [
+        { transaction_id: 'txn-orphan', amount: 10, date: '2024-01-01', name: 'Orphan' },
+      ],
+    });
 
     const client = createMockGraphQLClient({});
     tools = new CopilotMoneyTools(mockDb, client);
@@ -254,7 +256,7 @@ describe('createRecurring', () => {
       // 'txn-out' is nowhere in the local cache — without the bypass this is
       // a guaranteed "Transaction not found". The caller-supplied pair (from
       // a live read) routes the nested transaction ref directly.
-      (mockDb as any)._transactions = [];
+      mockDb._injectDataForTesting({ transactions: [] });
       const client = okClient();
       tools = new CopilotMoneyTools(mockDb, client);
 
@@ -289,7 +291,9 @@ describe('createRecurring', () => {
         frequency: 'MONTHLY',
       });
 
-      expect((client._calls[0].variables as any).input.transaction).toEqual({
+      expect(
+        (client._calls[0].variables as { input: { transaction: unknown } }).input.transaction
+      ).toEqual({
         accountId: 'acct9',
         itemId: 'item9',
         transactionId: 'txn-abc',

@@ -1164,7 +1164,7 @@ describe('dump-tool-modes.ts matches the server', () => {
     });
     const stdout = await new Response(proc.stdout).text();
     expect(await proc.exited).toBe(0);
-    const modes: Record<string, string[]> = JSON.parse(stdout);
+    const modes = JSON.parse(stdout) as Record<string, string[]>;
 
     const listed = (write: boolean, live: boolean): string[] =>
       new CopilotMoneyServer(
@@ -1201,7 +1201,7 @@ describe('registry coverage', () => {
     const stdout = await new Response(proc.stdout).text();
     expect(await proc.exited).toBe(0);
 
-    const names: string[] = JSON.parse(stdout);
+    const names = JSON.parse(stdout) as string[];
     const registry = ALL_TOOL_DEFS.map((def) => def.name);
 
     expect(names.sort()).toEqual([...registry].sort());

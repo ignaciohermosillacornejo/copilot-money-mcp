@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import { FirebaseAuth } from '../../../src/core/auth/firebase-auth.js';
 import type { TokenCandidates } from '../../../src/core/auth/browser-token.js';
+import { urlOf } from '../../helpers/fetch-input.js';
 
 // Mock token extractor: yields a single valid candidate, found where only
 // Copilot's own origin writes (`scoped`) — the shape of a logged-in user.
@@ -17,7 +18,7 @@ const originalFetch = globalThis.fetch;
 
 function mockFetch(response: object, status = 200) {
   globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
-    fetchCalls.push({ url: String(url), options: options ?? {} });
+    fetchCalls.push({ url: urlOf(url), options: options ?? {} });
     return Promise.resolve(
       new Response(JSON.stringify(response), {
         status,
@@ -34,7 +35,7 @@ function mockFetch(response: object, status = 200) {
 function mockFetchSequence(responses: [object, number][]) {
   let i = 0;
   globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
-    fetchCalls.push({ url: String(url), options: options ?? {} });
+    fetchCalls.push({ url: urlOf(url), options: options ?? {} });
     const [body, status] = responses[Math.min(i, responses.length - 1)];
     i += 1;
     return Promise.resolve(

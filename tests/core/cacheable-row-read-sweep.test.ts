@@ -22,7 +22,7 @@
  * turns into an accepted row that throws or goes missing here.
  */
 
-import { describe, test, expect, afterAll, beforeAll, spyOn } from 'bun:test';
+import { describe, test, expect, afterAll, beforeAll, spyOn, type Mock } from 'bun:test';
 import { mkdtempSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -173,7 +173,7 @@ afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
 // Hundreds of refusals run through warnMutationRowRefused here. Silence them,
 // and reset the module-level dedupe on both sides, so this file neither
 // floods stderr nor seeds warning keys for whichever file runs next.
-let warnSpy: ReturnType<typeof spyOn> | undefined;
+let warnSpy: Mock<typeof console.warn> | undefined;
 beforeAll(() => {
   __resetReadShapeWarnDedupe();
   warnSpy = spyOn(console, 'warn').mockImplementation(() => {});

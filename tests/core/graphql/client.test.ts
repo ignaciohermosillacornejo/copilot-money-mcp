@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach, mock, spyOn } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, mock, spyOn, type Mock } from 'bun:test';
 import {
   GraphQLClient,
   GraphQLError,
@@ -14,6 +14,7 @@ import {
   __resetReadResponseDriftState,
 } from '../../../src/core/graphql/read-response-validation.js';
 import type { FirebaseAuth } from '../../../src/core/auth/firebase-auth.js';
+import { urlOf } from '../../helpers/fetch-input.js';
 
 let fetchCalls: { url: string; options: RequestInit }[] = [];
 const originalFetch = globalThis.fetch;
@@ -21,7 +22,7 @@ const originalFetch = globalThis.fetch;
 function mockFetch(responseBody: unknown, status = 200, throwErr?: Error) {
   fetchCalls = [];
   globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
-    fetchCalls.push({ url: String(url), options: options ?? {} });
+    fetchCalls.push({ url: urlOf(url), options: options ?? {} });
     if (throwErr) return Promise.reject(throwErr);
     return Promise.resolve(
       new Response(JSON.stringify(responseBody), {
@@ -61,7 +62,7 @@ describe('GraphQLClient', () => {
     mockFetch({ data: { ok: true } });
     const client = new GraphQLClient(createMockAuth());
     await client.mutate('TestOp', 'mutation TestOp { ok }', { id: 'x' });
-    const body = JSON.parse(fetchCalls[0].options.body as string);
+    const body: unknown = JSON.parse(fetchCalls[0].options.body as string);
     expect(Array.isArray(body)).toBe(false);
     expect(body).toEqual({
       operationName: 'TestOp',
@@ -321,7 +322,7 @@ describe('GraphQLClient', () => {
     fetchCalls = [];
     const originalFetch2 = globalThis.fetch;
     globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
-      fetchCalls.push({ url: String(url), options: options ?? {} });
+      fetchCalls.push({ url: urlOf(url), options: options ?? {} });
       return Promise.resolve(
         new Response('not-json-garbage', {
           status: 200,
@@ -398,7 +399,7 @@ function mockFetchSequence(steps: FetchStep[]) {
   fetchCalls = [];
   let i = 0;
   globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
-    fetchCalls.push({ url: String(url), options: options ?? {} });
+    fetchCalls.push({ url: urlOf(url), options: options ?? {} });
     const step = steps[Math.min(i, steps.length - 1)];
     i += 1;
     if ('throwErr' in step) return Promise.reject(step.throwErr);
@@ -527,7 +528,7 @@ describe('GraphQLClient — retry/backoff (#443)', () => {
     fetchCalls = [];
     let call = 0;
     globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
-      fetchCalls.push({ url: String(url), options: options ?? {} });
+      fetchCalls.push({ url: urlOf(url), options: options ?? {} });
       call += 1;
       if (call === 1) {
         // Hang until the timeout signal aborts us.
@@ -659,7 +660,7 @@ describe('GraphQLClient — retry/backoff (#443)', () => {
   test('mutation does NOT retry a timeout; flags writeMayHaveApplied', async () => {
     fetchCalls = [];
     globalThis.fetch = mock((url: string | URL | Request, options?: RequestInit) => {
-      fetchCalls.push({ url: String(url), options: options ?? {} });
+      fetchCalls.push({ url: urlOf(url), options: options ?? {} });
       return new Promise<Response>((_resolve, reject) => {
         options?.signal?.addEventListener('abort', () => reject(options.signal?.reason));
       });
@@ -763,7 +764,7 @@ describe('GraphQLClient — retry/backoff (#443)', () => {
 });
 
 describe('GraphQLClient — warn-mode response-shape validation (#437)', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   beforeEach(() => {
     __resetResponseDriftState();
@@ -828,7 +829,7 @@ describe('GraphQLClient — warn-mode response-shape validation (#437)', () => {
 });
 
 describe('GraphQLClient — warn-mode READ response-shape validation (#537)', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   beforeEach(() => {
     __resetReadResponseDriftState();

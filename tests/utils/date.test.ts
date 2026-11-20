@@ -50,7 +50,7 @@ function setMockDate(dateString: string) {
 
   // @ts-expect-error - Mocking global Date
   global.Date = class extends originalDate {
-    constructor(...args: any[]) {
+    constructor(...args: unknown[]) {
       if (args.length === 0) {
         super(mockDate.getTime());
       } else {

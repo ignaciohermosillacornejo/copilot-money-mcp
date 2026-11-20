@@ -21,9 +21,6 @@ import {
   buildTransactionSort,
   paginateTransactions,
   fetchTransactionsPage,
-  type BuildFilterOptions,
-  type TransactionFilterInput,
-  type TransactionSortInput,
   type TransactionNode,
   type TransactionsPage,
 } from '../../../../src/core/graphql/queries/transactions.js';

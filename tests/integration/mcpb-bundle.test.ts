@@ -147,7 +147,9 @@ describe('mcpb bundle', () => {
     }
     extractDir = mkdtempSync(join(tmpdir(), 'copilot-mcpb-test-'));
     execSync(`unzip -q ${JSON.stringify(bundlePath)} -d ${JSON.stringify(extractDir)}`);
-    bundledVersion = JSON.parse(readFileSync(join(extractDir, 'package.json'), 'utf8')).version;
+    bundledVersion = (
+      JSON.parse(readFileSync(join(extractDir, 'package.json'), 'utf8')) as { version: string }
+    ).version;
 
     // Synthetic LevelDB for the tools/call round-trip test. Built here (in the
     // test process) and handed to the spawned bundle via --db-path.

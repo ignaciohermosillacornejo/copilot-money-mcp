@@ -7,7 +7,7 @@ import {
   getRecurringDisplayName,
   KNOWN_FREQUENCIES,
   type Recurring,
-} from '../../src/models/recurring';
+} from '../../src/models/recurring.js';
 
 describe('recurring.ts', () => {
   describe('getRecurringDisplayName', () => {

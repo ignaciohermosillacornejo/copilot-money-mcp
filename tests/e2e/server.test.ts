@@ -387,7 +387,7 @@ describe('CopilotMoneyServer E2E', () => {
       for (const { func } of toolsToTest) {
         const result = await func();
         const jsonStr = JSON.stringify(result);
-        const deserialized = JSON.parse(jsonStr);
+        const deserialized: unknown = JSON.parse(jsonStr);
         expect(deserialized).toEqual(result);
       }
     });

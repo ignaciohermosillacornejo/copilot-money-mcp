@@ -20,6 +20,7 @@
 import { describe, test, expect } from 'bun:test';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { CopilotDatabase } from '../../src/core/database.js';
+import type { Transaction } from '../../src/models/index.js';
 import {
   createMockGraphQLClient,
   bulkEditEcho,
@@ -29,28 +30,27 @@ import { GraphQLError } from '../../src/core/graphql/client.js';
 import { bulkEditTransactions } from '../../src/core/graphql/transactions.js';
 
 function makeTools(txnIds: string[], responses?: Parameters<typeof createMockGraphQLClient>[0]) {
-  const db = new CopilotDatabase('/nonexistent');
-  (db as any).dbPath = '/fake';
-  (db as any)._transactions = txnIds.map((id) => ({
-    transaction_id: id,
-    amount: 50,
-    date: '2024-01-15',
-    name: `Txn ${id}`,
-    category_id: 'food',
-    item_id: 'item1',
-    account_id: 'acct1',
-    tag_ids: [],
-  }));
-  (db as any)._userCategories = [
-    { category_id: 'food', name: 'Food' },
-    { category_id: 'groceries', name: 'Groceries' },
-  ];
-  (db as any)._tags = [
-    { tag_id: 'tag1', name: 'Trip' },
-    { tag_id: 'tag2', name: 'Work' },
-  ];
-  (db as any)._allCollectionsLoaded = true;
-  (db as any)._cacheLoadedAt = Date.now();
+  const db = new CopilotDatabase('/fake');
+  db._injectDataForTesting({
+    transactions: txnIds.map((id) => ({
+      transaction_id: id,
+      amount: 50,
+      date: '2024-01-15',
+      name: `Txn ${id}`,
+      category_id: 'food',
+      item_id: 'item1',
+      account_id: 'acct1',
+      tag_ids: [],
+    })),
+    userCategories: [
+      { category_id: 'food', name: 'Food' },
+      { category_id: 'groceries', name: 'Groceries' },
+    ],
+    tags: [
+      { tag_id: 'tag1', name: 'Trip' },
+      { tag_id: 'tag2', name: 'Work' },
+    ],
+  });
 
   const client = createMockGraphQLClient(responses ?? { BulkEditTransactions: bulkEditEcho });
   const tools = new CopilotMoneyTools(db, client);
@@ -246,7 +246,9 @@ describe('bulk_edit_transactions validates before writing', () => {
     // always going to reject.
     const { tools } = makeTools([]);
     let resolveCalls = 0;
-    (tools as any).resolveTransactionMeta = () => {
+    (
+      tools as unknown as { resolveTransactionMeta: () => Promise<unknown> }
+    ).resolveTransactionMeta = () => {
       resolveCalls++;
       return Promise.resolve({ meta: new Map(), liveWindowMonths: 13 });
     };
@@ -329,8 +331,8 @@ describe('bulk_edit_transactions surfaces partial application', () => {
 describe('bulk_edit_transactions optimistic cache patch', () => {
   test('patches confirmed rows with category and reviewed', async () => {
     const { tools, db } = makeTools(['a', 'b']);
-    const patched: Array<[string, any]> = [];
-    (db as any).patchCachedTransaction = (id: string, patch: any) => patched.push([id, patch]);
+    const patched: Array<[string, Partial<Transaction>]> = [];
+    db.patchCachedTransaction = (id, patch) => patched.push([id, patch]) > 0;
 
     await tools.bulkEditTransactions({
       transaction_ids: ['a', 'b'],
@@ -344,8 +346,8 @@ describe('bulk_edit_transactions optimistic cache patch', () => {
 
   test('INCOME mirrors the server-side category clear', async () => {
     const { tools, db } = makeTools(['a']);
-    const patched: Array<[string, any]> = [];
-    (db as any).patchCachedTransaction = (id: string, patch: any) => patched.push([id, patch]);
+    const patched: Array<[string, Partial<Transaction>]> = [];
+    db.patchCachedTransaction = (id, patch) => patched.push([id, patch]) > 0;
 
     await tools.bulkEditTransactions({ transaction_ids: ['a'], type: 'INCOME' });
 
@@ -358,8 +360,8 @@ describe('bulk_edit_transactions optimistic cache patch', () => {
     // comes back in updated[].tags, so the cache copies that rather than
     // guessing at the union.
     const { tools, db } = makeTools(['a']);
-    const patched: Array<[string, any]> = [];
-    (db as any).patchCachedTransaction = (id: string, patch: any) => patched.push([id, patch]);
+    const patched: Array<[string, Partial<Transaction>]> = [];
+    db.patchCachedTransaction = (id, patch) => patched.push([id, patch]) > 0;
 
     await tools.bulkEditTransactions({ transaction_ids: ['a'], add_tag_ids: ['tag1'] });
 

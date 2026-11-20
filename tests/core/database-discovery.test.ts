@@ -28,6 +28,7 @@ import {
 import { MAX_INTERRUPT_ATTEMPTS } from '../../src/core/fs-retry.js';
 import { CopilotMoneyServer } from '../../src/server.js';
 import { createTestDatabase } from '../../src/core/leveldb-reader.js';
+import { textOf } from '../helpers/tool-result.js';
 
 const FIRESTORE =
   'Library/Containers/com.copilot.production/Data/Library/Application Support/firestore/__FIRAPP_DEFAULT';
@@ -212,7 +213,7 @@ describe('availability: "could not look" survives to the server dispatch gate', 
     const server = new CopilotMoneyServer(mainPath);
     interruptReaddir(Number.POSITIVE_INFINITY);
     const response = await server.handleCallTool('get_accounts', {});
-    const text = response.content[0]?.text ?? '';
+    const text = textOf(response);
     expect(response.isError).toBe(true);
     expect(text).toContain('EINTR');
     expect(text).not.toContain('ensure Copilot Money is installed');
@@ -233,14 +234,14 @@ describe('availability: "could not look" survives to the server dispatch gate', 
     const internals = db as unknown as { dbPath?: string; discoveryError?: Error };
     internals.dbPath = undefined;
     internals.discoveryError = eintr('/synthetic/main');
-    const text = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    const text = textOf(await server.handleCallTool('get_accounts', {}));
     expect(text).toContain('EINTR');
     expect(text).not.toContain('ensure Copilot Money is installed');
   });
 
   test('control: genuine absence still gets the install advice', async () => {
     const server = new CopilotMoneyServer(path.join(home, 'nope'));
-    const text = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    const text = textOf(await server.handleCallTool('get_accounts', {}));
     expect(text).toContain('ensure Copilot Money is installed');
   });
 });
@@ -282,11 +283,11 @@ describe('a retryable discovery failure is looked at again, not served from memo
     const server = await serverWithFailedDiscovery(eintr('/synthetic/main'));
     // The first re-look is itself interrupted past the bound: still unavailable.
     interruptReaddir(MAX_INTERRUPT_ATTEMPTS);
-    const first = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    const first = textOf(await server.handleCallTool('get_accounts', {}));
     expect(first).toContain('EINTR');
     // The interrupt has cleared. Retrying — what the message said to do — works.
     const second = await server.handleCallTool('get_accounts', {});
-    expect(second.content[0]?.text ?? '').not.toContain('Database not available');
+    expect(textOf(second)).not.toContain('Database not available');
   });
 
   test('getDbPath() re-looks too, so reading the path first cannot miss a cleared interrupt', async () => {
@@ -305,7 +306,7 @@ describe('a retryable discovery failure is looked at again, not served from memo
     // retry forever, and re-walk the container on every call.
     const server = await serverWithFailedDiscovery(eintr('/synthetic/main'));
     fs.rmSync(path.join(home, 'Library'), { recursive: true, force: true });
-    const first = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    const first = textOf(await server.handleCallTool('get_accounts', {}));
     expect(first).toContain('ensure Copilot Money is installed');
     expect(first).not.toContain('EINTR');
 
@@ -323,7 +324,7 @@ describe('a retryable discovery failure is looked at again, not served from memo
   test('a persistent error is served from memory, not re-walked on every call', async () => {
     const server = await serverWithFailedDiscovery(eacces('/synthetic/main'));
     const delivered = interruptReaddir(Number.POSITIVE_INFINITY);
-    const text = (await server.handleCallTool('get_accounts', {})).content[0]?.text ?? '';
+    const text = textOf(await server.handleCallTool('get_accounts', {}));
     // Its message says to fix permissions; re-walking would not change that.
     expect(text).toContain('EACCES');
     expect(delivered()).toBe(0);

@@ -9,7 +9,7 @@
  * doc in a collection.
  */
 
-import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
 import { z } from 'zod';
 import {
   validateOrWarn,
@@ -27,7 +27,7 @@ const Schema = z.object({
 });
 
 describe('validateOrWarn', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   beforeEach(() => {
     __resetWarnedKeys();
@@ -161,7 +161,7 @@ describe('validateOrWarn', () => {
 });
 
 describe('warnUnreadFields', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   // Small factory for FirestoreValue-shaped test fixtures — we only care about
   // the .keys() of the Map, not the values, so `type: 'string'` is fine.
@@ -354,7 +354,7 @@ describe('warnUnreadFields', () => {
 // drops are counted per document (NOT deduped) so the counters reflect the
 // true number of missing documents.
 describe('decode stats counters', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   function fakeFields(keys: string[]): Map<string, FirestoreValue> {
     return new Map(keys.map((k) => [k, { type: 'string', value: '' } as FirestoreValue]));
@@ -481,7 +481,7 @@ describe('decode stats counters', () => {
  * fails.
  */
 describe('validateOrWarn — non-finite repair', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   const HoldingsSchema = z.object({
     account_id: z.string(),
@@ -661,7 +661,7 @@ describe('validateOrWarn — non-finite repair', () => {
  * (#902 review); other non-numeric dynamic keys still key separately.
  */
 describe('validateOrWarn — warn dedupe collapses positional paths', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   const HoldingsSchema = z.object({
     account_id: z.string(),
@@ -772,7 +772,7 @@ describe('validateOrWarn — warn dedupe collapses positional paths', () => {
  * `tests/core/nested-field-sweep.test.ts`; these pin the mechanism.
  */
 describe('validateOrWarn — nested value repair (#902)', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   const Holding = z.object({
     security_id: z.string(),

@@ -91,8 +91,10 @@ describe('editRecurring', () => {
         },
       },
     });
-    expect(typeof call[2].input.rule.minAmount).toBe('number');
-    expect(typeof call[2].input.rule.maxAmount).toBe('number');
+    const { rule } = (call[2] as { input: { rule: { minAmount: unknown; maxAmount: unknown } } })
+      .input;
+    expect(typeof rule.minAmount).toBe('number');
+    expect(typeof rule.maxAmount).toBe('number');
   });
 
   test('changed.rule echoes the caller input as strings (not the wire Float values)', async () => {

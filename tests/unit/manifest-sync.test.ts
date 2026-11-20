@@ -26,7 +26,7 @@ interface Manifest {
 describe('Manifest Tool Sync', () => {
   const actualSchemas = createToolSchemas();
   const manifestPath = join(import.meta.dir, '../../manifest.json');
-  const manifest: Manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Manifest;
 
   test('manifest.json tool count matches actual tool count', () => {
     const actualToolNames = actualSchemas.map((s) => s.name).sort();

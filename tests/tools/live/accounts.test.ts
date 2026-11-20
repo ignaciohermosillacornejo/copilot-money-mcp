@@ -303,8 +303,8 @@ describe('get_accounts_live fields param — parity with get_accounts', () => {
   // the shared constant, so forking either side back to a private copy that
   // then drifts fails here. Same pattern as the transactions parity suite in
   // tests/tools/live/transactions.test.ts.
-  const cacheFragment = getAccountsTool.schema.inputSchema.properties?.fields;
-  const liveFragment = getAccountsLiveTool.schema.inputSchema.properties?.fields;
+  const cacheFragment: unknown = getAccountsTool.schema.inputSchema.properties?.fields;
+  const liveFragment: unknown = getAccountsLiveTool.schema.inputSchema.properties?.fields;
 
   test('both tools expose a fields param', () => {
     expect(cacheFragment).toBeDefined();

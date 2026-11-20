@@ -11,7 +11,6 @@ import {
   decodeRecurring,
   decodeBudgets,
   decodeGoals,
-  decodeGoalHistory,
   decodeCategories,
   decodeAllCollections,
 } from '../../src/core/decoder.js';
@@ -25,13 +24,11 @@ import {
   createCategoryDb,
   createEmptyDb,
   createTestDb,
-  cleanupTestDb,
   type TestTransaction,
   type TestAccount,
   type TestRecurring,
   type TestBudget,
   type TestGoal,
-  type TestGoalHistory,
   type TestCategory,
 } from '../helpers/test-db.js';
 import path from 'node:path';
