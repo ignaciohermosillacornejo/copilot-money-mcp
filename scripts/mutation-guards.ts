@@ -422,7 +422,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'remove',
       find: wholeLines(
         '      // mutation-guard: a failed transaction write drops its live months',
-        '      () => this.liveDb?.invalidateLiveTransactionMonths(ids),'
+        "      ['live transaction months', () => this.liveDb?.invalidateLiveTransactionMonths(ids)],"
       ),
     },
     expectFailingTests: ['the mutation throws, and the cached month is refetched'],
@@ -439,8 +439,8 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     mutation: {
       kind: 'remove',
       find: wholeLines(
-        '          // mutation-guard: a possibly-applied create_recurring drops its seed month',
-        '          this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);'
+        '            // mutation-guard: a possibly-applied create_recurring drops its seed month',
+        '            this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);'
       ),
     },
     expectFailingTests: ["a create_recurring that may have applied drops the seed row's month too"],
@@ -457,11 +457,11 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     mutation: {
       kind: 'replace',
       find:
-        '        // mutation-guard: create_recurring drops its seed month only when it may have applied\n' +
-        '        if (e instanceof GraphQLError && e.writeMayHaveApplied) {',
+        '          // mutation-guard: create_recurring drops its seed month only when it may have applied\n' +
+        '          if (e instanceof GraphQLError && e.writeMayHaveApplied) {',
       with:
-        '        // mutation-guard: create_recurring drops its seed month only when it may have applied\n' +
-        '        if (e instanceof Error) {',
+        '          // mutation-guard: create_recurring drops its seed month only when it may have applied\n' +
+        '          if (e instanceof Error) {',
     },
     expectFailingTests: ["a create_recurring that cannot have written keeps the seed row's month"],
     expectFails: 'tests/tools/live-write-coherence.test.ts',
@@ -495,7 +495,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'remove',
       find: wholeLines(
         '        // mutation-guard: a possibly-applied recurring write drops its derived snapshots',
-        '        () => live.invalidateRecurringDerivedSnapshots(),'
+        "        ['recurring-derived snapshots', () => live.invalidateRecurringDerivedSnapshots()],"
       ),
     },
     expectFailingTests: ['a writeApplied error drops the snapshot'],
@@ -513,7 +513,7 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
       kind: 'remove',
       find: wholeLines(
         '        // mutation-guard: a possibly-applied category write drops its derived snapshots',
-        '        () => live.invalidateCategoryDerivedSnapshots(),'
+        "        ['category-derived snapshots', () => live.invalidateCategoryDerivedSnapshots()],"
       ),
     },
     expectFailingTests: ['a writeApplied error drops the snapshot'],
@@ -675,29 +675,24 @@ export const MUTATION_GUARDS: readonly MutationGuard[] = [
     expectFails: 'tests/core/cacheable-row-read-sweep.test.ts',
   },
   {
-    name: "a cached transaction's date is a calendar day",
-    file: 'src/models/transaction.ts',
+    name: 'a cached date field is a calendar day',
+    file: 'src/models/calendar-date.ts',
     invariant:
-      'Cache-mode month-range reads compare dates as strings, so a decoded 2025-02-30 row is ' +
-      'invisible to every read of the month it claims, a silent short read. The Transaction ' +
-      'model must require a real calendar day, as the live row schema does, so such a row is ' +
-      'a counted schema drop that decode_health reports (#917, #920).',
+      'Cache-mode ranges and buckets compare YYYY-MM-DD strings, so a decoded 2025-02-30 ' +
+      'sorts past the real end of its month and silently falls out of every range that should ' +
+      "hold it. Every model's date field must require a real calendar day, as the live row " +
+      'schema does, so such a value is a counted schema drop that decode_health reports ' +
+      '(#917, #920).',
     mutation: {
       kind: 'replace',
       find:
-        "    // mutation-guard: a cached transaction's date is a calendar day\n" +
-        '    date: z\n' +
-        '      .string()\n' +
-        "      .regex(/^\\d{4}-\\d{2}-\\d{2}$/, 'Date must be in YYYY-MM-DD format')\n" +
-        "      .refine(isCalendarDate, 'Date must be a day that exists on the calendar'),",
+        '      // mutation-guard: a cached date field is a calendar day\n' +
+        '      .refine(isCalendarDate, CALENDAR_DATE_MESSAGE)',
       with:
-        "    // mutation-guard: a cached transaction's date is a calendar day\n" +
-        '    date: z\n' +
-        '      .string()\n' +
-        "      .regex(/^\\d{4}-\\d{2}-\\d{2}$/, 'Date must be in YYYY-MM-DD format')\n" +
+        '      // mutation-guard: a cached date field is a calendar day\n' +
         // Back to the pattern-only check (#920), keeping isCalendarDate
         // referenced so the mutated file stays type-valid.
-        "      .refine((d) => d.length > 0 || isCalendarDate(d), 'Date must be a day that exists on the calendar'),",
+        '      .refine((d) => d.length > 0 || isCalendarDate(d), CALENDAR_DATE_MESSAGE)',
     },
     expectFailingTests: ['counts a well-formed but impossible date as dropped'],
     expectFails: 'tests/core/decode-stats.test.ts',

@@ -12,11 +12,7 @@
  */
 
 import { z } from 'zod';
-
-/**
- * Date format regex for YYYY-MM-DD validation.
- */
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+import { calendarDateField } from './calendar-date.js';
 
 /**
  * Month format regex for YYYY-MM validation.
@@ -31,7 +27,7 @@ const MONTH_REGEX = /^\d{4}-\d{2}$/;
 export const DailySnapshotSchema = z
   .object({
     amount: z.number().optional(), // Amount at this point in time
-    date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
+    date: calendarDateField().optional(),
     timestamp: z.number().optional(), // Unix timestamp
   })
   .passthrough();
@@ -44,7 +40,7 @@ export type DailySnapshot = z.infer<typeof DailySnapshotSchema>;
 export const GoalContributionSchema = z
   .object({
     amount: z.number(), // Positive for deposits, negative for withdrawals
-    date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
+    date: calendarDateField().optional(),
     transaction_id: z.string().optional(),
     description: z.string().optional(),
     type: z.string().optional(), // "deposit", "withdrawal", "transfer", etc.
@@ -78,7 +74,7 @@ export const GoalHistorySchema = z
 
     // Metadata
     last_updated: z.string().optional(), // Last update timestamp
-    created_date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
+    created_date: calendarDateField().optional(),
   })
   .passthrough(); // Allow additional fields we haven't discovered yet
 

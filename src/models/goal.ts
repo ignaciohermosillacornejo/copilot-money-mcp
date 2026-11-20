@@ -6,11 +6,7 @@
  */
 
 import { z } from 'zod';
-
-/**
- * Date format regex for YYYY-MM-DD validation.
- */
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+import { calendarDateField } from './calendar-date.js';
 
 /**
  * Savings configuration nested object schema.
@@ -22,7 +18,7 @@ const SavingsConfigSchema = z
     target_amount: z.number().optional(),
     tracking_type: z.string().optional(), // "monthly_contribution", etc.
     tracking_type_monthly_contribution: z.number().optional(),
-    start_date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
+    start_date: calendarDateField().optional(),
     modified_start_date: z.boolean().optional(),
     inflates_budget: z.boolean().optional(),
     is_ongoing: z.boolean().optional(),
@@ -45,7 +41,7 @@ export const GoalSchema = z
     name: z.string().optional(),
     recommendation_id: z.string().optional(), // slug form like "emergency-fund"
     emoji: z.string().optional(),
-    created_date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
+    created_date: calendarDateField().optional(),
 
     // Savings configuration (nested object)
     savings: SavingsConfigSchema.optional(),

@@ -5,7 +5,7 @@
  */
 
 import { z } from 'zod';
-import { isCalendarDate } from '../utils/date.js';
+import { calendarDateField } from './calendar-date.js';
 
 /**
  * Transaction schema with validation.
@@ -23,16 +23,8 @@ export const TransactionSchema = z
     amount: z.number().refine((val) => Math.abs(val) <= 10_000_000, {
       message: 'Amount exceeds maximum allowed value',
     }),
-    // A real calendar day, not only the pattern: every month-range read
-    // compares dates as strings, so a 2025-02-30 row would be invisible to
-    // any read of the month it claims, a silent short read. Rejected here it
-    // is a counted schema drop that decode_health reports instead. The same
-    // definition the live row schema uses (#917, #920).
-    // mutation-guard: a cached transaction's date is a calendar day
-    date: z
-      .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be in YYYY-MM-DD format')
-      .refine(isCalendarDate, 'Date must be a day that exists on the calendar'),
+    // A real calendar day, not only the pattern (#920): see calendarDateField.
+    date: calendarDateField('Date must be in YYYY-MM-DD format'),
 
     // Merchant/name fields
     name: z.string().optional(),

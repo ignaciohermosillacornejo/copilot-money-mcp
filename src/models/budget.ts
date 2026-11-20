@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { calendarDateField } from './calendar-date.js';
 
 /**
  * Known period values for budgets.
@@ -14,11 +15,6 @@ import { z } from 'zod';
 export const KNOWN_PERIODS = ['monthly', 'yearly', 'weekly', 'daily'] as const;
 
 export type KnownPeriod = (typeof KNOWN_PERIODS)[number];
-
-/**
- * Date format regex for YYYY-MM-DD validation.
- */
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Budget schema with validation.
@@ -39,8 +35,8 @@ export const BudgetSchema = z
     category_id: z.string().optional(),
 
     // Date range
-    start_date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
-    end_date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
+    start_date: calendarDateField().optional(),
+    end_date: calendarDateField().optional(),
 
     // Status
     is_active: z.boolean().optional(),

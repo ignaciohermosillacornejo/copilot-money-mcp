@@ -6,6 +6,7 @@
  */
 
 import { z } from 'zod';
+import { calendarDateField } from './calendar-date.js';
 
 /**
  * Known frequency values for recurring transactions.
@@ -32,11 +33,6 @@ export const RECURRING_STATES = ['active', 'paused', 'archived'] as const;
 export type RecurringState = (typeof RECURRING_STATES)[number];
 
 /**
- * Date format regex for YYYY-MM-DD validation.
- */
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
  * Recurring transaction schema with validation.
  *
  * This represents Copilot's native subscription tracking data,
@@ -57,8 +53,8 @@ export const RecurringSchema = z
 
     // Frequency and schedule
     frequency: z.string().optional(), // Accept any string since Copilot uses various values
-    next_date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
-    last_date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
+    next_date: calendarDateField().optional(),
+    last_date: calendarDateField().optional(),
     days_filter: z.number().optional(), // Day of month filter
 
     // References
@@ -85,7 +81,7 @@ export const RecurringSchema = z
     skip_filter_update: z.boolean().optional(),
     identification_method: z.string().optional(),
     _origin: z.string().optional(),
-    latest_date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(),
+    latest_date: calendarDateField().optional(),
   })
   .passthrough();
 

@@ -1602,7 +1602,10 @@ export class CopilotDatabase {
    * Build a map of category ID to category name from user-defined categories.
    *
    * This map can be used for efficient category name lookups.
-   * The map is cached after the first call.
+   * The map is cached after the first call, and returned live on purpose,
+   * unlike getExcludedCategoryIds' copy: it is dropped on a cache reload or a
+   * category write, and a caller holding its own copy is what kept serving
+   * old names (#909 review). Treat it as read-only.
    *
    * @returns Map from category_id to category name
    */
