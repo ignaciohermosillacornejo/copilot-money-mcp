@@ -1251,9 +1251,12 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       '`isVisibleAccount` against live `isUserHidden`/`isUserClosed` per account id on every ' +
       'run, counts merged documents, and FAILs naming this premise if a merged account the ' +
       'cache hides is listed open by live. Its PASS line says when no merged document was ' +
-      'present, which is every run so far. TO VERIFY: one run of that smoke on a cache that ' +
-      'holds a merged account, checked against the app; then this becomes verified-once, ' +
-      'and gated once a merged account stays in a cache the weekly check reads.',
+      'present, which is every run so far. TO VERIFY: one run of that smoke with ' +
+      '`mergedCompared > 0`, i.e. a merged account that live actually RETURNED and ' +
+      'classified, checked against the app. A merged document live omits only agrees by ' +
+      'absence and does not count; the PASS line names the two separately. Then this ' +
+      'becomes verified-once, and gated once such an account stays in a cache the weekly ' +
+      'check reads.',
   },
   gatedQueryResponseShape('accounts'),
   // Singular Account: generated document exists but has no hand-written

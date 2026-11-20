@@ -91,7 +91,9 @@ describe('compareAccountVisibility', () => {
     );
     // Not compared: live never ruled on it.
     expect(parity).toEqual({ ...ZERO, compared: 1, cacheOnlyHidden: 1, merged: 1 });
-    expect(classifyAccountVisibilityParity(parity).status).toBe('PASS');
+    // Agreement, but by absence: with no hidden account live returned, the
+    // hiding rules are unexercised (#928 review).
+    expect(classifyAccountVisibilityParity(parity).status).toBe('WARN');
   });
 
   test('an account the cache shows and live hides is the missing-marker shape', () => {
@@ -178,6 +180,42 @@ describe('classifyAccountVisibilityParity', () => {
     const { status, detail } = classifyAccountVisibilityParity({ ...ZERO, compared: 3 });
     expect(status).toBe('WARN');
     expect(detail).toContain('unexercised');
+  });
+
+  test('(a) all compared visible plus one cache-only hidden is WARN unexercised (#928 review)', () => {
+    const { status, detail } = classifyAccountVisibilityParity({
+      ...ZERO,
+      compared: 3,
+      cacheOnlyHidden: 1,
+    });
+    expect(status).toBe('WARN');
+    expect(detail).toContain('hiding rules are unexercised');
+    expect(detail).toContain('1 more the cache hides are absent from live');
+  });
+
+  test('(b) a hidden account both modes classified is a PASS (#928 review)', () => {
+    const { status, detail } = classifyAccountVisibilityParity({
+      ...ZERO,
+      compared: 3,
+      hiddenAgreed: 1,
+    });
+    expect(status).toBe('PASS');
+    expect(detail).toContain('including 1 that both modes hide');
+    expect(detail).not.toContain('absent from live, which agrees by absence');
+  });
+
+  test('(c) a PASS names hidden-in-both and absent-from-live separately (#928 review)', () => {
+    const { status, detail } = classifyAccountVisibilityParity({
+      ...ZERO,
+      compared: 3,
+      hiddenAgreed: 2,
+      cacheOnlyHidden: 1,
+    });
+    expect(status).toBe('PASS');
+    expect(detail).toContain('including 2 that both modes hide');
+    expect(detail).toContain('; 1 more the cache hides are absent from live');
+    // Not folded into one "neither mode shows" figure.
+    expect(detail).not.toContain('3 that');
   });
 
   test('a one-sided HIDDEN live row does not stop a PASS', () => {

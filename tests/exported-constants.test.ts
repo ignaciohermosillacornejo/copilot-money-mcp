@@ -434,9 +434,9 @@ const PINNED: Record<string, readonly string[]> = {
     'YELLOW1',
     'YELLOW2',
   ],
-  // src/conformance/ledger.ts
   // src/models/account.ts — the fields isVisibleAccount reads (#904)
   ACCOUNT_VISIBILITY_FIELDS: ['user_hidden', 'user_deleted', 'merged'],
+  // src/conformance/ledger.ts
   CONFORMANCE_CLASSES: ['gated', 'verified-once', 'unverified'],
   // src/models/item.ts
   CONNECTION_STATUSES: ['active', 'error', 'disconnected', 'pending'],
