@@ -27,7 +27,6 @@ import type { GetTopMoversLiveEntry } from './live/top-movers.js';
 import type { CategoryLiveRow } from './live/categories.js';
 import type { GetRecurringLiveRow } from './live/recurring.js';
 import type { GetAccountsLiveRow } from './live/accounts.js';
-import { ACCOUNT_VISIBILITY_FIELDS } from '../models/account.js';
 
 /**
  * The default field set for transaction rows: the v3 baseline that
@@ -306,9 +305,13 @@ export const DEFAULT_ACCOUNT_FIELDS = [
   'institution_name',
   'iso_currency_code',
   'item_id',
-  // The fields isVisibleAccount reads, from its own list so they cannot drift
-  // apart: `merged` joined in #904 and arrived here with it.
-  ...ACCOUNT_VISIBILITY_FIELDS,
+  // The fields isVisibleAccount reads (ACCOUNT_VISIBILITY_FIELDS). Spelled out
+  // rather than spread, so tests/exported-constants.test.ts can still pin this
+  // preset member by member (#635); tests/models/account-visibility.test.ts
+  // fails if the two lists part. `merged` joined in #904.
+  'user_hidden',
+  'user_deleted',
+  'merged',
 ] as const;
 
 export const DEFAULT_ACCOUNT_LIVE_FIELDS = [

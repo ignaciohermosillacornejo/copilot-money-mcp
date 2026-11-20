@@ -50,7 +50,7 @@ the rule (`get_accounts` rows and totals, `get_holdings`) inherited the gap.
 
 Root cause: `isVisibleAccount` hides an account whose document carries a `merged` map,
 whatever its `source`. The fields the rule reads are one exported list,
-`ACCOUNT_VISIBILITY_FIELDS`, and `get_accounts`' default field preset spreads it, so a row
+`ACCOUNT_VISIBILITY_FIELDS`, and `get_accounts`' default field preset carries every member (a test fails if it does not), so a row
 returned under `include_hidden: true` still shows the `merged` map that hid it. Also
 changed: `smoke:cache`'s raw re-derivation reads `merged` the way the decoder does, the
 decoder fixture uses the reported shape, and the tool descriptions say merged accounts are

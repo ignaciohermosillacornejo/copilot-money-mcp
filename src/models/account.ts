@@ -181,11 +181,12 @@ export type Account = z.infer<typeof AccountSchema>;
 /**
  * The cache-document fields {@link isVisibleAccount} reads, in one list so a
  * consumer that must carry them cannot drift from the rule. `get_accounts`'
- * default field preset spreads it: a caller who passes `include_hidden: true`
+ * default field preset carries every member: a caller who passes `include_hidden: true`
  * gets back exactly the rows these fields discriminate, and a row projected
  * without the field that hid it is shape-identical to a visible one (#904).
  * `tests/models/account-visibility.test.ts` requires each field here to hide
- * an otherwise-plain account on its own, and the rule to read nothing else.
+ * an otherwise-plain account on its own, the rule to read nothing else, and
+ * the preset to contain the list.
  */
 export const ACCOUNT_VISIBILITY_FIELDS = ['user_hidden', 'user_deleted', 'merged'] as const;
 
