@@ -787,7 +787,9 @@ export async function decodeCategories(dbPath: string): Promise<Category[]> {
  * count on every run, so a cache where it is populated again is loud.
  */
 export function isUserAccountCustomizationCollection(collection: string): boolean {
-  return collection.includes('users/') && collection.endsWith('/accounts');
+  // Adjacent segments, not includes() + endsWith(): the loose form also claimed
+  // any `.../accounts` with a `users/` segment anywhere above it (#915).
+  return /(?:^|\/)users\/[^/]+\/accounts$/.test(collection);
 }
 
 /**
@@ -2985,9 +2987,11 @@ export type CollectionRoute = (typeof COLLECTION_ROUTES)[number];
 export function routeCollection(collection: string): CollectionRoute | null {
   // User accounts (users/{user_id}/accounts) must be checked before regular accounts
   if (isUserAccountCustomizationCollection(collection)) return 'user_accounts';
-  if (collection.includes('/holdings_history/') && collection.endsWith('/history')) {
-    return 'holdings_history';
-  }
+  // Clauses that name more than one segment match those segments adjacently
+  // (`(^|/)parent/{id}/leaf$`), not as `includes()` + `endsWith()`: the loose
+  // form also claimed `.../holdings_history/{id}/<unknown>/{id}/history` and
+  // any other path with the parent somewhere above the leaf (#915).
+  if (/\/holdings_history\/[^/]+\/history$/.test(collection)) return 'holdings_history';
   // END-anchored, like every clause that names a subcollection: an
   // `includes()` test here also claimed any unknown subcollection beneath a
   // holdings_history document and built a meta row from it (#915).
@@ -3027,8 +3031,8 @@ export function routeCollection(collection: string): CollectionRoute | null {
   if (collectionMatches(collection, 'items')) return 'items';
   if (collectionMatches(collection, 'tags')) return 'tags';
   if (collectionMatches(collection, 'categories')) return 'categories';
-  if (collection.endsWith('/t') && collection.includes('changes/')) return 'transaction_changes';
-  if (collection.endsWith('/a') && collection.includes('changes/')) return 'account_changes';
+  if (/(?:^|\/)changes\/[^/]+\/t$/.test(collection)) return 'transaction_changes';
+  if (/(?:^|\/)changes\/[^/]+\/a$/.test(collection)) return 'account_changes';
   if (collectionMatches(collection, 'changes')) return 'changes';
   if (collectionMatches(collection, 'securities')) return 'securities';
   // Only the `users` collection itself. A `/^users\/[^/]+$/` alternative used to
@@ -3036,9 +3040,7 @@ export function routeCollection(collection: string): CollectionRoute | null {
   // collection, which is a 3-segment document path the key parser now always
   // rejects (#807, #915). The same holds for the `amazon/{id}` alternative below.
   if (collectionMatches(collection, 'users')) return 'users';
-  if (collectionMatches(collection, 'orders') && collection.includes('amazon/')) {
-    return 'amazon_orders';
-  }
+  if (/(?:^|\/)amazon\/[^/]+\/orders$/.test(collection)) return 'amazon_orders';
   if (collection === 'amazon') return 'amazon';
   if (collectionMatches(collection, 'subscriptions')) return 'subscriptions';
   if (collectionMatches(collection, 'invites')) return 'invites';

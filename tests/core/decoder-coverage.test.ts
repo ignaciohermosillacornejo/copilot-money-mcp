@@ -1858,6 +1858,17 @@ describe('decoder coverage', () => {
         ([, value]) => Array.isArray(value) && value.length > 0
       );
       expect(rows).toEqual([]);
+      // Rows are only half of it: "counted as decoded while dropped" was the
+      // financial_goal_sentinels half of #915, which no row count can see. No
+      // collection may record anything for this document.
+      expect(result.decodeStats).toEqual({});
+      // And the row check above sees every container: a result field holding
+      // rows in something other than an array would be skipped silently.
+      expect(
+        Object.entries(result)
+          .filter(([, value]) => !Array.isArray(value))
+          .map(([key]) => key)
+      ).toEqual(['decodeStats']);
     });
 
     test('decodes tags via decodeAllCollections', async () => {
@@ -2469,6 +2480,7 @@ describe('decoder coverage', () => {
       const result = await decodeAllCollections(dbPath);
       expect(result.goals).toEqual([]);
       expect(result.goalHistory).toEqual([]);
+      expect(result.decodeStats).toEqual({});
     });
 
     test('decodes goal with savings map', async () => {
