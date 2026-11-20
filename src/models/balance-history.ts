@@ -6,11 +6,13 @@
  */
 
 import { z } from 'zod';
+import { calendarDateField } from './calendar-date.js';
 
 export const BalanceHistorySchema = z
   .object({
     balance_id: z.string(), // constructed: {item_id}:{account_id}:{date}
-    date: z.string(),
+    // The document id, a day; get_balance_history range-compares it (#920).
+    date: calendarDateField(),
     item_id: z.string(),
     account_id: z.string(),
     current_balance: z.number().optional(),

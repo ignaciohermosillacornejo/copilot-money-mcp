@@ -32,11 +32,7 @@ import {
   InvestmentPriceSchema,
   type PriceType,
 } from '../models/investment-price.js';
-import {
-  InvestmentSplit,
-  InvestmentSplitSchema,
-  DATE_KEY_REGEX,
-} from '../models/investment-split.js';
+import { InvestmentSplit, InvestmentSplitSchema } from '../models/investment-split.js';
 import { Item, ItemSchema, IGNORED_ITEM_FIELDS } from '../models/item.js';
 import { Category, CategorySchema } from '../models/category.js';
 import { PlaidAccount, PlaidAccountSchema } from '../models/plaid-account.js';
@@ -59,6 +55,7 @@ import { Security, SecuritySchema } from '../models/security.js';
 import { UserProfile, UserProfileSchema } from '../models/user-profile.js';
 import { Tag, TagSchema } from '../models/tag.js';
 import { MAX_TIMEOUT_MS, parseTimeoutMs } from '../utils/timeout.js';
+import { isCalendarDate } from '../utils/date.js';
 import {
   AmazonIntegration,
   AmazonIntegrationSchema,
@@ -2590,7 +2587,10 @@ function processInvestmentSplit(
 ): InvestmentSplit | null {
   const adjustments: Record<string, number> = {};
   for (const [key, value] of fields.entries()) {
-    if (!DATE_KEY_REGEX.test(key)) continue;
+    // A calendar day, the rule the schema's keys use (#920). A key that is
+    // not one stays unconsumed, so it is reported as an unread field rather
+    // than kept or silently dropped.
+    if (!isCalendarDate(key)) continue;
     if (value.type !== 'double' && value.type !== 'integer') continue;
     adjustments[key] = value.value;
   }
@@ -3724,13 +3724,15 @@ export async function decodeAllCollections(dbPath: string): Promise<AllCollectio
   };
 }
 
+/** The decode timeout when neither --timeout nor DECODE_TIMEOUT_MS gives a usable one. */
+const DEFAULT_DECODE_TIMEOUT_MS = 90_000;
+/** Set once the unusable-DECODE_TIMEOUT_MS diagnostic has printed. */
+let warnedUnusableDecodeTimeout = false;
+
 /**
  * Get the decode timeout in milliseconds from environment or default.
  * Can be set via DECODE_TIMEOUT_MS environment variable or --timeout CLI flag.
  */
-const DEFAULT_DECODE_TIMEOUT_MS = 90_000;
-let warnedUnusableDecodeTimeout = false;
-
 export function getDecodeTimeoutMs(): number {
   const envValue = process.env.DECODE_TIMEOUT_MS;
   if (envValue !== undefined) {

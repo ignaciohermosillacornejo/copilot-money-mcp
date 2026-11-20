@@ -17,18 +17,13 @@
  */
 
 import { z } from 'zod';
-
-/**
- * Exported so the decoder can reuse the same regex when scanning raw
- * Firestore docs for date-keyed adjustment fields.
- */
-export const DATE_KEY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+import { calendarDateField } from './calendar-date.js';
 
 export const InvestmentSplitSchema = z
   .object({
     security_id: z.string(),
     // Map of YYYY-MM-DD → adjustment multiplier (e.g. "2024-06-10": 0.1)
-    adjustments: z.record(z.string().regex(DATE_KEY_REGEX), z.number()).default({}),
+    adjustments: z.record(calendarDateField(), z.number()).default({}),
   })
   .passthrough();
 

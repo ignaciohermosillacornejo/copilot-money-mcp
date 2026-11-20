@@ -10,6 +10,7 @@
  */
 
 import { z } from 'zod';
+import { calendarDateField } from './calendar-date.js';
 
 /**
  * The two investment-price subcollections in the Firestore cache.
@@ -19,11 +20,6 @@ import { z } from 'zod';
  */
 export const PRICE_TYPES = ['daily', 'hf'] as const;
 export type PriceType = (typeof PRICE_TYPES)[number];
-
-/**
- * Date format regex for YYYY-MM-DD validation.
- */
-const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * Month format regex for YYYY-MM validation.
@@ -60,7 +56,7 @@ export const InvestmentPriceSchema = z
     institution_price: z.number().optional(),
 
     // Date/time information
-    date: z.string().regex(DATE_REGEX, 'Must be YYYY-MM-DD format').optional(), // For hf data
+    date: calendarDateField().optional(), // For hf data
     month: z.string().regex(MONTH_REGEX, 'Must be YYYY-MM format').optional(), // For daily data
     close_price_as_of: z.string().optional(), // ISO timestamp
 

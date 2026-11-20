@@ -1317,6 +1317,49 @@ describe('a transaction write that throws leaves the next read to the server (#8
       expect(derivedCalls).toBeGreaterThan(0);
     }
   );
+
+  // create_transaction is the write that names its month outright, so it is
+  // the one that exercises all three steps: each must run whichever throws.
+  test.each([
+    [
+      'invalidateLiveTransactionMonths',
+      ['invalidateLiveMonthKeys', 'invalidateTransactionDerivedSnapshots'],
+    ],
+    ['invalidateLiveMonthKeys', ['invalidateTransactionDerivedSnapshots']],
+  ] as const)(
+    'create_transaction: a throw in %s still runs the later steps (#911 review)',
+    async (throwing, later) => {
+      const { call, read, liveDb } = setup({
+        [MUTATION_OP.create_transaction!]: new Error('synthetic transport timeout'),
+      });
+      await read();
+      const boom = spyOn(liveDb, throwing).mockImplementation(() => {
+        throw new Error('housekeeping boom');
+      });
+      const spies = later.map((m) => spyOn(liveDb, m));
+      const log = spyOn(console, 'error').mockImplementation(() => {});
+      let boomCalls: number;
+      let laterCalls: number[];
+      let traced: string[];
+      try {
+        await expect(call('create_transaction', CASES.create_transaction!.args)).rejects.toThrow(
+          /synthetic transport timeout/
+        );
+      } finally {
+        boomCalls = boom.mock.calls.length;
+        laterCalls = spies.map((s) => s.mock.calls.length);
+        traced = log.mock.calls.map((c) => String(c[0]));
+        boom.mockRestore();
+        for (const s of spies) s.mockRestore();
+        log.mockRestore();
+      }
+      expect(boomCalls).toBe(1);
+      expect(laterCalls.every((n) => n > 0)).toBe(true);
+      // The trace names the step that failed, so a reader knows what was skipped.
+      expect(traced.filter((m) => m.includes('housekeeping boom'))).toHaveLength(1);
+      expect(traced.find((m) => m.includes('housekeeping boom'))).toMatch(/threw \(.+\)/);
+    }
+  );
 });
 
 // ── Transaction writes drop the transaction-derived snapshots (#825) ───────

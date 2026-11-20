@@ -824,6 +824,9 @@ export function buildBulkEditCachePatch(
   return patch;
 }
 
+/** One catch-path cache drop: a name for the failure trace, and the drop. */
+type HousekeepingStep = readonly [name: string, drop: () => void];
+
 /**
  * Collection of MCP tools for querying Copilot Money data.
  */
@@ -889,18 +892,21 @@ export class CopilotMoneyTools {
     // not cost the others (#911 review).
     this.housekeepAfterThrow(
       // mutation-guard: a failed transaction write drops its live months
-      () => this.liveDb?.invalidateLiveTransactionMonths(ids),
-      () => {
-        if (months.length > 0) this.liveDb?.invalidateLiveMonthKeys(months);
-      },
-      () => this.liveDb?.invalidateTransactionDerivedSnapshots()
+      ['live transaction months', () => this.liveDb?.invalidateLiveTransactionMonths(ids)],
+      [
+        'named live months',
+        () => {
+          if (months.length > 0) this.liveDb?.invalidateLiveMonthKeys(months);
+        },
+      ],
+      ['transaction-derived snapshots', () => this.liveDb?.invalidateTransactionDerivedSnapshots()]
     );
   }
 
-  /** The one trace for catch-path housekeeping that threw. */
-  private static traceHousekeepingFailure(e: unknown): void {
+  /** The one trace for catch-path housekeeping that threw, naming the step. */
+  private static traceHousekeepingFailure(step: string, e: unknown): void {
     console.error(
-      `[copilot-money-mcp] live-cache invalidation after a failed write threw: ${
+      `[copilot-money-mcp] live-cache invalidation after a failed write threw (${step}): ${
         e instanceof Error ? e.message : String(e)
       }`
     );
@@ -924,19 +930,19 @@ export class CopilotMoneyTools {
     // A Record, so a new scope is a type error here rather than a silent miss.
     // Each drop is its own step, so a throw from the entity snapshot's drop
     // does not cost the derived snapshots theirs (#911 review).
-    const drop: Record<typeof scope, ReadonlyArray<() => void>> = {
+    const drop: Record<typeof scope, ReadonlyArray<HousekeepingStep>> = {
       // Every category write, create included: a create holds no rows, so
       // dropping monthly_spend after one costs a refetch and nothing else.
       categories: [
-        () => live.getCategoriesCache().invalidate(),
+        ['categories snapshot', () => live.getCategoriesCache().invalidate()],
         // mutation-guard: a possibly-applied category write drops its derived snapshots
-        () => live.invalidateCategoryDerivedSnapshots(),
+        ['category-derived snapshots', () => live.invalidateCategoryDerivedSnapshots()],
       ],
-      tags: [() => live.getTagsCache().invalidate()],
+      tags: [['tags snapshot', () => live.getTagsCache().invalidate()]],
       recurring: [
-        () => live.getRecurringCache().invalidate(),
+        ['recurring snapshot', () => live.getRecurringCache().invalidate()],
         // mutation-guard: a possibly-applied recurring write drops its derived snapshots
-        () => live.invalidateRecurringDerivedSnapshots(),
+        ['recurring-derived snapshots', () => live.invalidateRecurringDerivedSnapshots()],
       ],
     };
     // Runs in a catch, one line above the rethrow: it must not mask it.
@@ -994,12 +1000,12 @@ export class CopilotMoneyTools {
    * success-path write-throughs: there a throw surfaces a cache bug instead
    * of hiding it behind a success.
    */
-  private housekeepAfterThrow(...steps: ReadonlyArray<() => void>): void {
-    for (const step of steps) {
+  private housekeepAfterThrow(...steps: ReadonlyArray<HousekeepingStep>): void {
+    for (const [name, step] of steps) {
       try {
         step();
       } catch (e) {
-        CopilotMoneyTools.traceHousekeepingFailure(e);
+        CopilotMoneyTools.traceHousekeepingFailure(name, e);
       }
     }
   }
@@ -1014,7 +1020,7 @@ export class CopilotMoneyTools {
   ): void {
     // mutation-guard: a rejected write keeps its linked-row months
     if (!(e instanceof GraphQLError && e.writeMayHaveApplied)) return;
-    this.housekeepAfterThrow(() => this.dropLinkedRowMonths(predicate));
+    this.housekeepAfterThrow(['linked-row months', () => this.dropLinkedRowMonths(predicate)]);
   }
 
   /** Live rows linked to recurring `id`. */
@@ -6315,13 +6321,16 @@ export class CopilotMoneyTools {
     } catch (e) {
       // A create that may have landed may have linked the seed row too; the
       // generic helper below has no transaction id, so its month goes here.
-      this.housekeepAfterThrow(() => {
-        // mutation-guard: create_recurring drops its seed month only when it may have applied
-        if (e instanceof GraphQLError && e.writeMayHaveApplied) {
-          // mutation-guard: a possibly-applied create_recurring drops its seed month
-          this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);
-        }
-      });
+      this.housekeepAfterThrow([
+        'seed transaction month',
+        () => {
+          // mutation-guard: create_recurring drops its seed month only when it may have applied
+          if (e instanceof GraphQLError && e.writeMayHaveApplied) {
+            // mutation-guard: a possibly-applied create_recurring drops its seed month
+            this.liveDb?.invalidateLiveTransactionMonths([args.transaction_id]);
+          }
+        },
+      ]);
       this.afterPossiblyAppliedEntityWrite(e, 'recurring');
       if (e instanceof GraphQLError) throw new Error(graphQLErrorToMcpError(e), { cause: e });
       throw e;
