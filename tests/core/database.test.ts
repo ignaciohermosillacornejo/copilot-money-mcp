@@ -555,6 +555,14 @@ describe('CopilotDatabase', () => {
       expect((await db.getExcludedCategoryIds()).size).toBe(0);
     });
 
+    test('returns a copy: mutating the result does not change the next read', async () => {
+      (db as any)._userCategories = [{ category_id: 'Ex1qK5aD3gJ8cX4hY6eC', excluded: true }];
+      const first = await db.getExcludedCategoryIds();
+      first.add('Ex9qK5aD3gJ8cX4hY6eC');
+      first.delete('Ex1qK5aD3gJ8cX4hY6eC');
+      expect([...(await db.getExcludedCategoryIds())]).toEqual(['Ex1qK5aD3gJ8cX4hY6eC']);
+    });
+
     test('clearCache drops the set', async () => {
       (db as any)._userCategories = [{ category_id: 'Ex1qK5aD3gJ8cX4hY6eC', excluded: true }];
       expect((await db.getExcludedCategoryIds()).size).toBe(1);

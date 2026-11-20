@@ -106,6 +106,24 @@ under a different name is not covered until it is added to the sweep's table.
 The parity test also pins `parent_name` for a deleted parent and the tree / subcategories
 names for an unnamed user category.
 
+The stale-copy half has its own detectors. Two tests in the parity file inject renamed and
+newly excluded categories into the database: every `get_categories` view must show the new
+name, and default `get_transactions` must drop the newly excluded row (and its `excluded`
+field must follow). The `getExcludedCategoryIds` block in `tests/core/database.test.ts` pins
+the write path: an upsert or delete of an excluded category is seen by the next read,
+`clearCache()` drops the set, and the set is returned as a copy.
+
+## Residual gap
+
+The two staleness tests inject the reload directly. Nothing in `get_categories`' tree,
+subcategories or search views triggers one: `loadUserCategories()` returns its memoized array
+before any TTL check. This is not specific to categories. Every cache-mode loader works the same
+way, and only `getTags()` and `getSplitParentIds()` reach `loadAllCollections()`'s stale check
+once the first decode has run. A view now shows the database's current categories, but the
+database itself refreshes only on a tag-filtered read, a delete's split check, or
+`refresh_database`. Tracked in
+[#925](https://github.com/ignaciohermosillacornejo/copilot-money-mcp/issues/925).
+
 ## Lesson
 
 A name resolver with a "make something up" fallback should not be reachable from a field a

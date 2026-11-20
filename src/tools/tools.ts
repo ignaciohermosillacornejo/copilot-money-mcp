@@ -105,6 +105,7 @@ import { isTransferCategory, lookupKnownCategoryName } from '../utils/categories
 import {
   TRANSACTION_TYPE_RULES,
   cacheTypeRuleRow,
+  type CategoryNameResolver,
   type SharedTransactionType,
 } from './transaction-type-rules.js';
 import type {
@@ -1788,7 +1789,7 @@ export class CopilotMoneyTools {
       const result = this._filterByTransactionType(
         transactions,
         transaction_type,
-        await this.db.getCategoryNameMap()
+        await this.knownCategoryNamer()
       );
       transactions = result.transactions;
       typeSpecificData = result.typeSpecificData;
@@ -1830,17 +1831,13 @@ export class CopilotMoneyTools {
   private _filterByTransactionType(
     transactions: Transaction[],
     type: TransactionTypeFilter,
-    userCategoryMap: Map<string, string>
+    nameOf: CategoryNameResolver
   ): { transactions: Transaction[]; typeSpecificData?: Record<string, unknown> } {
     // refunds / credits / hsa_eligible / tagged mean the same thing in live
     // mode: both modes evaluate the one rule in transaction-type-rules.ts
     // (#843), each through its own row adapter.
     const byRule = (rule: SharedTransactionType) =>
-      transactions.filter((txn) =>
-        TRANSACTION_TYPE_RULES[rule](
-          cacheTypeRuleRow(txn, (id) => lookupKnownCategoryName(id, userCategoryMap))
-        )
-      );
+      transactions.filter((txn) => TRANSACTION_TYPE_RULES[rule](cacheTypeRuleRow(txn, nameOf)));
     switch (type) {
       case 'foreign': {
         const foreignTxns = transactions.filter((txn) => {
