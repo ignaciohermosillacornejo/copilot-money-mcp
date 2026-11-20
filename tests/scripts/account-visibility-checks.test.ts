@@ -41,6 +41,7 @@ const ZERO: AccountVisibilityParity = {
   liveOnlyVisible: 0,
   liveOnlyHidden: 0,
   merged: 0,
+  mergedCompared: 0,
 };
 
 describe('compareAccountVisibility', () => {
@@ -68,12 +69,19 @@ describe('compareAccountVisibility', () => {
       cacheHidesLiveShows: 1,
       cacheHidesLiveShowsMerged: 1,
       merged: 1,
+      mergedCompared: 1,
     });
   });
 
   test('a merged account live closes is agreement (#904)', () => {
     const parity = compareAccountVisibility([{ account_id: A, merged: MERGED }], [closed(A)]);
-    expect(parity).toEqual({ ...ZERO, compared: 1, hiddenAgreed: 1, merged: 1 });
+    expect(parity).toEqual({
+      ...ZERO,
+      compared: 1,
+      hiddenAgreed: 1,
+      merged: 1,
+      mergedCompared: 1,
+    });
   });
 
   test('a merged account live omits entirely is agreement, not one-sided (#904)', () => {
@@ -81,6 +89,7 @@ describe('compareAccountVisibility', () => {
       [{ account_id: A }, { account_id: B, merged: MERGED }],
       [open(A)]
     );
+    // Not compared: live never ruled on it.
     expect(parity).toEqual({ ...ZERO, compared: 1, cacheOnlyHidden: 1, merged: 1 });
     expect(classifyAccountVisibilityParity(parity).status).toBe('PASS');
   });
@@ -115,6 +124,7 @@ describe('classifyAccountVisibilityParity', () => {
       cacheHidesLiveShows: 1,
       cacheHidesLiveShowsMerged: 1,
       merged: 1,
+      mergedCompared: 1,
     });
     expect(status).toBe('FAIL');
     expect(detail).toContain('#904 premise');
@@ -185,8 +195,47 @@ describe('classifyAccountVisibilityParity', () => {
     });
     expect(status).toBe('PASS');
     expect(detail).toContain('#904 term is unexercised');
-    expect(
-      classifyAccountVisibilityParity({ ...ZERO, compared: 2, hiddenAgreed: 1, merged: 1 }).detail
-    ).not.toContain('unexercised');
+  });
+
+  test('PASS with merged accounts live never returned claims agreement by absence only', () => {
+    // The ledger entry is promoted on this sentence, so a merged document live
+    // omitted must not read as a live confirmation (#928 review).
+    const { status, detail } = classifyAccountVisibilityParity({
+      ...ZERO,
+      compared: 2,
+      hiddenAgreed: 1,
+      cacheOnlyHidden: 1,
+      merged: 1,
+    });
+    expect(status).toBe('PASS');
+    expect(detail).toContain('agree by absence only');
+    expect(detail).toContain('live has not confirmed the #904 term');
+    expect(detail).not.toContain('confirming');
+  });
+
+  test('PASS with a merged account live also hides says it was confirmed', () => {
+    const { status, detail } = classifyAccountVisibilityParity({
+      ...ZERO,
+      compared: 2,
+      hiddenAgreed: 1,
+      merged: 1,
+      mergedCompared: 1,
+    });
+    expect(status).toBe('PASS');
+    expect(detail).toContain('confirming the #904 term');
+    expect(detail).not.toContain('absence');
+  });
+
+  test('PASS with both kinds names each', () => {
+    const { detail } = classifyAccountVisibilityParity({
+      ...ZERO,
+      compared: 2,
+      hiddenAgreed: 1,
+      cacheOnlyHidden: 1,
+      merged: 2,
+      mergedCompared: 1,
+    });
+    expect(detail).toContain('confirming the #904 term');
+    expect(detail).toContain('1 more absent from live agree by absence only');
   });
 });

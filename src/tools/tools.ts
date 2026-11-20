@@ -6533,7 +6533,13 @@ export class CopilotMoneyTools {
       });
     }
 
-    // Enrich with account names
+    // Enrich with account names.
+    //
+    // Deliberately UNFILTERED by isVisibleAccount, in both modes: this is a
+    // per-account history, and a caller asking for a hidden, closed or merged
+    // account's past balances should get them. It is not a total. Summing its
+    // rows across accounts would count a merged account's frozen balance twice
+    // (#904); get_accounts is the surface that sums.
     const accountNameMap = await this.db.getAccountNameMap();
     const accountSet = new Set<string>();
 
