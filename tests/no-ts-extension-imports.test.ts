@@ -45,6 +45,8 @@ import { scriptKindFor, tsFilesUnder } from './helpers/ts-files.js';
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TREES = ['src', 'scripts', 'tests'] as const;
 const TS_EXTENSION = /\.(?:ts|tsx|mts|cts)$/;
+// A closed allowlist. A relative import of another kind (`.wasm`, `.css`)
+// would be reported as no-extension; extend this list, not the message.
 const RUNTIME_EXTENSION = /\.(?:js|mjs|cjs|json)$/;
 
 interface Offender {

@@ -399,6 +399,7 @@ const MEMBERSHIP_IS_THE_COVERAGE = [
   'tests/core/auth/candidate-ordering.test.ts',
   'tests/core/auth/firebase-auth.test.ts',
   'tests/core/temp-db-suite-teardown.test.ts',
+  'tests/eslint-unsafe-ratchet.test.ts',
   'tests/exported-constants.test.ts',
   'tests/fixtures/temp-db-leak-probe.ts',
   'tests/integration/uid-transition-sweep.test.ts',

@@ -44,6 +44,7 @@ import {
 } from '../helpers/mock-graphql.js';
 import { monthsCovered } from '../../src/utils/date.js';
 import type { Transaction } from '../../src/models/index.js';
+import type { TxFixture } from '../helpers/fixtures.js';
 
 // Firestore-shaped opaque ids.
 const ACCOUNT_ID = 'Wd4fG7hJ0kL3zX6cV9bN';
@@ -450,7 +451,7 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
     db._injectDataForTesting({
       transactions: [
         { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
-      ] satisfies Partial<Transaction>[] as Transaction[],
+      ] satisfies TxFixture[] as Transaction[],
     });
     const tools = new CopilotMoneyTools(db, client);
     await tools.updateTransaction({ transaction_id: PLAIN_ID, ...routing, amount: 30 });
@@ -470,7 +471,7 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
       transactions: [
         { transaction_id: PLAIN_ID, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 25 },
         { transaction_id: CHILD_1, account_id: ACCOUNT_ID, item_id: ITEM_ID, amount: 10 },
-      ] satisfies Partial<Transaction>[] as Transaction[],
+      ] satisfies TxFixture[] as Transaction[],
     });
     const copies = spyOn(db, 'getAllTransactions');
     const tools = new CopilotMoneyTools(db, client);
@@ -489,7 +490,7 @@ describe('cache-only mode: no window to check, so nothing is refused for it (#83
     db._injectDataForTesting({
       transactions: [
         { transaction_id: CHILD_1, parent_transaction_id: PARENT_ID, amount: 60 },
-      ] satisfies Partial<Transaction>[] as Transaction[],
+      ] satisfies TxFixture[] as Transaction[],
     });
     const tools = new CopilotMoneyTools(db, client);
     await expect(
@@ -557,7 +558,7 @@ describe('the local split index stays current (#836)', () => {
       transactions: [
         { transaction_id: CHILD_2, amount: 40 },
         { transaction_id: CHILD_2, parent_transaction_id: PARENT_ID, amount: 40 },
-      ] satisfies Partial<Transaction>[] as Transaction[],
+      ] satisfies TxFixture[] as Transaction[],
       // split_transaction validates its children's categories first (#846).
       userCategories: [
         { category_id: CAT_A, name: 'A' },

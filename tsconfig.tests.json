@@ -169,6 +169,12 @@
     // the #725 shape. Membership IS the coverage, so it is pinned in
     // tests/unit/tsconfig-tests-sync.test.ts.
     "tests/no-ts-extension-imports.test.ts",
+    // The #919 ratchet over eslint.config.js's no-unsafe-* list and the
+    // inline directives that could bypass it. Here for the #725 reason: its
+    // findings are interpolated into failure messages, and `lint` reports rule
+    // hits, not type errors, so nothing else typechecks it. Membership IS the
+    // coverage, so it is pinned in tests/unit/tsconfig-tests-sync.test.ts.
+    "tests/eslint-unsafe-ratchet.test.ts",
     // The #756 ratchet, and the sibling of the line above in both shape and
     // reason: a `Finding` interface whose fields are read only inside an
     // interpolated failure message, over an AST walk — the #725 shape, in a
