@@ -1834,7 +1834,8 @@ export const CONFORMANCE_LEDGER: readonly LedgerEntry[] = [
       'could plausibly undergo is already absorbed. ' +
       'NOT ADDED to the sibling `plaid_accounts` processor: the probe saw the field only on ' +
       '`accounts`, and decoding it there on the strength of "the collections look alike" ' +
-      'would be exactly the guess this ledger exists to prevent.',
+      'would be exactly the guess this ledger exists to prevent. (That processor was later ' +
+      'retired as unreachable, #915.)',
   },
 
   // NOT IN THIS LEDGER: `accounts.apy`, the fourth field #718 names. It is

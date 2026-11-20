@@ -540,13 +540,14 @@ Stores daily and high-frequency price data per security (identified by SHA256 ha
 > structural entry keyed at a subcollection's own path, as the table above says, not an
 > account document. The holdings and cost basis live on the `items/{id}/accounts`
 > documents instead. Until #797, `processPlaidAccount` built a phantom row from each, with the
-> subcollection name as its `plaid_account_id`. It now returns none, and would still decode a
-> populated document if Copilot ever wrote one here.
+> subcollection name as its `plaid_account_id`. Those entries were `remote_document_read_time`
+> index keys misparsed as documents, which the key parser rejects since #807.
 >
-> Note that the decoder's `plaid_accounts` route is a **catch-all**: anything under
-> `items/*/accounts/*` that is not a known subcollection (`balance_history`, `transactions`,
-> `holdings_history`). A new per-account subcollection will route here until it is added to
-> `routeCollection`.
+> The decoder has no route for this path any more (#915): measured after #807, zero documents
+> took the `plaid_accounts` route, and it was a **catch-all** for anything under
+> `items/*/accounts/*` that its denylist did not name, so a new per-account subcollection would
+> have been decoded as Plaid accounts. An unknown subcollection now stays unrouted and shows as
+> undecoded in `scripts/decode-coverage.ts`.
 
 **Measured 2026-10-11:** ~5,100 entries, none with a field, so there are no known fields to
 document. Earlier versions of this section described ~6,867 "raw Plaid account documents"

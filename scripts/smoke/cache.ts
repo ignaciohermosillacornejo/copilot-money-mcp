@@ -174,9 +174,6 @@ export function routedNonEmpty(route: CollectionRoute, routed: ReadonlyRoutedCou
  * roots did before #778 — adding one forces a decision about it.
  */
 export const ROUTES_NOT_COMPARED = {
-  financial_goal_sentinels:
-    'routed only so coverage reports count the empty parents of financial_goal_history; ' +
-    'it has no processor and decodes no rows, so there is nothing to compare',
   user_accounts:
     'known and deliberately unread since #666: routed so the accounts leaf clause cannot ' +
     'claim it, but it has no processor; check 8 reports its document count instead',
@@ -196,7 +193,6 @@ export const ROUTE_ROWS: Record<ComparedRoute, (all: AllCollectionsResult) => nu
   holdings_history: (all) => all.holdingsHistory.length,
   holdings_history_meta: (all) => all.holdingsHistoryMeta.length,
   balance_history: (all) => all.balanceHistory.length,
-  plaid_accounts: (all) => all.plaidAccounts.length,
   transactions: (all) => all.transactions.length,
   accounts: (all) => all.accounts.length,
   recurring: (all) => all.recurring.length,

@@ -55,7 +55,6 @@ describe('routeCollection', () => {
     // What made the root-prefix `items` count sum every document beneath it:
     // these all live under `items/` and none of them is an item.
     const acct = 'items/itm_5pQw8ZnRvL3MxK7cHt2J/accounts/acc_9wKe4RnTpB2XvL7mQd3F';
-    expect(routeCollection(acct)).toBe('plaid_accounts');
     expect(routeCollection(`${acct}/balance_history`)).toBe('balance_history');
     expect(routeCollection(`${acct}/holdings_history`)).toBe('holdings_history_meta');
     expect(routeCollection(`${acct}/holdings_history/h_2mXq/history`)).toBe('holdings_history');
@@ -81,9 +80,58 @@ describe('routeCollection', () => {
     expect(routeCollection('changes')).toBe('changes');
   });
 
-  test('user profiles match both the collection and its parent-pointer path', () => {
+  test('user profiles and amazon integrations route only from their own collection (#915)', () => {
     expect(routeCollection('users')).toBe('users');
-    expect(routeCollection('users/usr_3hTq7WmZ2xKv9LpR4cNb')).toBe('users');
+    expect(routeCollection('amazon')).toBe('amazon');
+    // The 2-segment "parent-pointer" alternatives these clauses once carried
+    // are even-segment collections: document paths the key parser rejects
+    // (#807), so the clauses could never fire.
+    expect(routeCollection('users/usr_3hTq7WmZ2xKv9LpR4cNb')).toBeNull();
+    expect(routeCollection('amazon/amz_7Kd2mQxZ4vLp9WnR3cHb')).toBeNull();
+  });
+
+  // Class-level detector for #915 (phantom-row near miss). Each entry is a
+  // collection shape seen on a real cache. A document in an unknown
+  // subcollection beneath any of them must stay unrouted: a clause that claims
+  // it either builds a row Copilot never wrote (the `plaid_accounts` and
+  // `holdings_history_meta` catch-alls did) or reports undecoded data as
+  // decoded (`financial_goal_sentinels` did). `investment_prices` is the one
+  // ROOT-anchored route; its parser rejects anything but `daily`/`hf`, which
+  // the decoder test for that route pins, so it is listed separately.
+  const I = 'itm_5pQw8ZnRvL3MxK7cHt2J';
+  const A = 'acc_9wKe4RnTpB2XvL7mQd3F';
+  const U = 'usr_3hTq7WmZ2xKv9LpR4cNb';
+  const REAL_SHAPES = [
+    'items',
+    `items/${I}/accounts`,
+    `items/${I}/accounts/${A}/balance_history`,
+    `items/${I}/accounts/${A}/transactions`,
+    `items/${I}/accounts/${A}/holdings_history`,
+    `items/${I}/accounts/${A}/holdings_history/hh_4kWz8nVq/history`,
+    `users/${U}/accounts`,
+    `users/${U}/budgets`,
+    `users/${U}/categories`,
+    `users/${U}/financial_goals`,
+    `users/${U}/financial_goals/gol_6rLp/financial_goal_history`,
+    `users/${U}/recurring`,
+    `users/${U}/tags`,
+    'users',
+    'amazon',
+    'amazon/amz_7Kd2/orders',
+    'changes',
+    'changes/chg_4kWz/a',
+    'changes/chg_4kWz/t',
+    'securities',
+    'investment_splits',
+    'subscriptions',
+    'invites',
+    'user_items',
+    'feature_tracking',
+    'support',
+  ];
+  test.each(REAL_SHAPES)('an unknown subcollection under %s is unrouted (#915)', (collection) => {
+    expect(routeCollection(collection)).not.toBeNull();
+    expect(routeCollection(`${collection}/doc_2vLq9XmT/zz_unknown_sub`)).toBeNull();
   });
 
   test('investment_prices is root-anchored, unlike the leaf-matched routes', () => {

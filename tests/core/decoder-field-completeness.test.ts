@@ -110,20 +110,22 @@ const DECODER_PATH = join(import.meta.dir, '..', '..', 'src', 'core', 'decoder.t
 const SRC = readFileSync(DECODER_PATH, 'utf-8');
 
 /**
- * There are 26 `process*` functions today (27 until #666 deleted
- * processUserAccount). The floor is a vacuity guard, not a budget: it exists
- * so a discovery regex that silently stops matching reports ONE unambiguous
- * failure rather than 26 downstream ones. Raise it only if the
- * decoder genuinely shrinks below it, and think hard first.
+ * There are 25 `process*` functions today (27 until #666 deleted
+ * processUserAccount, 26 until #915 deleted processPlaidAccount). The floor is
+ * a vacuity guard, not a budget: it exists so a discovery regex that silently
+ * stops matching reports ONE unambiguous failure rather than 25 downstream
+ * ones. Lower it only if the decoder genuinely shrinks below it, and think
+ * hard first.
  */
-const MIN_PROCESSORS = 26;
+const MIN_PROCESSORS = 25;
 
 /**
  * Same idea one level down, over the field names inside those processors
- * (307 today). Without this, a broken array regex would leave every `lists`
- * entry empty and the failure would read as "the decoder lost 307 fields".
+ * (271 today, after #915 removed processPlaidAccount's). Without this, a broken
+ * array regex would leave every `lists` entry empty and the failure would read
+ * as "the decoder lost 271 fields".
  */
-const MIN_FIELD_NAMES = 300;
+const MIN_FIELD_NAMES = 265;
 
 // ---------------------------------------------------------------------------
 // Discovery
@@ -841,65 +843,6 @@ const PINNED: Record<string, ProcessorPin> = {
           '...booleanFields',
           '...arrayFields',
           '...additionalStringFields',
-        ],
-        ignored: [],
-      },
-    ],
-  },
-  processPlaidAccount: {
-    lists: {
-      stringFields: [
-        'account_id',
-        'name',
-        'official_name',
-        'mask',
-        'account_type',
-        'subtype',
-        'iso_currency_code',
-        'institution_id',
-        'institution_name',
-        'original_subtype',
-        'original_type',
-        'color',
-        'logo',
-        'logo_content_type',
-        'nickname',
-        '_origin',
-        'id',
-        'user_id',
-        'custom_color',
-        'group_id',
-        'item_id',
-      ],
-      numberFields: ['current_balance', 'available_balance', 'original_current_balance'],
-      booleanFields: [
-        'historical_update',
-        'investments_performance_enabled',
-        'holdings_initialized',
-        'provider_deleted',
-        'savings_active',
-        'dashboard_active',
-        'live_balance_backend_disabled',
-        'live_balance_user_disabled',
-        'user_hidden',
-        'user_deleted',
-        'is_manual',
-        'group_leader',
-      ],
-      mapFieldNames: ['metadata', 'merged'],
-    },
-    calls: [
-      {
-        collection: 'plaid_accounts',
-        consumed: [
-          'verification_status',
-          'latest_balance_update',
-          'holdings',
-          '...stringFields',
-          '...numberFields',
-          'limit',
-          '...booleanFields',
-          '...mapFieldNames',
         ],
         ignored: [],
       },

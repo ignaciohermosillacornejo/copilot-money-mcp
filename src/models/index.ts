@@ -93,8 +93,6 @@ export {
   isConsentExpiringSoon,
 } from './item.js';
 
-export { PlaidAccountSchema, type PlaidAccount, type Holding } from './plaid-account.js';
-
 export { BalanceHistorySchema, type BalanceHistory } from './balance-history.js';
 
 export { SecuritySchema, type Security } from './security.js';
