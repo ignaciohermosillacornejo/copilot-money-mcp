@@ -75,8 +75,6 @@ const NON_DATE_RECORD_KEYS: Record<string, string> = {
   'budget.ts:amounts': 'YYYY-MM month keys, not days',
   'goal.ts:associated_accounts': 'account ids',
   'holdings-history.ts:history': 'epoch-millis strings',
-  'plaid-account.ts:metadata': 'opaque metadata names',
-  'plaid-account.ts:merged': 'opaque merge map',
   'item.ts:error': 'Plaid error fields',
   'item.ts:fetch_data': 'opaque fetch state',
   'item.ts:oauth': 'opaque OAuth state',
