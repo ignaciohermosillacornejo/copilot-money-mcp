@@ -49,6 +49,7 @@ function errorOf(argv: string[]): string {
 describe('parseCliArgs', () => {
   test('the flag table has value-taking and boolean flags', () => {
     expect(VALUE_FLAGS.map((f) => f.name)).toEqual(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- bun-types returns `any` from asymmetric matchers.
       expect.arrayContaining([
         '--db-path',
         '--timeout',
@@ -58,6 +59,7 @@ describe('parseCliArgs', () => {
       ])
     );
     expect(BOOLEAN_FLAGS.map((f) => f.name)).toEqual(
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- bun-types returns `any` from asymmetric matchers.
       expect.arrayContaining(['--write', '--live-reads', '--verbose', '--help'])
     );
   });

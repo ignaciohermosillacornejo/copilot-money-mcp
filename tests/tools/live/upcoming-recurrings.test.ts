@@ -53,12 +53,14 @@ function mkLiveReturning(
 } {
   const client = {
     query: mock((operation: string) => {
-      if (operation === 'User')
+      if (operation === 'User') {
         return Promise.resolve({ user: { id: 'Us3rQ7mK2nW9vR4xT8sL', budgetingConfig: null } });
-      if (operation === 'Categories')
+      }
+      if (operation === 'Categories') {
         return Promise.resolve({
           categories: categories.map(({ parentId: _p, ...rest }) => rest),
         });
+      }
       return Promise.resolve({ unpaidUpcomingRecurrings: rows });
     }),
   } as unknown as GraphQLClient & { query: ReturnType<typeof mock> };

@@ -33,12 +33,12 @@ const META_DIR = mkdtempSync(join(tmpdir(), 'possibly-applied-entity-'));
 afterAll(() => rmSync(META_DIR, { recursive: true, force: true }));
 
 function makeDb(): CopilotDatabase {
-  const db = new CopilotDatabase('/nonexistent');
-  (db as any).dbPath = '/fake';
-  (db as any)._transactions = [];
-  (db as any)._userCategories = localCategories([CAT_ID]);
-  (db as any)._tags = [];
-  db._markLoadedForTesting();
+  const db = new CopilotDatabase('/fake');
+  db._injectDataForTesting({
+    transactions: [],
+    userCategories: localCategories([CAT_ID]),
+    tags: [],
+  });
   return db;
 }
 
@@ -56,6 +56,7 @@ function cacheFor(
 type DerivedKey =
   | (typeof LiveCopilotDatabase.RECURRING_DERIVED_SNAPSHOTS)[number]
   | (typeof LiveCopilotDatabase.CATEGORY_DERIVED_SNAPSHOTS)[number]
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents -- TAG_DERIVED_SNAPSHOTS is empty today (never); listed so a tag snapshot added later joins the key.
   | (typeof LiveCopilotDatabase.TAG_DERIVED_SNAPSHOTS)[number];
 
 /**

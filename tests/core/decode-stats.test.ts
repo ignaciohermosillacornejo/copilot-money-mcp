@@ -12,7 +12,7 @@
  * fails Zod validation and is dropped.
  */
 
-import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
 import path from 'node:path';
 import fs from 'node:fs';
 import { decodeAllCollections } from '../../src/core/decoder.js';
@@ -71,7 +71,7 @@ const UNREAD_FIELD_TXN = {
   },
 };
 
-let warnSpy: ReturnType<typeof spyOn>;
+let warnSpy: Mock<typeof console.warn>;
 
 beforeEach(() => {
   fs.mkdirSync(FIXTURES_DIR, { recursive: true });

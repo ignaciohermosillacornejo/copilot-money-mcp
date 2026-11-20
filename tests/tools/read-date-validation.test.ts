@@ -81,8 +81,7 @@ function server(mode: 'cache' | 'live'): {
   );
   if (mode === 'cache') {
     const db = new CopilotDatabase(DB_DIR);
-    (db as any)._transactions = [];
-    db._markLoadedForTesting();
+    db._injectDataForTesting({ transactions: [] });
     s._injectForTesting(db, new CopilotMoneyTools(db));
   }
   return { server: s, requests: () => client._calls.length };

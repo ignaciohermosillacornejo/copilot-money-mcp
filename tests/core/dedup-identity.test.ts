@@ -688,7 +688,7 @@ function discoverAggregatePushTargets(
   // "serializes to the same string". There is no `toStrictEqual` in this file
   // today — if a future review suggests tightening one of those comparisons,
   // this is why it does not apply here.
-  const found: Record<string, string> = Object.create(null);
+  const found = Object.create(null) as Record<string, string>;
   for (const m of scoped.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
     const setVar = m[1] as string;
     const window = stripComments(
@@ -854,7 +854,7 @@ function discoverDedupBlocks(source: string = DECODER_SRC): Record<string, strin
   // and not here. Kept so the two scanners read the same way; recorded as
   // unreachable so nobody later mistakes it for a live guard. Carries the same
   // `toEqual`-not-`toStrictEqual` dependency documented on the sibling above.
-  const found: Record<string, string> = Object.create(null);
+  const found = Object.create(null) as Record<string, string>;
   for (const m of source.matchAll(/const (\w+) = new Set<string>\(\)/g)) {
     const variable = m[1] as string;
     const enclosing = declarations.filter(([at]) => at < (m.index as number)).pop();

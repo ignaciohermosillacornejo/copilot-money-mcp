@@ -133,9 +133,9 @@ function rootCalleeName(expr: ts.Expression): string | undefined {
   let node: ts.Node = expr;
   for (;;) {
     if (ts.isIdentifier(node)) return node.text;
-    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))
+    if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
       node = node.expression;
-    else if (ts.isCallExpression(node)) node = node.expression;
+    } else if (ts.isCallExpression(node)) node = node.expression;
     else return undefined;
   }
 }
@@ -162,8 +162,9 @@ function isFunctionLike(node: ts.Node): boolean {
 function declaredName(node: ts.Node): string | undefined {
   if (ts.isFunctionDeclaration(node)) return node.name?.text;
   const parent = node.parent;
-  if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name))
+  if (parent && ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)) {
     return parent.name.text;
+  }
   return undefined;
 }
 

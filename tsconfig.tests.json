@@ -13,8 +13,8 @@
 // adopts createMockGraphQLClient, add it here.
 //
 // The gates listed below, other than the mock-GraphQL adopters above, are here
-// for a different reason: a test file outside this list is checked by nothing
-// (`eslint` reads src/ only), and #725 shipped a review round with an object
+// for a different reason: a test file outside this list is typechecked by
+// nothing (`eslint` lints tests/ but reports rule hits, not type errors), and #725 shipped a review round with an object
 // literal silently missing two declared fields — the failure message read them
 // and got `undefined`. A gate whose legibility depends on its own types should
 // have them checked. Named rather than counted, since a bare count over a
@@ -73,8 +73,8 @@
     "tests/helpers/mock-graphql.ts",
     // The #691 source-scanning machinery. Not GraphQL mocks, but the same
     // argument applies one step over: outside this list nothing in
-    // `bun run check` reads a line of these files — the base config excludes
-    // tests/, eslint ignores tests/**, and `lint` runs on src/ only — and
+    // `bun run check` typechecks these files — the base config excludes
+    // tests/, and `lint` reports rule hits, not type errors — and
     // strip-comments.ts is a correctness-critical dependency of two scanners
     // that are NOT on this list.
     //
@@ -199,9 +199,9 @@
     "tests/unit/cli-args.test.ts",
     // The sole verification of a gate that edits tracked source files in
     // place (scripts/mutation-guards.ts, #596). Nothing imports a .test.ts and
-    // `lint` reads src/ only, so without this line the one file standing
-    // between a mutated `src/tools/tools.ts` and a lost working tree is checked
-    // by nothing. The tsconfig header's own #725 argument, applied to the case
+    // `lint` reports rule hits, not type errors, so without this line the one
+    // file standing between a mutated `src/tools/tools.ts` and a lost working
+    // tree is typechecked by nothing. The tsconfig header's own #725 argument, applied to the case
     // where it bites hardest. It drags the script in too, which tsconfig.scripts.json
     // already covers — the redundancy is harmless and the coupling is real.
     "tests/scripts/mutation-guards.test.ts",

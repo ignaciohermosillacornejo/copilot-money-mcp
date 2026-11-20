@@ -1,0 +1,12 @@
+// The ESLint program for tests/ (#919). NOT a typecheck gate: tests/ still
+// carries pre-existing type errors outside tsconfig.tests.json, whose include
+// list is the curated set `tsc` holds to zero errors. Type-aware lint rules
+// need every linted file inside SOME program, so this one widens that file's
+// compiler options to all of tests/. ESLint reports rule hits, not type
+// errors, so a file with a tsc error still lints; what it can no longer do is
+// hide an `any` from the no-unsafe-* rules by being outside every program.
+{
+  "extends": "./tsconfig.tests.json",
+  "include": ["tests/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

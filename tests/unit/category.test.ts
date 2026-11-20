@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { CategorySchema, type Category } from '../../src/models/category.js';
+import { CategorySchema } from '../../src/models/category.js';
 
 describe('CategorySchema validation', () => {
   test('validates minimal category', () => {

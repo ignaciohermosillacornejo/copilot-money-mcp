@@ -175,12 +175,14 @@ async function liveDb(): Promise<LiveCopilotDatabase> {
   const client = {
     mutate: mock(),
     query: mock((operation: string) => {
-      if (operation === 'User')
+      if (operation === 'User') {
         return Promise.resolve({ user: { id: 'Us3rQ7mK2nW9vR4xT8sL', budgetingConfig: null } });
-      if (operation === 'Categories')
+      }
+      if (operation === 'Categories') {
         return Promise.resolve({
           categories: CATEGORY_NODES.map(({ parentId: _p, ...rest }) => rest),
         });
+      }
       return Promise.resolve({ recurrings, unpaidUpcomingRecurrings: recurrings });
     }),
   } as unknown as GraphQLClient;
@@ -509,7 +511,10 @@ describe('category_name for an id in neither name map (#867)', () => {
       Object.fromEntries(
         rows
           .filter((r) => Object.values(TXN_BY_CATEGORY).includes(r.transaction_id as string))
-          .map((r) => [r.transaction_id, 'category_name' in r ? r.category_name : '<absent>'])
+          .map((r): [string, unknown] => [
+            r.transaction_id as string,
+            'category_name' in r ? r.category_name : '<absent>',
+          ])
       );
     const cachePicked = pick(cache.transactions as Row[]);
     expect(cachePicked).toEqual(pick(live.transactions as Row[]));

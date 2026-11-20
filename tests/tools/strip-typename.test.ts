@@ -52,7 +52,7 @@ describe('stripTypename', () => {
     // copy would assign through the inherited setter and repoint `out`'s own
     // prototype instead of copying data (same guard, and same regression
     // shape, as projectRows — see field-selection.test.ts).
-    const hostile = JSON.parse('{"__proto__": {"polluted": true}, "id": "a"}');
+    const hostile: unknown = JSON.parse('{"__proto__": {"polluted": true}, "id": "a"}');
     const out = stripTypename(hostile) as Record<string, unknown>;
     // Property access (not Object.keys) so an inherited `polluted` from a
     // repointed prototype is caught via the lookup chain.

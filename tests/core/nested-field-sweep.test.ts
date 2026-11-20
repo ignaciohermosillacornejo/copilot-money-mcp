@@ -26,7 +26,7 @@
  * `validateOrWarn` (src/core/schema-warn.ts) turns the sweep red.
  */
 
-import { describe, test, expect, beforeEach, afterEach, spyOn } from 'bun:test';
+import { describe, test, expect, beforeEach, afterEach, spyOn, type Mock } from 'bun:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { z, type ZodType } from 'zod';
@@ -210,7 +210,7 @@ const sweepCases = modelCases.flatMap((m) =>
 );
 
 describe('nested-field sweep (#902)', () => {
-  let warnSpy: ReturnType<typeof spyOn>;
+  let warnSpy: Mock<typeof console.warn>;
 
   beforeEach(() => {
     __resetWarnedKeys();

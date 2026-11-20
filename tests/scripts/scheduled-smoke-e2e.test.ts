@@ -42,7 +42,8 @@ function runWithStubSmoke(smokeScript: string): {
     throw new Error(
       `Expected runScheduledSmoke() to write a status file at ${statusPath}, ` +
         `but it could not be read (exitCode=${exitCode}). The runner likely ` +
-        `exited before writing status. Underlying error: ${String(err)}`
+        `exited before writing status. Underlying error: ${String(err)}`,
+      { cause: err }
     );
   }
   let status: Record<string, unknown>;
@@ -51,7 +52,8 @@ function runWithStubSmoke(smokeScript: string): {
   } catch (err) {
     throw new Error(
       `Status file at ${statusPath} is not valid JSON (exitCode=${exitCode}). ` +
-        `Contents: ${JSON.stringify(raw)}. Parse error: ${String(err)}`
+        `Contents: ${JSON.stringify(raw)}. Parse error: ${String(err)}`,
+      { cause: err }
     );
   }
   return { exitCode, status };

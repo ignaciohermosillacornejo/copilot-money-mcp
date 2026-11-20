@@ -335,8 +335,9 @@ function discoverProcessors(src: string = SRC): DiscoveredProcessor[] {
         const [raw] = balanced(args, at, '[', ']');
         const tokens: Array<[number, string]> = [];
         for (const lit of raw.matchAll(/'([^']*)'/g)) tokens.push([lit.index, lit[1] as string]);
-        for (const sp of raw.matchAll(/\.\.\.(\w+)/g))
+        for (const sp of raw.matchAll(/\.\.\.(\w+)/g)) {
           tokens.push([sp.index, `...${sp[1] as string}`]);
+        }
         const residue = raw.replace(/'[^']*'|\.\.\.\w+|,|\s/g, '');
         if (residue !== '') unresolved.push(`${name}: ${key} residue ${JSON.stringify(residue)}`);
         return tokens.sort((a, b) => a[0] - b[0]).map(([, token]) => token);
@@ -387,11 +388,13 @@ function discoverProcessors(src: string = SRC): DiscoveredProcessor[] {
 
     for (const ident of rowIdents) {
       // row.field = ... / row.field ??= ...
-      for (const m of body.matchAll(new RegExp(`\\b${ident}\\.(\\w+)\\s*(?:=[^=]|\\?\\?=)`, 'g')))
+      for (const m of body.matchAll(new RegExp(`\\b${ident}\\.(\\w+)\\s*(?:=[^=]|\\?\\?=)`, 'g'))) {
         surfaced.add(m[1] as string);
+      }
       // row['field'] = ...
-      for (const m of body.matchAll(new RegExp(`\\b${ident}\\['(\\w+)'\\]\\s*=`, 'g')))
+      for (const m of body.matchAll(new RegExp(`\\b${ident}\\['(\\w+)'\\]\\s*=`, 'g'))) {
         surfaced.add(m[1] as string);
+      }
       // for (const field of someList) { row[field] = ... }
       for (const m of body.matchAll(
         /for \(const (?:\[(\w+), *\w+\]|(\w+)) of ([\w.()]+)\)\s*\{/g

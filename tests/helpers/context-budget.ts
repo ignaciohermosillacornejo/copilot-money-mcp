@@ -33,6 +33,7 @@ export interface ContextBudgetSuite<T extends { name: string }> {
    * or a schema object. Sync or async; the result is passed to
    * `serializedSize`.
    */
+  // eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents -- `unknown` absorbs the Promise; it is spelled out to say async results are accepted.
   getResult: (def: T) => unknown | Promise<unknown>;
   /** Noun phrase for the completeness-guard test title, e.g. "eligible read tools". */
   subject: string;

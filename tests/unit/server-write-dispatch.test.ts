@@ -129,8 +129,9 @@ describe('write tool dispatch (writeEnabled=true)', () => {
 
     // Stub every write method to return STUB_RESULT
     for (const spec of Object.values(WRITE_TOOL_SPECS)) {
-      if (!(spec.method in (tools as object)))
+      if (!(spec.method in (tools as object))) {
         throw new Error(`Unknown method on tools: ${spec.method}`);
+      }
       (tools as unknown as Record<string, unknown>)[spec.method] = async () => STUB_RESULT;
     }
 
@@ -145,7 +146,7 @@ describe('write tool dispatch (writeEnabled=true)', () => {
       expect(result.content).toHaveLength(1);
 
       const text = (result.content[0] as { type: string; text: string }).text;
-      const parsed = JSON.parse(text);
+      const parsed: unknown = JSON.parse(text);
       expect(parsed).toEqual(STUB_RESULT);
     });
   }

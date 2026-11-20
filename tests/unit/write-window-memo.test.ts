@@ -131,9 +131,8 @@ function setup(
       };
     },
   });
-  const db = new CopilotDatabase('/nonexistent');
-  (db as any).dbPath = '/fake';
-  (db as any)._transactions = [];
+  const db = new CopilotDatabase('/fake');
+  db._injectDataForTesting({ transactions: [] });
   db._markLoadedForTesting();
   const liveDb = new LiveCopilotDatabase(client, db, {
     metaStore: new TransactionMetaStore({
@@ -188,7 +187,9 @@ describe('a burst of deletes shares one window load (#838)', () => {
     await del(IDS[0]!);
     expect(windowRequests()).toBe(WINDOW_LOAD);
     // What refresh_cache's full flush and the uid-transition sweep both do.
-    (tools as any).liveDb.getTransactionsWindowCache().invalidate('all');
+    (tools as unknown as { liveDb: LiveCopilotDatabase }).liveDb
+      .getTransactionsWindowCache()
+      .invalidate('all');
     await del(IDS[1]!);
     expect(windowRequests()).toBe(2 * WINDOW_LOAD);
   });

@@ -43,6 +43,7 @@ function makeMockLive(): {
     investmentBalance: ReturnType<typeof makeInvalidateCache>;
     investmentLiveBalance: ReturnType<typeof makeInvalidateCache>;
     transactions: { invalidate: ReturnType<typeof mock> };
+    balanceHistory: Map<string, unknown>;
   };
 } {
   const accounts = makeInvalidateCache();

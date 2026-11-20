@@ -40,6 +40,7 @@ import {
   MAX_EXCHANGE_CANDIDATES,
   TOKEN_EXCHANGE_TIMEOUT_MS,
 } from '../../../src/core/auth/firebase-auth.js';
+import { bodyText } from '../../helpers/fetch-input.js';
 
 /**
  * A synthetic `AMf-`-shaped string long enough to match the extractor's regex
@@ -74,7 +75,7 @@ const FOREIGN_REJECTION: [object, number] = [
  */
 function mockExchange(attempts: string[], foreign: [object, number] = FOREIGN_REJECTION) {
   globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-    const body = String(options?.body ?? '');
+    const body = bodyText(options);
     const label = labelFor(body);
     attempts.push(label);
     if (label === 'session') {
@@ -479,7 +480,7 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
       const attempts: string[] = [];
       let issued = false;
       globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-        const body = String(options?.body ?? '');
+        const body = bodyText(options);
         if (!issued) {
           // First call: a normal cold exchange that hands back a server token
           // and expires immediately, so the next call takes the fast path.
@@ -567,9 +568,7 @@ describe('no single candidate can starve a valid one behind it (#722)', () => {
         );
       }
       attempts.push(
-        String(options?.body ?? '').includes(syntheticToken('server-issued'))
-          ? 'fast-path'
-          : 'cold-path'
+        bodyText(options).includes(syntheticToken('server-issued')) ? 'fast-path' : 'cold-path'
       );
       return Promise.resolve(Response.json({ error: { message: msg } }, { status: 403 }));
     }) as unknown as typeof fetch;
@@ -695,7 +694,7 @@ describe('an endpoint-level failure does not discard a known-good cached token (
       let stage: 'bootstrap' | 'outage' | 'recovered' = 'bootstrap';
 
       globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-        const sent = String(options?.body ?? '');
+        const sent = bodyText(options);
         if (stage === 'bootstrap') {
           stage = 'outage';
           attempts.push('bootstrap');
@@ -744,7 +743,7 @@ describe('an endpoint-level failure does not discard a known-good cached token (
     // still cached for the call after.
     const attempts: string[] = [];
     globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-      const sent = String(options?.body ?? '');
+      const sent = bodyText(options);
       if (sent.includes(syntheticToken('server-issued'))) {
         attempts.push('expired-token');
         return Promise.resolve(
@@ -810,7 +809,7 @@ describe('an endpoint-level failure does not discard a known-good cached token (
       let bootstrapped = false;
 
       globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-        const sent = String(options?.body ?? '');
+        const sent = bodyText(options);
         if (!bootstrapped) {
           bootstrapped = true;
           attempts.push('bootstrap');
@@ -934,7 +933,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
     read.open();
 
-    expect(await settle(calls)).toEqual(Array(CALLERS).fill(`ok:${ID_TOKEN}`));
+    expect(await settle(calls)).toEqual(Array<string>(CALLERS).fill(`ok:${ID_TOKEN}`));
     expect(extractions).toBe(1);
     expect(exchanges).toBe(1);
   });
@@ -943,7 +942,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const answered = gate();
     let cachedExchanges = 0;
     globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-      const sent = String(options?.body ?? '');
+      const sent = bodyText(options);
       if (sent.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
       cachedExchanges += 1;
       return answered.opened.then(() => session(CACHED, '3600'));
@@ -959,7 +958,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
     answered.open();
 
-    expect(await settle(calls)).toEqual(Array(CALLERS).fill(`ok:${ID_TOKEN}`));
+    expect(await settle(calls)).toEqual(Array<string>(CALLERS).fill(`ok:${ID_TOKEN}`));
     expect(cachedExchanges).toBe(1);
     expect(extractions).toBe(1);
   });
@@ -968,7 +967,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const answered = gate();
     const sent: string[] = [];
     globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-      const body = String(options?.body ?? '');
+      const body = bodyText(options);
       if (body.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
       if (body.includes(CACHED)) {
         sent.push('cached');
@@ -989,7 +988,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
     answered.open();
 
-    expect(await settle(calls)).toEqual(Array(CALLERS).fill(`ok:${ID_TOKEN}`));
+    expect(await settle(calls)).toEqual(Array<string>(CALLERS).fill(`ok:${ID_TOKEN}`));
     // One fast-path exchange, one cold read, one candidate exchange: what a
     // single caller costs.
     expect(sent).toEqual(['cached', 'live']);
@@ -1001,7 +1000,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     let cachedExchanges = 0;
     let limited = true;
     globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-      const body = String(options?.body ?? '');
+      const body = bodyText(options);
       if (body.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
       if (body.includes(CACHED)) {
         cachedExchanges += 1;
@@ -1045,7 +1044,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
       const answered = gate();
       const sent: string[] = [];
       globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-        const body = String(options?.body ?? '');
+        const body = bodyText(options);
         if (body.includes(PARKED)) {
           sent.push('parked');
           return answered.opened.then(parkedFailure);
@@ -1088,7 +1087,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const bSent = gate();
     const bAnswered = gate();
     globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-      const body = String(options?.body ?? '');
+      const body = bodyText(options);
       if (body.includes(DEAD)) return Promise.resolve(deadVerdict());
       if (body.includes(B)) {
         bSent.open();
@@ -1154,7 +1153,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
 
     const calls = Array.from({ length: CALLERS }, () => auth.getIdToken());
     read.open();
-    expect(await settle(calls)).toEqual(Array(CALLERS).fill('err:synthetic read failure'));
+    expect(await settle(calls)).toEqual(Array<string>(CALLERS).fill('err:synthetic read failure'));
     expect(extractions).toBe(1);
 
     // The failed attempt was cleared when it settled: this is a new one, not
@@ -1175,7 +1174,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     let cachedExchanges = 0;
     let unsignalled = 0;
     globalThis.fetch = mock((_url: string | URL | Request, options?: RequestInit) => {
-      const body = String(options?.body ?? '');
+      const body = bodyText(options);
       if (body.includes(BOOT)) return Promise.resolve(session(CACHED, '0'));
       cachedExchanges += 1;
       if (!hung) return Promise.resolve(session(CACHED, '3600'));
@@ -1204,7 +1203,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     const outcomes = await settle(Array.from({ length: CALLERS }, () => auth.getIdToken()));
     expect(unsignalled, 'the exchange must carry an abort signal').toBe(0);
     expect(outcomes).toEqual(
-      Array(CALLERS).fill('err:Firebase token exchange timed out after 20ms')
+      Array<string>(CALLERS).fill('err:Firebase token exchange timed out after 20ms')
     );
     expect(cachedExchanges).toBe(1);
 
@@ -1332,7 +1331,7 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
       ts.isAwaitExpression(node) ||
       (ts.isForOfStatement(node) && node.awaitModifier !== undefined) ||
       (ts.isVariableDeclarationList(node) &&
-        (node.flags & ts.NodeFlags.BlockScoped) === ts.NodeFlags.AwaitUsing);
+        (node.flags & ts.NodeFlags.BlockScoped) === (ts.NodeFlags.AwaitUsing as number));
     /** The `this.<field>` a node writes: `=`, compound `op=`, or `++`/`--`. */
     const writtenField = (node: ts.Node): string | undefined => {
       let target: ts.Node | undefined;
@@ -1393,8 +1392,9 @@ describe('concurrent callers share one refresh attempt (#796)', () => {
     // saw, and survives the specimen being reordered.
     const recognised: string[] = [];
     const scan = (node: ts.Node): void => {
-      if (suspendsNode(node))
+      if (suspendsNode(node)) {
         recognised.push(`${ts.SyntaxKind[node.kind]}: ${node.getText(specimen)}`);
+      }
       ts.forEachChild(node, scan);
     };
     scan(specimen);

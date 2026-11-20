@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { getBudgetDisplayName, type Budget } from '../../src/models/budget';
+import { getBudgetDisplayName, type Budget } from '../../src/models/budget.js';
 
 describe('getBudgetDisplayName', () => {
   it('returns name when name is defined', () => {

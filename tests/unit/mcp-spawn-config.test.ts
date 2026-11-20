@@ -30,7 +30,7 @@ interface Manifest {
 
 describe('manifest server config', () => {
   const manifestPath = join(import.meta.dir, '../../manifest.json');
-  const manifest: Manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')) as Manifest;
   const { mcp_config } = manifest.server;
 
   test('base command is not the literal string "node"', () => {

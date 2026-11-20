@@ -80,11 +80,8 @@ function setup() {
     },
     ...mutationMocks,
   });
-  const db = new CopilotDatabase('/nonexistent');
-  (db as any).dbPath = '/fake';
-  (db as any)._transactions = [];
-  (db as any)._userCategories = [];
-  db._markLoadedForTesting();
+  const db = new CopilotDatabase('/fake');
+  db._injectDataForTesting({ transactions: [], userCategories: [] });
   const liveDb = new LiveCopilotDatabase(client, db, {
     metaStore: new TransactionMetaStore({
       baseDir: mkdtempSync(join(META_DIR, 'store-')),
@@ -322,10 +319,8 @@ function referenceSetup() {
     EditTransaction: new Error('synthetic: mutation reached the server'),
     EditBudget: new Error('synthetic: mutation reached the server'),
   });
-  const db = new CopilotDatabase('/nonexistent');
-  (db as any).dbPath = '/fake';
-  (db as any)._transactions = [];
-  db._markLoadedForTesting();
+  const db = new CopilotDatabase('/fake');
+  db._injectDataForTesting({ transactions: [] });
   const liveDb = new LiveCopilotDatabase(client, db, {
     metaStore: new TransactionMetaStore({
       baseDir: mkdtempSync(join(META_DIR, 'store-')),

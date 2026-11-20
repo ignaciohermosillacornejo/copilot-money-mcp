@@ -11,6 +11,7 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import type { Transaction, Account } from '../../src/models/index.js';
 import { SYNTHETIC_DB_PATH } from '../helpers/synthetic-db-path.js';
+import { firstText, parseToolJson } from '../helpers/tool-result.js';
 
 // Mock data for testing
 // Copilot Money format: positive = expenses, negative = income/refunds
@@ -241,7 +242,7 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
 
     expect(response.content).toBeDefined();
     expect(response.isError).toBeUndefined();
-    const result = JSON.parse(response.content[0].text);
+    const result = parseToolJson(response);
     expect(result.transactions).toBeDefined();
     expect(result.count).toBeDefined();
   });
@@ -250,7 +251,7 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     const response = await server.handleCallTool('get_transactions', undefined);
 
     expect(response.content).toBeDefined();
-    const result = JSON.parse(response.content[0].text);
+    const result = parseToolJson(response);
     expect(result.transactions).toBeDefined();
   });
 
@@ -258,7 +259,7 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     const response = await server.handleCallTool('get_transactions', {});
 
     expect(response.content).toBeDefined();
-    const result = JSON.parse(response.content[0].text);
+    const result = parseToolJson(response);
     expect(result.transactions).toBeDefined();
   });
 
@@ -266,7 +267,7 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     const response = await server.handleCallTool('get_accounts', {});
 
     expect(response.content).toBeDefined();
-    const result = JSON.parse(response.content[0].text);
+    const result = parseToolJson(response);
     expect(result.accounts).toBeDefined();
     expect(result.count).toBeGreaterThan(0);
   });
@@ -275,7 +276,7 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     const response = await server.handleCallTool('get_accounts', { account_type: 'checking' });
 
     expect(response.content).toBeDefined();
-    const result = JSON.parse(response.content[0].text);
+    const result = parseToolJson(response);
     expect(result.accounts).toBeDefined();
   });
 
@@ -283,7 +284,9 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     const response = await server.handleCallTool('get_categories', {});
 
     expect(response.content).toBeDefined();
-    const result = JSON.parse(response.content[0].text);
+    const result = parseToolJson<{ view: unknown; data: { categories: unknown }; count: unknown }>(
+      response
+    );
     expect(result.view).toBe('list');
     expect(result.data.categories).toBeDefined();
     expect(result.count).toBeDefined();
@@ -293,7 +296,7 @@ describe('CopilotMoneyServer.handleCallTool - basic tools', () => {
     const response = await server.handleCallTool('get_recurring_transactions', {});
 
     expect(response.content).toBeDefined();
-    const result = JSON.parse(response.content[0].text);
+    const result = parseToolJson(response);
     expect(result).toBeDefined();
   });
 });
@@ -448,12 +451,12 @@ describe('CopilotMoneyServer.handleCallTool - response format', () => {
   test('successful response is valid JSON', async () => {
     const response = await server.handleCallTool('get_accounts', {});
 
-    expect(() => JSON.parse(response.content[0].text)).not.toThrow();
+    expect(() => JSON.parse(firstText(response))).not.toThrow();
   });
 
   test('response JSON is compact (no pretty-print whitespace)', async () => {
     const response = await server.handleCallTool('get_accounts', {});
-    const text = response.content[0].text;
+    const text = firstText(response);
 
     // Compact serialization: no newlines, byte-identical to JSON.stringify(result)
     expect(text).not.toContain('\n');
@@ -506,7 +509,7 @@ describe('CopilotMoneyServer - constructor and initialization', () => {
     // Verify injection worked by calling a tool
     const response = await server.handleCallTool('get_transactions', {});
     expect(response.isError).toBeUndefined();
-    const result = JSON.parse(response.content[0].text);
+    const result = parseToolJson<{ transactions: unknown[] }>(response);
     expect(result.transactions.length).toBeGreaterThan(0);
   });
 });

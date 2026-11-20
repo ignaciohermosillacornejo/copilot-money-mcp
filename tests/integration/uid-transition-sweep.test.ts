@@ -18,6 +18,19 @@ import { FirebaseAuth } from '../../src/core/auth/firebase-auth.js';
 import { GraphQLClient } from '../../src/core/graphql/client.js';
 import type { TokenCandidates } from '../../src/core/auth/browser-token.js';
 import { createTestDb } from '../helpers/test-db.js';
+import { bodyText, urlOf } from '../helpers/fetch-input.js';
+import type { CopilotDatabase } from '../../src/core/database.js';
+
+/**
+ * The server's private collaborators (#919). `db` carries its real type; the
+ * two tools methods are private, which TypeScript cannot index, so they are
+ * restated by hand and a rename there surfaces as a TypeError at run time.
+ */
+interface ServerInternals {
+  db: CopilotDatabase;
+  tools: { recordSplitParent(id: string): void; isRecordedSplitParent(id: string): boolean };
+}
+const internals = (server: CopilotMoneyServer) => server as unknown as ServerInternals;
 
 const originalFetch = globalThis.fetch;
 const originalDisable = process.env.COPILOT_DISABLE_PERSISTENT_INDEX;
@@ -70,7 +83,7 @@ function installTransitionFetch(): () => number {
   // re-exchanges. Exchange #2+ lands uid-B (valid 1h).
   let exchanges = 0;
   globalThis.fetch = mock(async (url: string | URL | Request, options?: RequestInit) => {
-    const u = String(url);
+    const u = urlOf(url);
     if (u.includes('securetoken.googleapis.com')) {
       exchanges += 1;
       const body =
@@ -95,7 +108,7 @@ function installTransitionFetch(): () => number {
       });
     }
     // GraphQL endpoint: route on operationName from the POST body.
-    const op = (JSON.parse(String(options?.body)) as { operationName: string }).operationName;
+    const op = (JSON.parse(bodyText(options)) as { operationName: string }).operationName;
     const data =
       op === 'Accounts'
         ? { accounts: [account('acc-1', exchanges === 1 ? 'Account of A' : 'Account of B')] }
@@ -163,7 +176,7 @@ test('mid-session uid transition drops the in-memory split-parent record (#842)'
   );
   const client = new GraphQLClient(new FirebaseAuth(extractor));
   const server = new CopilotMoneyServer(tempDbDir, undefined, true, true, client);
-  const tools = (server as any).tools;
+  const tools = internals(server).tools;
   const PARENT_ID = 'Rt4yU9iO2pA7sD1fG6hK';
 
   const origWarn = console.warn;
@@ -173,7 +186,7 @@ test('mid-session uid transition drops the in-memory split-parent record (#842)'
     tools.recordSplitParent(PARENT_ID);
     expect(tools.isRecordedSplitParent(PARENT_ID)).toBe(true);
     // And the local cache's accumulated evidence, which is per login too.
-    const db = (server as any).db;
+    const db = internals(server).db;
     db._injectDataForTesting({ splitParentIds: [PARENT_ID] });
     expect(db.peekSplitParentIds().has(PARENT_ID)).toBe(true);
 
@@ -218,7 +231,7 @@ test('after a uid transition the next delete re-reads the local cache, even whil
   );
   const client = new GraphQLClient(new FirebaseAuth(extractor));
   const server = new CopilotMoneyServer(tempDbDir, undefined, true, true, client);
-  const db = (server as any).db;
+  const db = internals(server).db;
 
   const origWarn = console.warn;
   console.warn = () => {};

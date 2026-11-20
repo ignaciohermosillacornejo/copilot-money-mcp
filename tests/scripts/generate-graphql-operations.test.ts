@@ -1,5 +1,9 @@
 import { describe, test, expect } from 'bun:test';
-import { parse } from 'graphql';
+import { parse, type FieldNode, type OperationDefinitionNode } from 'graphql';
+
+/** The field selections of a selection set; every selection in these specimens is a field. */
+const fieldNames = (node: { selectionSet?: { selections: readonly unknown[] } }): string[] =>
+  (node.selectionSet?.selections as FieldNode[]).map((s) => s.name.value);
 
 // Import the transform function. It must be exported for testability.
 // (This task also requires making addTypenameToSelectionSets and extractQueryBlock
@@ -14,8 +18,9 @@ describe('addTypenameToSelectionSets', () => {
     const input = `mutation M { editThing(id: "x") { id name } }`;
     const out = addTypenameToSelectionSets(input);
     const ast = parse(out);
-    const queryField = (ast.definitions[0] as any).selectionSet.selections[0];
-    const selectionNames = queryField.selectionSet.selections.map((s: any) => s.name.value);
+    const queryField = (ast.definitions[0] as OperationDefinitionNode).selectionSet
+      .selections[0] as FieldNode;
+    const selectionNames = fieldNames(queryField);
     expect(selectionNames).toContain('__typename');
     expect(selectionNames).toContain('id');
     expect(selectionNames).toContain('name');
@@ -34,13 +39,11 @@ describe('addTypenameToSelectionSets', () => {
     const input = `mutation M { editThing(id: "x") { id } }`;
     const out = addTypenameToSelectionSets(input);
     const ast = parse(out);
-    const op = ast.definitions[0] as any;
-    const rootSelections = op.selectionSet.selections.map((s: any) => s.name.value);
+    const op = ast.definitions[0] as OperationDefinitionNode;
+    const rootSelections = fieldNames(op);
     expect(rootSelections).not.toContain('__typename');
     // But the field's selection set should have __typename.
-    const fieldSelections = op.selectionSet.selections[0].selectionSet.selections.map(
-      (s: any) => s.name.value
-    );
+    const fieldSelections = fieldNames(op.selectionSet.selections[0] as FieldNode);
     expect(fieldSelections).toContain('__typename');
   });
 

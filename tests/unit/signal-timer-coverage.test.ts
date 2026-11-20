@@ -4,7 +4,18 @@
  * - Timer callbacks in leveldb-reader.ts (temp-db refcount cleanup)
  */
 
-import { describe, test, expect, beforeEach, afterEach, mock, spyOn, jest } from 'bun:test';
+import {
+  describe,
+  test,
+  expect,
+  beforeEach,
+  afterEach,
+  mock,
+  spyOn,
+  jest,
+  type Mock,
+} from 'bun:test';
+import type { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { CopilotMoneyServer } from '../../src/server.js';
 import { CopilotDatabase } from '../../src/core/database.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
@@ -25,18 +36,20 @@ import fs from 'node:fs';
 function setupServerWithMockData(): CopilotMoneyServer {
   const server = new CopilotMoneyServer('/fake/path');
   const db = new CopilotDatabase('/fake/path');
-  (db as any)._transactions = [];
-  (db as any)._accounts = [];
-  (db as any)._userCategories = [];
-  (db as any)._categoryNameMap = new Map<string, string>();
-  (db as any)._accountNameMap = new Map<string, string>();
-  (db as any)._recurring = [];
-  (db as any)._budgets = [];
-  (db as any)._goals = [];
-  (db as any)._goalHistory = [];
-  (db as any)._investmentPrices = [];
-  (db as any)._investmentSplits = [];
-  (db as any)._items = [];
+  db._injectDataForTesting({
+    transactions: [],
+    accounts: [],
+    userCategories: [],
+    categoryNameMap: new Map<string, string>(),
+    accountNameMap: new Map<string, string>(),
+    recurring: [],
+    budgets: [],
+    goals: [],
+    goalHistory: [],
+    investmentPrices: [],
+    investmentSplits: [],
+    items: [],
+  });
   db.availability = () => ({ available: true });
   server._injectForTesting(db, new CopilotMoneyTools(db));
   return server;
@@ -45,7 +58,7 @@ function setupServerWithMockData(): CopilotMoneyServer {
 describe('server.ts - Signal Handler Coverage', () => {
   let originalProcessOn: typeof process.on;
   let signalHandlers: Map<string, () => void>;
-  let exitSpy: ReturnType<typeof spyOn>;
+  let exitSpy: Mock<typeof process.exit>;
 
   beforeEach(() => {
     // Store original process.on
@@ -55,26 +68,28 @@ describe('server.ts - Signal Handler Coverage', () => {
     signalHandlers = new Map();
 
     // Mock process.on to capture handlers
-    (process as any).on = (signal: string, handler: () => void) => {
+    process.on = ((signal: string, handler: () => void) => {
       if (signal === 'SIGINT' || signal === 'SIGTERM') {
         signalHandlers.set(signal, handler);
       }
       return process;
-    };
+    }) as typeof process.on;
 
     // Mock process.exit
-    exitSpy = spyOn(process, 'exit').mockImplementation((() => {}) as any);
+    exitSpy = spyOn(process, 'exit').mockImplementation(
+      (() => {}) as unknown as typeof process.exit
+    );
   });
 
   afterEach(() => {
     // Restore original process.on
-    (process as any).on = originalProcessOn;
+    process.on = originalProcessOn;
     exitSpy.mockRestore();
   });
 
   test('SIGINT handler calls server.close and process.exit', async () => {
     const server = setupServerWithMockData();
-    const mcpServer = (server as any).server;
+    const mcpServer = (server as unknown as { server: Server }).server;
 
     // Mock the server.close method
     let closeWasCalled = false;
@@ -107,7 +122,7 @@ describe('server.ts - Signal Handler Coverage', () => {
 
   test('SIGTERM handler calls server.close and process.exit', async () => {
     const server = setupServerWithMockData();
-    const mcpServer = (server as any).server;
+    const mcpServer = (server as unknown as { server: Server }).server;
 
     // Mock the server.close method
     let closeWasCalled = false;
@@ -139,8 +154,6 @@ describe('server.ts - Signal Handler Coverage', () => {
   });
 });
 
-// TTL for temp database cache (must match the value in leveldb-reader.ts)
-const TEMP_DB_CACHE_TTL = 5 * 60 * 1000;
 const FIXTURES_DIR = path.join(__dirname, '../fixtures/timer-coverage-tests');
 
 describe('leveldb-reader.ts - Timer Callback Coverage', () => {

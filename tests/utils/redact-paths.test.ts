@@ -10,6 +10,7 @@ import { CopilotDatabase } from '../../src/core/database.js';
 import { CopilotMoneyServer } from '../../src/server.js';
 import { CopilotMoneyTools } from '../../src/tools/tools.js';
 import { SYNTHETIC_DB_PATH } from '../helpers/synthetic-db-path.js';
+import { textOf } from '../helpers/tool-result.js';
 
 const HOME = '/Users/synthetic-user';
 
@@ -305,7 +306,7 @@ describe('handleCallTool relays a thrown error without the username', () => {
     server._injectForTesting(db, tools);
 
     const response = await server.handleCallTool('get_accounts', {});
-    const text = response.content[0]?.text ?? '';
+    const text = textOf(response);
     expect(response.isError).toBe(true);
     expect(text).toContain('EACCES');
     expect(text).toContain('~/Library/Containers/x/main/000001.ldb');

@@ -298,6 +298,7 @@ describe('the scanner recognises the shapes', () => {
       "import { other as retryInterrupted } from './fs-retry.js';\nretryInterrupted(() => fs.readdirSync(p));",
     ],
   ])('flags a wrapper that is not the real one: %s', (_label, src) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- bun-types returns `any` from asymmetric matchers.
     expect(raw(src)).toEqual([expect.stringContaining('is not imported from fs-retry')]);
   });
 

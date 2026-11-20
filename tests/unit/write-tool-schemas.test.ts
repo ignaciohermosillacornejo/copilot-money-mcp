@@ -35,10 +35,15 @@ describe('createWriteToolSchemas', () => {
       'item_id',
       'splits',
     ]);
-    expect(split!.inputSchema.properties.splits.type).toBe('array');
+    const splits = split!.inputSchema.properties.splits as {
+      type: string;
+      minItems: number;
+      items: unknown;
+    };
+    expect(splits.type).toBe('array');
     // minItems:2 — a split-into-one is meaningless; caller should use update_transaction.
-    expect(split!.inputSchema.properties.splits.minItems).toBe(2);
-    const itemSchema = split!.inputSchema.properties.splits.items as {
+    expect(splits.minItems).toBe(2);
+    const itemSchema = splits.items as {
       type: string;
       required: string[];
       additionalProperties: boolean;
@@ -77,7 +82,7 @@ describe('createWriteToolSchemas', () => {
       'amount',
       'type',
     ]);
-    expect(createTxn!.inputSchema.properties.type.enum).toEqual([
+    expect((createTxn!.inputSchema.properties.type as { enum: string[] }).enum).toEqual([
       'REGULAR',
       'INCOME',
       'INTERNAL_TRANSFER',

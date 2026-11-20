@@ -61,6 +61,7 @@ import type {
   TransactionType,
 } from '../../src/core/graphql/transactions.js';
 import { createMockGraphQLClient, type MockResponsesByOp } from '../helpers/mock-graphql.js';
+import type { Transaction } from '../../src/models/index.js';
 
 // ── Firestore-shaped opaque ids (never id-equals-name fixtures) ─────────────
 
@@ -262,26 +263,25 @@ function setup(mutationMocks: MockResponsesByOp) {
       };
     },
   });
-  const db = new CopilotDatabase('/nonexistent');
-  (db as any).dbPath = '/fake';
+  const db = new CopilotDatabase('/fake');
   // The local (LevelDB-model) cache holds the same rows, so a partial batch can
   // be checked against both caches.
-  (db as any)._transactions = SEED.map((n) => ({
-    transaction_id: n.id,
-    account_id: n.accountId,
-    item_id: n.itemId,
-    category_id: n.categoryId,
-    user_reviewed: n.isReviewed,
-    tag_ids: [],
-    amount: n.amount,
-    date: n.date,
-    name: n.name,
-    // The decoder's type-derived flags (#864 review).
-    ...(n.type === 'INTERNAL_TRANSFER' ? { internal_transfer: true } : {}),
-    ...(n.type === 'INCOME' ? { income: true } : {}),
-  }));
-  (db as any)._allCollectionsLoaded = true;
-  (db as any)._cacheLoadedAt = Date.now();
+  db._injectDataForTesting({
+    transactions: SEED.map((n) => ({
+      transaction_id: n.id,
+      account_id: n.accountId,
+      item_id: n.itemId,
+      category_id: n.categoryId,
+      user_reviewed: n.isReviewed,
+      tag_ids: [],
+      amount: n.amount,
+      date: n.date,
+      name: n.name,
+      // The decoder's type-derived flags (#864 review).
+      ...(n.type === 'INTERNAL_TRANSFER' ? { internal_transfer: true } : {}),
+      ...(n.type === 'INCOME' ? { income: true } : {}),
+    })) as Transaction[],
+  });
   // Persisted routing index in a per-run temp dir — never the user's home.
   const metaStore = new TransactionMetaStore({
     baseDir: mkdtempSync(join(META_DIR, 'store-')),
@@ -308,7 +308,7 @@ function setup(mutationMocks: MockResponsesByOp) {
       fields: READ_FIELDS,
     })) as { transactions: Row[]; _cache_hit: boolean };
   const local = (id: string) =>
-    ((db as any)._transactions as Array<Record<string, unknown>>).find(
+    (db as unknown as { _transactions: Array<Record<string, unknown>> })._transactions.find(
       (t) => t.transaction_id === id
     );
   return { call, read, local, liveDb, fetches: () => transactionsFetches };
